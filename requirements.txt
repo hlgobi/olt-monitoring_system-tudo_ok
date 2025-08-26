@@ -1,0 +1,7 @@
+# Este arquivo lista todas as dependências do projeto.
+# Use o comando 'pip install -r requirements.txt' para instalar todas de uma vez.
+
+netmiko
+pandas
+openpyxl
+python-dotenv

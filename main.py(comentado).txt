@@ -1,0 +1,73 @@
+Explicação Detalhada
+
+Importações
+O arquivo começa importando todos os módulos necessários:
+
+> sys: Para manipulação de argumentos e saída do sistema
+> logging: Para registro de eventos e mensagens
+> signal: Para capturar sinais do sistema como Ctrl+C
+> QApplication e QTimer do PyQt5: Para gerenciar a aplicação GUI e temporizadores
+> OLTDatabaseGUI: A classe principal da interface gráfica
+> create_tables e check_db_connection: Funções para gerenciamento do banco de dados
+
+Função main()
+Esta é a função principal que orquestra toda a inicialização da aplicação:
+
+1 Inicialização do Logging:
+
+logging.info("Iniciando a aplicação OLT Monitoring System.")
+Registra o início da aplicação no sistema de logging.
+
+2 Criação da Aplicação PyQt5:
+app = QApplication(sys.argv)
+Cria a instância principal da aplicação PyQt5.
+
+3 Verificação de Conexão com o Banco de Dados:
+if not check_db_connection():
+    logging.critical("Falha crítica ao conectar com o banco de dados. A aplicação será encerrada.")
+    sys.exit(1)
+Verifica se é possível estabelecer conexão com o banco de dados PostgreSQL. Se falhar, encerra a aplicação.
+
+4 Criação/Verificação de Tabelas:
+if not create_tables():
+    logging.critical("Falha crítica ao criar/verificar tabelas do banco de dados. A aplicação será encerrada.")
+    sys.exit(1)
+Garante que todas as tabelas necessárias existam no banco de dados. Se não conseguir criá-las, encerra a aplicação.
+
+5 Inicialização da Interface Gráfica:
+main_window = OLTDatabaseGUI()
+Cria a janela principal da aplicação.
+
+6 Manipulação de Sinais (Ctrl+C):
+def signal_handler(sig, frame):
+    logging.warning("Sinal de interrupção (Ctrl+C) recebido. Iniciando desligamento limpo...")
+    main_window.shutdown_threads()
+    app.quit()
+
+signal.signal(signal.SIGINT, signal_handler)
+Configura um manipulador para o sinal SIGINT (Ctrl+C) que permite um desligamento limpo da aplicação, encerrando todas as threads antes de fechar.
+
+7 Configuração do Timer:
+timer = QTimer()
+timer.start(500)
+timer.timeout.connect(lambda: None)
+Cria um temporizador que permite ao interpretador Python processar sinais do sistema operacional, essencial para o funcionamento correto do manipulador de sinais em aplicações PyQt5.
+
+8 Exibição da Janela e Início do Loop de Eventos:
+main_window.show()
+logging.info("Janela principal da GUI exibida.")
+sys.exit(app.exec_())
+Exibe a janela principal e inicia o loop de eventos da aplicação PyQt5.
+
+Bloco de Execução Principal
+if __name__ == '__main__':
+    main()
+Garante que a função main() seja chamada apenas quando o script é executado diretamente, não quando importado como módulo.
+
+Padrões e Boas Práticas
+1 Documentação Completa: Cada função e bloco de código importante está documentado com docstrings explicando seu propósito e funcionamento.
+2 Tratamento de Erros: Verificações críticas (como conexão com banco de dados) são tratadas com mensagens de erro claras e encerramento seguro da aplicação.
+3 Gerenciamento de Recursos: O manipulador de sinais garante que a aplicação possa ser encerrada de forma controlada, liberando todos os recursos.
+4 Logging: Eventos importantes são registrados para facilitar depuração e monitoramento.
+5 Estrutura Modular: O código está organizado em funções claras e coesas, seguindo o princípio da responsabilidade única.
+6 Este arquivo serve como o ponto de entrada central da aplicação, coordenando todos os componentes principais e garantindo que o ambiente esteja corretamente configurado antes de iniciar a interface gráfica.

@@ -1,0 +1,82 @@
+OLT,Slot,Placa (Board),Status,Função Resumida
+OLT-93_CARMO,0,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,1,H807GPBD,Normal,Serviço GPON: Placa com 8 portas para clientes.
+,6,H802SCUN,Active_normal,"Controle (Principal): Gerencia a OLT, em modo ativo."
+,7,H802SCUN,Standby_normal,"Controle (Backup): Gerencia a OLT, em modo de espera."
+,8,H802X2CS,Normal,Uplink 10GE: Conexão de alta capacidade com a rede.
+,9,H801GICF,Normal,Uplink 1GE: Conexão padrão com a rede.
+Ceres-OLT_96,0,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,1,H807GPBD,Normal,Serviço GPON: Placa com 8 portas para clientes.
+,2,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,6,H802SCUN,Standby_normal,"Controle (Backup): Gerencia a OLT, em modo de espera."
+,7,H802SCUN,Active_normal,"Controle (Principal): Gerencia a OLT, em modo ativo."
+,8,H801X2CS,Normal,Uplink 10GE: Conexão de alta capacidade com a rede.
+,9,H801GICF,Normal,Uplink 1GE: Conexão padrão com a rede.
+Goiania-OLT_98,0,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,1,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,2,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,3,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,6,H802SCUN,Active_normal,"Controle (Principal): Gerencia a OLT, em modo ativo."
+,7,H802SCUN,Standby_normal,"Controle (Backup): Gerencia a OLT, em modo de espera."
+,8,H801X2CS,Normal,Uplink 10GE: Conexão de alta capacidade com a rede.
+,9,H801GICF,Normal,Uplink 1GE: Conexão padrão com a rede.
+Jaragua-OLT_99,0,H807GPBD,Normal,Serviço GPON: Placa com 8 portas para clientes.
+,1,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,2,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,3,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,6,H802SCUN,Active_normal,"Controle (Principal): Gerencia a OLT, em modo ativo."
+,7,H802SCUN,Standby_normal,"Controle (Backup): Gerencia a OLT, em modo de espera."
+,8,H801X2CS,Normal,Uplink 10GE: Conexão de alta capacidade com a rede.
+,9,H801GICF,Normal,Uplink 1GE: Conexão padrão com a rede.
+OLT-88_JARAGUA-XGPON,1,H901CGID,Normal,Uplink GE/FE: Placa com 8 portas de uplink.
+,6,H901GPLF,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,7,H907CGHF,Normal,Serviço Combo XG-PON/GPON: Placa com 16 portas para clientes.
+,8,H901MPLA,Standby_failed,"Controle (Backup): Placa em modo de espera, porém com falha. ⚠️"
+,9,H901MPLA,Active_normal,"Controle (Principal): Gerencia a OLT, em modo ativo."
+,10,H903PILA,Normal,Alimentação DC: Interface de energia para a OLT.
+,11,H903PILA,Normal,Alimentação DC: Interface de energia para a OLT (redundante).
+OLT-89_NOVAGLORIA,1,H902GPUF,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,8,H902MPLB,Standby_normal,"Controle (Backup): Gerencia a OLT, em modo de espera."
+,9,H902MPLB,Active_normal,"Controle (Principal): Gerencia a OLT, em modo ativo."
+,10,H902PILA,Normal,Alimentação DC: Interface de energia para a OLT.
+,11,H902PILA,Normal,Alimentação DC: Interface de energia para a OLT (redundante).
+Rialma-OLT-97,0,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,1,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,2,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,6,H801SCUN,Standby_normal,"Controle (Backup): Gerencia a OLT, em modo de espera."
+,7,H801SCUN,Active_normal,"Controle (Principal): Gerencia a OLT, em modo ativo."
+,8,H801X2CS,Normal,Uplink 10GE: Conexão de alta capacidade com a rede.
+,9,H801GICF,Normal,Uplink 1GE: Conexão padrão com a rede.
+OLT-94_Rianapolis,0,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,6,H802SCUN,Standby_normal,"Controle (Backup): Gerencia a OLT, em modo de espera."
+,7,H802SCUN,Active_normal,"Controle (Principal): Gerencia a OLT, em modo ativo."
+,8,H801GICF,Normal,Uplink 1GE: Conexão padrão com a rede.
+,9,H801X2CS,Normal,Uplink 10GE: Conexão de alta capacidade com a rede.
+OLT-91_URUACU,1,H901GPUF,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,2,H902GPLF,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,3,H901GPUF,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,4,H903GPSF,Normal,Serviço GPON (Long Reach): Placa com 16 portas para clientes.
+,5,H902GPSF,Normal,Serviço GPON (Long Reach): Placa com 16 portas para clientes.
+,7,H901GPLF,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,8,H902MPLA,Standby_normal,"Controle (Backup): Gerencia a OLT, em modo de espera."
+,9,H902MPLA,Active_normal,"Controle (Principal): Gerencia a OLT, em modo ativo."
+,10,H901PILA,Normal,Alimentação DC: Interface de energia para a OLT.
+,11,H901PILA,Normal,Alimentação DC: Interface de energia para a OLT (redundante).
+OLT-92_URUANA,0,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,1,H805GPFD,Normal,Serviço GPON: Placa com 16 portas para clientes.
+,6,H802SCUN,Standby_normal,"Controle (Backup): Gerencia a OLT, em modo de espera."
+,7,H802SCUN,Active_normal,"Controle (Principal): Gerencia a OLT, em modo ativo."
+,8,H802X2CS,Normal,Uplink 10GE: Conexão de alta capacidade com a rede.
+,9,H801GICF,Auto_find,"Uplink 1GE: Placa detectada, mas não configurada/ativada. ⚠️"
+OLT - 90 - 10.0.0.90 - SAO_XICO,0,H805GPFD,Normal,Placa de Serviço GPON: Conecta os clientes finais via fibra óptica.
+,6,H802SCUN,Standby_normal,"Placa de Controle (Backup): Gerencia a OLT, em modo de espera."
+,7,H802SCUN,Active_normal,"Placa de Controle (Principal): Gerencia a OLT, em modo ativo."
+,9,H801GICF,Normal,Placa de Uplink: Conecta a OLT ao restante da rede (core).
+OLT-95_GYN_BURITI_SERENO - 10.0.0.95,0,H805GPFD,Normal,Placa de Serviço GPON: Conecta os clientes finais via fibra óptica.
+,1,H805GPFD,Normal,Placa de Serviço GPON: Conecta os clientes finais via fibra óptica.
+,2,H805GPFD,Normal,Placa de Serviço GPON: Conecta os clientes finais via fibra óptica.
+,3,H805GPFD,Normal,Placa de Serviço GPON: Conecta os clientes finais via fibra óptica.
+,6,H802SCUN,Standby_normal,"Placa de Controle (Backup): Gerencia a OLT, em modo de espera."
+,7,H802SCUN,Active_normal,"Placa de Controle (Principal): Gerencia a OLT, em modo ativo."
+,8,H801X2CS,Normal,Placa de Uplink 10GE: Conecta a OLT à rede com alta capacidade.
+,9,H801GICF,Normal,Placa de Uplink 1GE: Conecta a OLT à rede (capacidade padrão).
