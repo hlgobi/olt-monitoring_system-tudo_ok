@@ -1643,21 +1643,24 @@ class OLTDatabaseGUI(QMainWindow):
         thread.daemon = True
         thread.start()
 
+# Em gui/main_window.py, substitua a sua função load_data inteira por esta:
+
     def load_data(self, filter_field=None, filter_value=None):
         """Carrega os dados das ONTs do banco, aplicando filtros e atualizando alarmes."""
         current_olt_filter_text = self.olt_filter.currentText()
         
         try:
-            # Bloquear sinais e desabilitar classificação para melhorar performance
+            # --- PONTO CRÍTICO DA SOLUÇÃO AUTOMÁTICA ---
+            # 1. Bloqueia os sinais ANTES de qualquer modificação na tabela.
+            #    Isso impede que o 'cellChanged' seja emitido durante o recarregamento.
             self.table.blockSignals(True)
+            
             self.table.setSortingEnabled(False)
             self.table.clearSelection()
             self.table.setRowCount(0)
             
-            # Desabilitar atualizações visuais durante o preenchimento
             self.table.setUpdatesEnabled(False)
             
-            # Construir condições da consulta
             conditions = ["ld.rn = 1"]
             params = []
             
@@ -1703,11 +1706,9 @@ class OLTDatabaseGUI(QMainWindow):
                 ORDER BY ld.olt_identifier, ld.fsp, ld.ont_id;
             """
             
-            # Executar consulta
             self.cursor.execute(query, tuple(params))
             data_for_table = self.cursor.fetchall()
             
-            # Definir colunas e cabeçalhos
             expected_columns = 17
             headers = [
                 "ID", "OLT", "Hora", "F/S/P", "ONT ID", "MAC", "S/N", "CLIENTE", 
@@ -1718,91 +1719,50 @@ class OLTDatabaseGUI(QMainWindow):
             self.table.setColumnCount(expected_columns)
             self.table.setHorizontalHeaderLabels(headers)
             
-            # Processar dados em lotes para evitar travamentos
-            batch_size = 100
-            total_rows = len(data_for_table)
-            self.table.setRowCount(total_rows)
+            self.table.setRowCount(len(data_for_table))
             
-            for batch_start in range(0, total_rows, batch_size):
-                batch_end = min(batch_start + batch_size, total_rows)
-                batch = data_for_table[batch_start:batch_end]
+            for row_idx, row_data in enumerate(data_for_table):
+                row_data = list(row_data)
+                while len(row_data) < expected_columns:
+                    row_data.append(None)
                 
-                for row_idx, row_data in enumerate(batch):
-                    actual_row_idx = batch_start + row_idx
+                for col_idx, col_data in enumerate(row_data):
+                    item = QTableWidgetItem(str(col_data) if col_data is not None else "")
+                    header_text = headers[col_idx]
                     
-                    # Converter para lista e garantir que temos o número correto de colunas
-                    row_data = list(row_data)
-                    while len(row_data) < expected_columns:
-                        row_data.append(None)
-                    if len(row_data) > expected_columns:
-                        row_data = row_data[:expected_columns]
+                    if header_text == "Status" and "online" in item.text().lower():
+                        item.setBackground(QtGui.QColor(144, 238, 144))
+                    elif header_text == "Status" and "offline" in item.text().lower():
+                        item.setBackground(QtGui.QColor(255, 153, 153))
+                    elif header_text == "RX (dBm)":
+                        try:
+                            rx_val = float(col_data)
+                            if rx_val >= -22.0: item.setBackground(QtGui.QColor(144, 238, 144))
+                            elif -25.0 <= rx_val < -22.0: item.setBackground(QtGui.QColor(255, 255, 153))
+                            else: item.setBackground(QtGui.QColor(255, 153, 153))
+                        except (ValueError, TypeError): pass
                     
-                    # Preencher células
-                    for col_idx, col_data in enumerate(row_data):
-                        if col_idx >= len(headers):
-                            continue
-                        
-                        item_text = str(col_data) if col_data is not None else ""
-                        item = QTableWidgetItem(item_text)
-                        
-                        # Aplicar formatação condicional
-                        header_text = headers[col_idx]
-                        
-                        if header_text == "Status":
-                            if "online" in item_text.lower(): 
-                                item.setBackground(QtGui.QColor(144, 238, 144))
-                            elif "offline" in item_text.lower(): 
-                                item.setBackground(QtGui.QColor(255, 153, 153))
-                            else: 
-                                item.setBackground(QtGui.QColor(220, 220, 220))
-                                
-                        elif header_text == "RX (dBm)":
-                            try:
-                                rx_val = float(col_data)
-                                if rx_val >= -22.0: 
-                                    item.setBackground(QtGui.QColor(144, 238, 144))
-                                elif -25.0 <= rx_val < -22.0: 
-                                    item.setBackground(QtGui.QColor(255, 255, 153))
-                                else: 
-                                    item.setBackground(QtGui.QColor(255, 153, 153))
-                            except (ValueError, TypeError): 
-                                pass
-                        
-                        # Tornar não editável, exceto a coluna CLIENTE
-                        if header_text != "CLIENTE":
-                            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                        
-                        self.table.setItem(actual_row_idx, col_idx, item)
-                
-                # Permitir que a GUI processe eventos periodicamente
-                QApplication.processEvents()
-                
-                # Mostrar progresso em tabelas muito grandes
-                if total_rows > 1000:
-                    progress = int((batch_end / total_rows) * 100)
-                    self.setWindowTitle(f"Sistema de Monitoramento OLT - Carregando: {progress}%")
+                    if header_text != "CLIENTE":
+                        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                    
+                    self.table.setItem(row_idx, col_idx, item)
             
-            # Restaurar título da janela
-            self.setWindowTitle("Sistema de Monitoramento OLT - Multi-OLT")
-            
-            # Ajustar colunas
             self.table.resizeColumnsToContents()
-            self.table.resizeColumnToContents(7)  # Ajusta a coluna CLIENTE
             
         except psycopg2.Error as e:
-            self.conn.rollback()  # Importante para reverter a transação em caso de erro
-            QMessageBox.critical(self, "Erro de Banco de Dados", 
-                            f"Ocorreu um erro ao carregar os dados das ONTs:\n{str(e)}")
+            self.conn.rollback()
+            QMessageBox.critical(self, "Erro de Banco de Dados", f"Ocorreu um erro ao carregar os dados das ONTs:\n{str(e)}")
             logging.error("Erro ao carregar dados das ONTs", exc_info=True)
         except Exception as e:
-            QMessageBox.critical(self, "Erro ao Carregar Dados", 
-                            f"Ocorreu um erro ao carregar os dados das ONTs:\n{str(e)}")
+            QMessageBox.critical(self, "Erro ao Carregar Dados", f"Ocorreu um erro ao carregar os dados das ONTs:\n{str(e)}")
             logging.error("Erro ao carregar dados das ONTs", exc_info=True)
         finally:
-            # Reabilitar atualizações e classificação
             if hasattr(self, 'table'):
                 self.table.setUpdatesEnabled(True)
                 self.table.setSortingEnabled(True)
+                # --- PONTO CRÍTICO DA SOLUÇÃO AUTOMÁTICA ---
+                # 2. Religa os sinais APÓS a tabela estar completamente preenchida.
+                #    Agora, o 'cellChanged' só será disparado por edições manuais do usuário.
                 self.table.blockSignals(False)
 
     def verify_database_schema(self):

@@ -139,7 +139,7 @@ def parse_ont_info_details(output_text):
     Analisa a saída do comando 'display ont info [f s p] [ont_id] all'
     e extrai informações detalhadas da ONT, limpando os valores.
     """
-    logging.info("--- Iniciando função parse_ont_info_details (versão aprimorada) ---")
+    logging.debug("--- Iniciando função parse_ont_info_details (versão aprimorada) ---")
     details = {
         'last_down_cause': 'N/A',
         'last_up_time': 'N/A',
@@ -211,7 +211,7 @@ def parse_ont_info_details(output_text):
                 }
                 details['services'].append(service_info)
 
-    logging.info(f"Detalhes da ONT extraídos (versão aprimorada): {details}")
+    logging.debug(f"Detalhes da ONT extraídos (versão aprimorada): {details}")
     return details
 
 def parse_pon_port_state(response):

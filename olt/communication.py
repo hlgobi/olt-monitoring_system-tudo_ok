@@ -126,7 +126,7 @@ def connect_to_olt(olt_ip, username, password, max_retries=3): # Define a funç�
                  response += shell.recv(4096).decode('utf-8', errors='ignore') # Lê e decodifica a resposta.
                  time.sleep(0.2) # Pequena espera entre leituras.
 
-            logging.info(f"Resposta inicial da OLT: {response.strip()}") # Loga a resposta inicial.
+            logging.debug(f"Resposta inicial da OLT: {response.strip()}") # Loga a resposta inicial.
 
             if ">" in response or "#" in response: # Verifica se o prompt esperado está na resposta.
                 logging.info(f"Conexão SSH estabelecida com {olt_ip} após {attempt+1} tentativa(s)") # Loga o sucesso.

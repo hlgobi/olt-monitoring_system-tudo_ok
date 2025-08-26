@@ -45,22 +45,11 @@ logging.basicConfig(
 # Dicionário contendo todas as informações necessárias para se conectar ao banco de dados PostgreSQL
 # Centralizar essas configurações facilita a manutenção e alteração sem modificar o código-fonte
 DB_CONFIG = {
-    # Endereço IP ou hostname do servidor onde o banco de dados está hospedado
-    'host': '177.8.200.12',
-    
-    # Nome do banco de dados ao qual a aplicação irá se conectar
-    'database': 'Olt',
-    
-    # Nome de usuário para autenticação no banco de dados
-    'user': 'olt_user132',
-    
-    # Senha correspondente ao usuário para autenticação
-    # Em um ambiente de produção, seria recomendável usar métodos mais seguros para armazenar senhas
-    'password': 'yQAZgvodsWSDm25671&&&',
-    
-    # Porta TCP na qual o servidor de banco de dados está ouvindo conexões
-    # A porta padrão para PostgreSQL é 5432
-    'port': '5432'
+    'host': 'localhost',        # Endereço do servidor do banco de dados.
+    'database': 'olt_monitoring', # Nome do banco de dados a ser utilizado.
+    'user': 'olt_user',         # Nome do usuário para autenticação.
+    'password': 'gigamatriz',   # Senha do usuário.
+    'port': '5432'              # Porta padrão do PostgreSQL.
 }
 
 # --- MODIFICAÇÃO: Lista de OLTs definida diretamente no código ---
