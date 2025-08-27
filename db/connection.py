@@ -154,12 +154,12 @@ def create_tables():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_temp_monitoring_olt_slot_time ON temperature_monitoring(olt_identifier, slot_id, collection_time DESC);")
             logging.info("Tabela 'temperature_monitoring' verificada/criada.")
 
-            # --- INÍCIO DA MODIFICAÇÃO ---
             # Tabela de Estado da Porta PON
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pon_port_state (
                     id SERIAL PRIMARY KEY,
                     olt_ip VARCHAR(50) NOT NULL,
+                    olt_identifier VARCHAR(10) NOT NULL, -- Adicionado para consistência
                     fsp VARCHAR(20) NOT NULL,
                     collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
                     port_state VARCHAR(20),
@@ -175,15 +175,24 @@ def create_tables():
                     temperature_c FLOAT,
                     tx_bias_current_ma FLOAT,
                     supply_voltage_v FLOAT,
-                    tx_power_dbm FLOAT
+                    tx_power_dbm FLOAT,
+                    -- --- INÍCIO DA MODIFICAÇÃO ---
+                    left_guaranteed_bandwidth_kbps INTEGER,
+                    admin_state VARCHAR(20)
+                    -- --- FIM DA MODIFICAÇÃO ---
                 );
             """)
+            
+            # --- INÍCIO DA MODIFICAÇÃO (ALTER TABLE) ---
+            # Adiciona as colunas se a tabela já existir
+            cursor.execute("ALTER TABLE pon_port_state ADD COLUMN IF NOT EXISTS olt_identifier VARCHAR(10);")
+            cursor.execute("ALTER TABLE pon_port_state ADD COLUMN IF NOT EXISTS left_guaranteed_bandwidth_kbps INTEGER;")
+            cursor.execute("ALTER TABLE pon_port_state ADD COLUMN IF NOT EXISTS admin_state VARCHAR(20);")
+            # --- FIM DA MODIFICAÇÃO (ALTER TABLE) ---
 
             # Índices para melhor performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pon_port_state_olt_fsp ON pon_port_state (olt_ip, fsp);")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_pon_port_state_time ON pon_port_state (collection_time);")
-            logging.info("Tabela 'pon_port_state' verificada/criada.")
-            # --- FIM DA MODIFICAÇÃO ---
+            # ... (resto da função)
             
             # Tabela de Monitoramento de Recursos
             cursor.execute("""

@@ -615,6 +615,8 @@ class DatabaseSignals(QObject):
 # Instância global para uso em todo o aplicativo
 db_signals = DatabaseSignals()
 
+# Em db/operations.py, substitua a função save_pon_port_state
+
 def save_pon_port_state(olt_ip, fsp, state_data):
     """Salva os dados de estado da porta PON no banco de dados."""
     conn = None
@@ -622,23 +624,22 @@ def save_pon_port_state(olt_ip, fsp, state_data):
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
         
-        # --- INÍCIO DA CORREÇÃO ---
-        # 1. Calcula o olt_identifier a partir do olt_ip
         olt_identifier = olt_ip.split('.')[-1]
         
-        # 2. Adiciona a coluna 'olt_identifier' no comando INSERT
+        # --- INÍCIO DA MODIFICAÇÃO ---
         query = """
             INSERT INTO pon_port_state (
                 olt_ip, olt_identifier, fsp, port_state, last_down_cause, last_up_time, last_down_time,
                 signal_detect, available_bandwidth_kbps, illegal_rogue_ont,
                 optical_module_status, laser_state, tx_fault, temperature_c,
-                tx_bias_current_ma, supply_voltage_v, tx_power_dbm
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                tx_bias_current_ma, supply_voltage_v, tx_power_dbm,
+                left_guaranteed_bandwidth_kbps, admin_state
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         cursor.execute(query, (
             olt_ip,
-            olt_identifier, # 3. Adiciona o valor do olt_identifier aqui
+            olt_identifier,
             fsp,
             state_data.get('port_state'),
             state_data.get('last_down_cause'),
@@ -653,9 +654,11 @@ def save_pon_port_state(olt_ip, fsp, state_data):
             state_data.get('temperature_c'),
             state_data.get('tx_bias_current_ma'),
             state_data.get('supply_voltage_v'),
-            state_data.get('tx_power_dbm')
+            state_data.get('tx_power_dbm'),
+            state_data.get('left_guaranteed_bandwidth_kbps'), # Novo campo
+            state_data.get('admin_state')                     # Novo campo
         ))
-        # --- FIM DA CORREÇÃO ---
+        # --- FIM DA MODIFICAÇÃO ---
         
         conn.commit()
         logging.info(f"Dados de estado da porta PON {fsp} salvos com sucesso.")

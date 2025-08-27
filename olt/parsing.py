@@ -275,3 +275,34 @@ def parse_pon_port_state(response):
 
     return state_data
 # --- FIM DA MODIFICAÇÃO ---
+
+# Em olt/parsing.py, adicione esta nova função
+
+def parse_port_info(response):
+    """
+    Analisa a saída do comando 'display port info <port>' e extrai informações.
+    """
+    info_data = {
+        'left_guaranteed_bandwidth_kbps': None,
+        'admin_state': None
+    }
+    key_map = {
+        "Left guaranteed bandwidth(kbps)": "left_guaranteed_bandwidth_kbps",
+        "Admin State": "admin_state"
+    }
+
+    for line in response.splitlines():
+        parts = re.split(r'\s{2,}', line.strip(), 1)
+        if len(parts) == 2:
+            key, value = parts[0].strip(), parts[1].strip()
+            if key in key_map:
+                db_key = key_map[key]
+                if db_key == 'left_guaranteed_bandwidth_kbps':
+                    try:
+                        info_data[db_key] = int(value)
+                    except (ValueError, TypeError):
+                        info_data[db_key] = None
+                else:
+                    info_data[db_key] = value
+    
+    return info_data

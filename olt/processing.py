@@ -15,8 +15,9 @@ import json
 from olt.communication import send_command, connect_to_olt # Funções para conectar e enviar comandos à OLT.
 # --- MODIFICADO AQUI ---
 # CÓDIGO CORRIGIDO
+# No topo de olt/processing.py
 from olt.parsing import (extract_service_mac, extract_ont_info, parse_ont_info_details, 
-                         parse_pon_port_state)
+                         parse_pon_port_state, parse_port_info) # Adicione parse_port_info
 from db.operations import (save_ont_data, save_pon_status, save_temp_data, 
                            save_resource_data, save_pon_traffic_data, save_pon_port_state)
 # --- FIM DA MODIFICAÇÃO ---
@@ -177,6 +178,35 @@ def process_ont_details(shell, olt_ip, slot, port, ont_id, info):
 
 # Em olt/processing.py, substitua a sua função process_pon_worker por esta:
 
+# Em olt/processing.py, adicione esta função antes de process_pon_worker
+
+def collect_port_info(shell, slot, port):
+    """(VERSÃO SIMPLIFICADA) Apenas executa o comando de info e faz o parse da saída."""
+    fsp = f"0/{slot}/{port}"
+    log_prefix = f"[PON Info {fsp}]"
+
+    try:
+        command = f"display port info {port}\n"
+        logging.info(f"{log_prefix} Executando comando: {command.strip()}")
+        shell.send(command)
+        time.sleep(1)
+
+        response = ""
+        timeout = time.time() + 10
+        while time.time() < timeout:
+            if shell.recv_ready():
+                response += shell.recv(8192).decode('utf-8', errors='ignore')
+            elif f"(config-if-gpon-0/{slot})" in response:
+                break
+            time.sleep(0.2)
+
+        logging.info(f"{log_prefix} Resposta recebida ({len(response)} bytes)")
+        return parse_port_info(response)
+
+    except Exception as e:
+        logging.error(f"{log_prefix} Erro durante coleta de info: {e}", exc_info=True)
+        return None
+
 def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instance, log_callback):
     """
     (VERSÃO FINAL E ROBUSTA) Worker que conecta, gerencia a navegação com verificação de prompt
@@ -224,7 +254,7 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
             if shell.recv_ready():
                 config_response += shell.recv(4096).decode('utf-8', errors='ignore')
                 if "(config)" in config_response:
-                    log_callback(f"{log_prefix} Modo 'config' confirmado.")
+                    log_callback(f"{log_prefix} Entrando nos modos de configuração...")
                     config_prompt_found = True
                     break
             time.sleep(0.2)
@@ -253,22 +283,25 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
             shell.send("quit\n") # Tenta sair do modo config
             return 0
 
-        # 3. Com a navegação confirmada, chama as funções de coleta
+        # Coleta todos os dados da PON
         traffic_data = collect_pon_traffic(shell, slot, port)
+        state_data = collect_pon_state(shell, slot, port)
+        info_data = collect_port_info(shell, slot, port) # NOVA COLETA
+
+        # Mescla os resultados antes de salvar
+        if state_data and info_data:
+            state_data.update(info_data)
+
         if traffic_data:
             save_pon_traffic_data(olt_ip, pon_fsp, traffic_data)
             log_callback(f"{log_prefix} Dados de tráfego salvos.")
-        else:
-            log_callback(f"{log_prefix} Falha ao coletar dados de tráfego.")
-        
-        state_data = collect_pon_state(shell, slot, port)
+
         if state_data:
-            save_pon_port_state(olt_ip, pon_fsp, state_data)
-            log_callback(f"{log_prefix} Dados de estado salvos.")
-        else:
-            log_callback(f"{log_prefix} Falha ao coletar dados de estado.")
-        
-        # 4. Sai dos modos de configuração
+            save_pon_port_state(olt_ip, pon_fsp, state_data) # Salva os dados combinados
+            log_callback(f"{log_prefix} Dados de estado e info salvos.")
+
+        # Sai dos modos de configuração
+        log_callback(f"{log_prefix} Saindo dos modos de configuração...")
         shell.send("quit\n")
         time.sleep(0.5)
         shell.send("quit\n")

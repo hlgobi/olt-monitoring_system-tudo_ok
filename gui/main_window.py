@@ -3116,10 +3116,11 @@ class OLTDatabaseGUI(QMainWindow):
 
         # -- Tabela de Estado da Porta PON --
         self.pon_state_table = QTableWidget()
-        self.pon_state_table.setColumnCount(15)
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        self.pon_state_table.setColumnCount(18) # Aumentado para 18
         self.pon_state_table.setHorizontalHeaderLabels([
-            "OLT", "F/S/P", "Estado Porta", "Causa Queda", "Última Subida", "Última Queda",
-            "Detecção Sinal", "Banda Disp. (Kbps)", "ONT Rogue", "Status Módulo",
+            "OLT", "F/S/P", "Hora da Coleta", "Estado Porta", "Estado Admin", "Causa Queda", "Última Subida", "Última Queda",
+            "Detecção Sinal", "Banda Disp. (Kbps)", "Banda Garantida Disp.", "ONT Rogue", "Status Módulo",
             "Estado Laser", "Falha TX", "Temperatura (°C)", "Corrente TX (mA)", "Potência TX (dBm)"
         ])
         self.pon_state_table.setSortingEnabled(True)
@@ -3176,15 +3177,26 @@ class OLTDatabaseGUI(QMainWindow):
             col_map = {desc[0]: i for i, desc in enumerate(self.cursor.description)}
 
             for row_idx, row in enumerate(results):
+                # --- INÍCIO DA MODIFICAÇÃO ---
+                collection_time = row[col_map['collection_time']].strftime('%d/%m/%Y %H:%M:%S') if row[col_map['collection_time']] else "-"
+
+                # Formata os novos campos
+                guaranteed_bw = row[col_map['left_guaranteed_bandwidth_kbps']]
+                formatted_guaranteed_bw = f"{guaranteed_bw:,}" if guaranteed_bw is not None else "-"
+                admin_state = str(row[col_map['admin_state']]) if row[col_map['admin_state']] is not None else "-"
+
                 items = [
                     QTableWidgetItem(str(row[col_map['olt_ip']])),
                     QTableWidgetItem(str(row[col_map['fsp']])),
+                    QTableWidgetItem(collection_time),
                     QTableWidgetItem(str(row[col_map['port_state']])),
+                    QTableWidgetItem(admin_state), # Nova coluna
                     QTableWidgetItem(str(row[col_map['last_down_cause']]) if row[col_map['last_down_cause']] is not None else "-"),
                     QTableWidgetItem(row[col_map['last_up_time']].strftime('%d/%m/%Y %H:%M') if row[col_map['last_up_time']] is not None else "-"),
                     QTableWidgetItem(row[col_map['last_down_time']].strftime('%d/%m/%Y %H:%M') if row[col_map['last_down_time']] is not None else "-"),
                     QTableWidgetItem(str(row[col_map['signal_detect']])),
                     QTableWidgetItem(f"{row[col_map['available_bandwidth_kbps']]:,}" if row[col_map['available_bandwidth_kbps']] is not None else "-"),
+                    QTableWidgetItem(formatted_guaranteed_bw), # Nova coluna
                     QTableWidgetItem(str(row[col_map['illegal_rogue_ont']])),
                     QTableWidgetItem(str(row[col_map['optical_module_status']])),
                     QTableWidgetItem(str(row[col_map['laser_state']])),
@@ -3206,6 +3218,10 @@ class OLTDatabaseGUI(QMainWindow):
 
                 for col_idx, item in enumerate(items):
                     self.pon_state_table.setItem(row_idx, col_idx, item)
+
+                if admin_state.lower() != 'on':
+                    items[4].setBackground(QColor("#FFCDD2")) # Coluna "Estado Admin"
+
 
             self.pon_state_table.resizeColumnsToContents()
             self.pon_state_table.setSortingEnabled(True)
