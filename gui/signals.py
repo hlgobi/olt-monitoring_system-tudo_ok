@@ -1,4 +1,3 @@
-# 12. olt_monitoring_system/gui/signals.py
 # gui/signals.py
 # Define sinais personalizados para comunicação entre threads e a GUI,
 # permitindo que threads de segundo plano atualizem a GUI de forma segura.

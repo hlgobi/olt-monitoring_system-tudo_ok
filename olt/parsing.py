@@ -371,25 +371,26 @@ def parse_ont_traffic(response):
 
 # Em olt/parsing.py, adicione esta nova função
 
-def parse_ont_statistics_bulk(response):
-    """Analisa a saída do 'display statistics ont-eth' e retorna uma lista."""
-    stats_list = []
-    # Regex para capturar: ONT-ID, Up-Frames, Up-Bytes, Up-Discard, Down-Frames, Down-Bytes, Down-Discard
-    pattern = re.compile(r"^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)")
-
+# --- INÍCIO DA MODIFICAÇÃO ---
+def parse_ont_statistics(response):
+    """Analisa a saída do 'display statistics ont' e extrai os contadores."""
+    stats_data = {}
+    key_map = {
+        'Upstream frames': 'upstream_frames',
+        'Upstream bytes': 'upstream_bytes',
+        'Upstream discarded frames': 'upstream_discarded_frames',
+        'Downstream frames': 'downstream_frames',
+        'Downstream bytes': 'downstream_bytes',
+        'Downstream discarded frames': 'downstream_discarded_frames',
+    }
     for line in response.splitlines():
-        match = pattern.match(line.strip())
-        if match:
-            try:
-                stats_list.append({
-                    "ont_id": int(match.group(1)),
-                    "upstream_frames": int(match.group(2)),
-                    "upstream_bytes": int(match.group(3)),
-                    "upstream_discarded_frames": int(match.group(4)),
-                    "downstream_frames": int(match.group(5)),
-                    "downstream_bytes": int(match.group(6)),
-                    "downstream_discarded_frames": int(match.group(7))
-                })
-            except (ValueError, IndexError):
-                continue
-    return stats_list
+        if ":" in line:
+            key, value = line.split(":", 1)
+            key = key.strip()
+            if key in key_map:
+                try:
+                    stats_data[key_map[key]] = int(value.strip())
+                except (ValueError, TypeError):
+                    continue
+    return stats_data
+# --- FIM DA MODIFICAÇÃO ---

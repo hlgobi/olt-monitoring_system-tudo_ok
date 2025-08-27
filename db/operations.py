@@ -778,8 +778,7 @@ def save_ont_traffic_bulk(olt_ip, fsp, traffic_list):
         if conn:
             conn.close()
 
-# Em db/operations.py, adicione esta função ao final do arquivo
-
+# --- INÍCIO DA MODIFICAÇÃO ---
 def save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list):
     """Salva uma lista de registros de estatísticas de pacotes de ONTs."""
     if not stats_list:
@@ -816,3 +815,4 @@ def save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list):
         return 0
     finally:
         if conn: conn.close()
+# --- FIM DA MODIFICAÇÃO ---

@@ -13,15 +13,14 @@ import json
 
 # --- Importações de Módulos da Aplicação ---
 from olt.communication import send_command, connect_to_olt # Funções para conectar e enviar comandos à OLT.
-# --- MODIFICADO AQUI ---
-# CÓDIGO CORRIGIDO
-# No topo de olt/processing.py
+# --- INÍCIO DA MODIFICAÇÃO 1: Importações ---
 from olt.parsing import (extract_service_mac, extract_ont_info, parse_ont_info_details, 
                          parse_pon_port_state, parse_port_info, parse_pon_statistics_packets, 
-                         parse_ont_traffic, parse_ont_statistics_bulk)
+                         parse_ont_traffic, parse_ont_statistics)
 from db.operations import (save_ont_data, save_pon_status, save_temp_data, 
                            save_resource_data, save_pon_traffic_data, save_pon_port_state, 
-                           save_pon_statistics_packets, save_ont_traffic_bulk, save_ont_statistics_packets_bulk)
+                           save_pon_statistics_packets, save_ont_traffic_bulk, 
+                           save_ont_statistics_packets_bulk)
 
 from gui.signals import db_signals
 
@@ -274,40 +273,44 @@ def collect_ont_traffic(shell, slot, port):
         return None
 
 
-def collect_ont_statistics_bulk(shell, slot, port, log_callback):
-    """Coleta estatísticas de pacotes para todas as ONTs em uma PON usando um único comando."""
+def collect_ont_statistics(shell, slot, port, ont_ids, log_callback):
+    """Coleta estatísticas de pacotes para uma lista de ONTs em uma PON, uma por uma."""
     fsp = f"0/{slot}/{port}"
     log_prefix = f"[ONT Stats {fsp}]"
+    all_stats = []
+    
+    if not ont_ids:
+        return all_stats
 
-    try:
-        # Comando mais eficiente que coleta dados de todas as ONTs de uma vez
-        command = f"display statistics ont-eth {port} all\n"
-        log_callback(f"{log_prefix} Executando comando: {command.strip()}")
-        shell.send(command)
-        time.sleep(2) # Comando pode ser demorado
+    log_callback(f"{log_prefix} Iniciando coleta de estatísticas para {len(ont_ids)} ONTs...")
+    for ont_id in ont_ids:
+        try:
+            command = f"display statistics ont {port} {ont_id}\n"
+            shell.send(command)
+            # Pausa curta para não sobrecarregar a OLT com comandos rápidos
+            time.sleep(0.5) 
+            
+            response = ""
+            timeout = time.time() + 15
+            while time.time() < timeout:
+                if shell.recv_ready():
+                    response += shell.recv(4096).decode('utf-8', 'ignore')
+                # A saída deste comando é curta, então o prompt da interface é um bom sinal de fim
+                elif f"(config-if-gpon-0/{slot})" in response and not shell.recv_ready():
+                    break
+                time.sleep(0.1)
 
-        response = ""
-        timeout = time.time() + 90
-        while time.time() < timeout:
-            if shell.recv_ready():
-                chunk = shell.recv(8192).decode('utf-8', 'ignore')
-                response += chunk
-                if "---- More" in chunk:
-                    shell.send(" ")
-                    time.sleep(0.8)
+            parsed_data = parse_ont_statistics(response)
+            if parsed_data:
+                parsed_data['ont_id'] = ont_id
+                all_stats.append(parsed_data)
 
-            elif f"(config-if-gpon-0/{slot})" in response and not shell.recv_ready():
-                break
-            time.sleep(0.2)
-
-        log_callback(f"{log_prefix} Resposta recebida ({len(response)} bytes)")
-        return parse_ont_statistics_bulk(response)
-
-    except Exception as e:
-        logging.error(f"{log_prefix} Erro durante coleta de estatísticas de ONT: {e}", exc_info=True)
-        return None
-
-# Em olt/processing.py, substitua a sua função process_pon_worker por esta:
+        except Exception as e:
+            logging.error(f"{log_prefix} Erro ao coletar estatísticas para ONT ID {ont_id}: {e}")
+            continue # Continua para a próxima ONT em caso de erro
+    
+    log_callback(f"{log_prefix} Coleta de estatísticas finalizada. {len(all_stats)} ONTs processadas.")
+    return all_stats
 
 def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instance, log_callback):
     """
@@ -399,7 +402,7 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
             shell.send("quit\n") # Tenta sair do modo config
             return 0
             
-        # --- Etapa 4: Coleta de todos os dados que exigem modo de interface ---
+        # --- Etapa 4: Coleta de dados que exigem modo de interface ---
         
         traffic_data = collect_pon_traffic(shell, slot, port)
         if traffic_data: save_pon_traffic_data(olt_ip, pon_fsp, traffic_data)
@@ -408,13 +411,28 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
         info_data = collect_port_info(shell, slot, port)
         if state_data and info_data: state_data.update(info_data)
         if state_data: save_pon_port_state(olt_ip, pon_fsp, state_data)
-
+        
         stats_data = collect_pon_statistics_packets(shell, slot, port)
         if stats_data: save_pon_statistics_packets(olt_ip, pon_fsp, stats_data)
             
         ont_traffic_list = collect_ont_traffic(shell, slot, port)
         if ont_traffic_list: save_ont_traffic_bulk(olt_ip, pon_fsp, ont_traffic_list)
         
+        # --- INÍCIO DA CORREÇÃO E REIMPLEMENTAÇÃO ---
+        # Coleta as estatísticas de pacotes para cada ONT individualmente
+        # Primeiro, criamos a lista de IDs a partir do dicionário já coletado
+        ont_ids_list = [int(ont_id) for ont_id in ont_info_dict.keys()]
+        
+        # Agora, chamamos a função e atribuímos o resultado à variável correta
+        ont_statistics_list = collect_ont_statistics(shell, slot, port, ont_ids_list, log_callback)
+        
+        # O 'if' agora funciona porque a variável existe
+        if ont_statistics_list:
+            save_ont_statistics_packets_bulk(olt_ip, pon_fsp, ont_statistics_list)
+        else:
+            log_callback(f"{log_prefix} Falha ao coletar estatísticas de pacotes das ONTs.")
+        # --- FIM DA CORREÇÃO E REIMPLEMENTAÇÃO ---
+
         # --- Etapa 5: Saída dos modos de configuração ---
         log_callback(f"{log_prefix} Saindo dos modos de configuração...")
         shell.send("quit\n")
