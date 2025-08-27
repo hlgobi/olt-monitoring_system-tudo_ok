@@ -368,3 +368,61 @@ def parse_ont_traffic(response):
             except (ValueError, IndexError):
                 continue
     return traffic_list
+
+# Em olt/parsing.py, adicione esta nova função
+
+# --- INÍCIO DA MODIFICAÇÃO ---
+def parse_ont_statistics(response):
+    """Analisa a saída do 'display statistics ont' e extrai os contadores."""
+    stats_data = {}
+    key_map = {
+        'Upstream frames': 'upstream_frames',
+        'Upstream bytes': 'upstream_bytes',
+        'Upstream discarded frames': 'upstream_discarded_frames',
+        'Downstream frames': 'downstream_frames',
+        'Downstream bytes': 'downstream_bytes',
+        'Downstream discarded frames': 'downstream_discarded_frames',
+    }
+    for line in response.splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            key = key.strip()
+            if key in key_map:
+                try:
+                    stats_data[key_map[key]] = int(value.strip())
+                except (ValueError, TypeError):
+                    continue
+    return stats_data
+# --- FIM DA MODIFICAÇÃO ---
+
+# Em olt/parsing.py, adicione esta nova função ao final do arquivo
+
+# --- INÍCIO DA MODIFICAÇÃO ---
+def parse_ont_eth_port_statistics(response):
+    """Analisa a saída do 'display statistics ont-eth ... ont-port'."""
+    stats_data = {}
+    key_map = {
+        'Received frames': 'rx_frames', 'Received unicast frames': 'rx_unicast_frames',
+        'Received multicast frames': 'rx_multicast_frames', 'Received broadcast frames': 'rx_broadcast_frames',
+        'Received right bytes': 'rx_bytes', # Usar "right bytes" para maior precisão
+        'Received CRC error frames': 'rx_crc_error_frames', 'Received discarded frames': 'rx_discarded_frames',
+        'Received error frames': 'rx_error_frames',
+        'Sent frames': 'tx_frames', 'Sent unicast frames': 'tx_unicast_frames',
+        'Sent multicast frames': 'tx_multicast_frames', 'Sent broadcast frames': 'tx_broadcast_frames',
+        'Sent right bytes': 'tx_bytes', # Usar "right bytes" para maior precisão
+        'Sent buffer overflow frames': 'tx_buffer_overflow_frames'
+    }
+
+    for line in response.splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            key = key.strip()
+            if key in key_map:
+                numeric_value = re.search(r'^\s*(\d+)', value.strip())
+                if numeric_value:
+                    try:
+                        stats_data[key_map[key]] = int(numeric_value.group(1))
+                    except (ValueError, TypeError):
+                        continue
+    return stats_data
+# --- FIM DA MODIFICAÇÃO ---

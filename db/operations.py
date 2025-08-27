@@ -53,7 +53,9 @@ def save_ont_data(olt_ip, ont_info):
         
         # Utiliza um cursor para executar comandos SQL
         with conn.cursor() as cursor:
-            # Verifica o registro anterior desta ONT para detectar mudanças e preservar o nome do cliente
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
             cursor.execute("""
                 SELECT fsp, ont_id, mac_address, client_name
                 FROM ont_data
@@ -196,7 +198,8 @@ def save_pon_status(olt_ip, fsp, online_count, total_count):
         
         # Estabelece conexão com o banco de dados
         conn = psycopg2.connect(**DB_CONFIG)
-        
+        with conn.cursor() as cursor:
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
         # Determina o status da PON com base na proporção de ONTs online
         if total_count == 0:
             status = "empty"
@@ -261,6 +264,9 @@ def save_temp_data(olt_ip, temp_data):
         
         # Utiliza um cursor para executar comandos SQL
         with conn.cursor() as cursor:
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
             # Itera sobre cada conjunto de dados de temperatura
             for data in temp_data:
                 # Comando SQL para inserir os dados de temperatura
@@ -331,6 +337,9 @@ def save_resource_data(olt_ip, resource_data):
         
         # Utiliza um cursor para executar comandos SQL
         with conn.cursor() as cursor:
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
             # Itera sobre cada conjunto de dados de recursos
             for data in resource_data:
                 # Comando SQL para inserir os dados de recursos
@@ -414,6 +423,10 @@ def get_ont_diagnostic_history(ont_serial_number: str, olt_identifier: str = Non
         # Estabelece conexão com o banco de dados
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+        # --- FIM DA MODIFICAÇÃO ---
+        cursor.execute(sql, tuple(params))
         
         # Executa a consulta SQL
         cursor.execute(sql, tuple(params))
@@ -460,6 +473,9 @@ def save_ont_diagnostic_data(diag_info: dict):
         # Estabelece conexão com o banco de dados
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+        # --- FIM DA MODIFICAÇÃO ---
         
         # Extrai os dados parseados do dicionário de informações de diagnóstico
         p_data = diag_info.get('parsed_data_dict', {})
@@ -510,6 +526,9 @@ def get_existing_ont_data(olt_ip, serial_number):
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+        # --- FIM DA MODIFICAÇÃO ---
         
         query = """
             SELECT connection_code, client_name 
@@ -562,6 +581,9 @@ def save_pon_traffic_data(olt_ip, fsp, traffic_data):
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+        # --- FIM DA MODIFICAÇÃO ---
         
         query = """
             INSERT INTO pon_traffic_data (
@@ -622,7 +644,10 @@ def save_pon_port_state(olt_ip, fsp, state_data):
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
+        with conn.cursor() as cursor:
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
         
         olt_identifier = olt_ip.split('.')[-1]
         
@@ -679,7 +704,10 @@ def save_pon_statistics_packets(olt_ip, fsp, stats_data):
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
+        with conn.cursor() as cursor:
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
         
         olt_identifier = olt_ip.split('.')[-1]
         
@@ -740,7 +768,10 @@ def save_ont_traffic_bulk(olt_ip, fsp, traffic_list):
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
+        with conn.cursor() as cursor:
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
         
         olt_identifier = olt_ip.split('.')[-1]
         
@@ -777,3 +808,91 @@ def save_ont_traffic_bulk(olt_ip, fsp, traffic_list):
     finally:
         if conn:
             conn.close()
+
+# --- INÍCIO DA MODIFICAÇÃO ---
+def save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list):
+    """Salva uma lista de registros de estatísticas de pacotes de ONTs."""
+    if not stats_list:
+        return 0
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        with conn.cursor() as cursor:
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
+        olt_identifier = olt_ip.split('.')[-1]
+        
+        args_list = [
+            (
+                olt_ip, olt_identifier, fsp, item['ont_id'],
+                item.get('upstream_frames'), item.get('upstream_bytes'), item.get('upstream_discarded_frames'),
+                item.get('downstream_frames'), item.get('downstream_bytes'), item.get('downstream_discarded_frames')
+            ) for item in stats_list
+        ]
+        
+        query = """
+            INSERT INTO ont_statistics_packets (
+                olt_ip, olt_identifier, fsp, ont_id,
+                upstream_frames, upstream_bytes, upstream_discarded_frames,
+                downstream_frames, downstream_bytes, downstream_discarded_frames
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        from psycopg2.extras import execute_batch
+        execute_batch(cursor, query, args_list)
+        conn.commit()
+        logging.info(f"{len(args_list)} registros de estatísticas de pacotes de ONT para a PON {fsp} salvos.")
+        return len(args_list)
+    except Exception as e:
+        logging.error(f"Erro ao salvar estatísticas de pacotes de ONT para a PON {fsp}: {e}")
+        if conn: conn.rollback()
+        return 0
+    finally:
+        if conn: conn.close()
+# --- FIM DA MODIFICAÇÃO ---
+
+# Em db/operations.py, adicione esta nova função ao final do arquivo
+
+# --- INÍCIO DA MODIFICAÇÃO ---
+def save_ont_eth_port_statistics_bulk(olt_ip, fsp, stats_list):
+    """Salva uma lista de registros de estatísticas de portas Ethernet de ONTs."""
+    if not stats_list:
+        return 0
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        olt_identifier = olt_ip.split('.')[-1]
+        
+        args_list = [
+            (
+                olt_ip, olt_identifier, fsp, item['ont_id'], item['eth_port_id'],
+                item.get('rx_frames'), item.get('rx_unicast_frames'), item.get('rx_multicast_frames'),
+                item.get('rx_broadcast_frames'), item.get('rx_bytes'), item.get('rx_crc_error_frames'),
+                item.get('rx_discarded_frames'), item.get('rx_error_frames'),
+                item.get('tx_frames'), item.get('tx_unicast_frames'), item.get('tx_multicast_frames'),
+                item.get('tx_broadcast_frames'), item.get('tx_bytes'), item.get('tx_buffer_overflow_frames')
+            ) for item in stats_list
+        ]
+        
+        query = """
+            INSERT INTO ont_eth_port_statistics (
+                olt_ip, olt_identifier, fsp, ont_id, eth_port_id,
+                rx_frames, rx_unicast_frames, rx_multicast_frames, rx_broadcast_frames, rx_bytes,
+                rx_crc_error_frames, rx_discarded_frames, rx_error_frames,
+                tx_frames, tx_unicast_frames, tx_multicast_frames, tx_broadcast_frames, tx_bytes,
+                tx_buffer_overflow_frames
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        from psycopg2.extras import execute_batch
+        execute_batch(cursor, query, args_list)
+        conn.commit()
+        logging.info(f"{len(args_list)} registros de estatísticas de porta ETH para a PON {fsp} salvos.")
+        return len(args_list)
+    except Exception as e:
+        logging.error(f"Erro ao salvar estatísticas de porta ETH para a PON {fsp}: {e}")
+        if conn: conn.rollback()
+        return 0
+    finally:
+        if conn: conn.close()
+# --- FIM DA MODIFICAÇÃO ---

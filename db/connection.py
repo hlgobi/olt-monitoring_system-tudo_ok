@@ -10,7 +10,10 @@ def create_tables():
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         with conn.cursor() as cursor:
-            # Tabela de Dados ONT (Optical Network Terminal)
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            # Define o fuso horário para a sessão atual do banco de dados
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ont_data (
                     id SERIAL PRIMARY KEY,
@@ -233,6 +236,28 @@ def create_tables():
             logging.info("Tabela 'ont_diagnostics_history' verificada/criada.")
         
             # --- INÍCIO DA MODIFICAÇÃO ---
+            # Tabela de Estatísticas de Pacotes por ONT
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ont_statistics_packets (
+                    id SERIAL PRIMARY KEY,
+                    olt_ip VARCHAR(50) NOT NULL,
+                    olt_identifier VARCHAR(10) NOT NULL,
+                    fsp VARCHAR(20) NOT NULL,
+                    ont_id INTEGER NOT NULL,
+                    collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                    upstream_frames BIGINT,
+                    upstream_bytes BIGINT,
+                    upstream_discarded_frames BIGINT,
+                    downstream_frames BIGINT,
+                    downstream_bytes BIGINT,
+                    downstream_discarded_frames BIGINT
+                );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_stats_packets_fsp_ont_id_time ON ont_statistics_packets(fsp, ont_id, collection_time DESC);")
+            logging.info("Tabela 'ont_statistics_packets' verificada/criada.")
+            # --- FIM DA MODIFICAÇÃO ---
+
+            # --- INÍCIO DA MODIFICAÇÃO ---
             # Tabela de Estatísticas de Pacotes da PON
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pon_statistics_packets (
@@ -300,6 +325,41 @@ def create_tables():
             logging.info("Tabela 'ont_traffic_data' verificada/criada.")
             # --- FIM DA MODIFICAÇÃO ---
         
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            # Tabela de Estatísticas de Porta Ethernet por ONT
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ont_eth_port_statistics (
+                    id SERIAL PRIMARY KEY,
+                    olt_ip VARCHAR(50) NOT NULL,
+                    olt_identifier VARCHAR(10) NOT NULL,
+                    fsp VARCHAR(20) NOT NULL,
+                    ont_id INTEGER NOT NULL,
+                    eth_port_id INTEGER NOT NULL,
+                    collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                    
+                    -- Estatísticas de Recebimento (RX)
+                    rx_frames BIGINT,
+                    rx_unicast_frames BIGINT,
+                    rx_multicast_frames BIGINT,
+                    rx_broadcast_frames BIGINT,
+                    rx_bytes BIGINT,
+                    rx_crc_error_frames BIGINT,
+                    rx_discarded_frames BIGINT,
+                    rx_error_frames BIGINT,
+                    
+                    -- Estatísticas de Envio (TX)
+                    tx_frames BIGINT,
+                    tx_unicast_frames BIGINT,
+                    tx_multicast_frames BIGINT,
+                    tx_broadcast_frames BIGINT,
+                    tx_bytes BIGINT,
+                    tx_buffer_overflow_frames BIGINT
+                );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_eth_stats_fsp_ont_port_time ON ont_eth_port_statistics(fsp, ont_id, eth_port_id, collection_time DESC);")
+            logging.info("Tabela 'ont_eth_port_statistics' verificada/criada.")
+            # --- FIM DA MODIFICAÇÃO ---
+        
         conn.commit()
         logging.info("Todas as tabelas e colunas foram verificadas/criadas com sucesso.")
         return True
@@ -319,6 +379,11 @@ def check_db_connection():
         conn = None
         try:
             conn = psycopg2.connect(**DB_CONFIG)
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            # Define o fuso horário para a sessão de verificação
+            with conn.cursor() as cursor:
+                cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
             return True
         except Exception as e:
             logging.warning(f"Tentativa {attempt+1}/{max_retries}: Conexão PostgreSQL falhou: {e}")

@@ -1,4 +1,3 @@
-# 12. olt_monitoring_system/gui/signals.py
 # gui/signals.py
 # Define sinais personalizados para comunicação entre threads e a GUI,
 # permitindo que threads de segundo plano atualizem a GUI de forma segura.
@@ -29,8 +28,12 @@ class DatabaseSignals(QObject): # Define a classe DatabaseSignals que herda de Q
 
     ont_traffic_data_updated = pyqtSignal()
 
+    ont_stats_packets_updated = pyqtSignal()
+
     # Sinal para Alarmes de Caixa Parada
     caixa_parada_alarms_updated = pyqtSignal(list)
+
+    ont_eth_stats_updated = pyqtSignal()
 
     # Sinais para Diagnóstico de ONT
     ont_connection_status_changed = pyqtSignal(bool, str)  # (isConnected, message)
