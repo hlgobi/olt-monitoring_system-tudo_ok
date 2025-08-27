@@ -644,7 +644,10 @@ def save_pon_port_state(olt_ip, fsp, state_data):
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
+        with conn.cursor() as cursor:
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
         
         olt_identifier = olt_ip.split('.')[-1]
         
@@ -701,7 +704,10 @@ def save_pon_statistics_packets(olt_ip, fsp, stats_data):
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
+        with conn.cursor() as cursor:
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
         
         olt_identifier = olt_ip.split('.')[-1]
         
@@ -762,7 +768,10 @@ def save_ont_traffic_bulk(olt_ip, fsp, traffic_list):
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
+        with conn.cursor() as cursor:
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
         
         olt_identifier = olt_ip.split('.')[-1]
         
@@ -808,7 +817,10 @@ def save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list):
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
+        with conn.cursor() as cursor:
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
         olt_identifier = olt_ip.split('.')[-1]
         
         args_list = [
