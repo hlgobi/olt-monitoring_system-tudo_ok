@@ -53,8 +53,9 @@ def save_ont_data(olt_ip, ont_info):
         
         # Utiliza um cursor para executar comandos SQL
         with conn.cursor() as cursor:
-            # Verifica o registro anterior desta ONT para detectar mudanças e preservar o nome do cliente
+            # --- INÍCIO DA MODIFICAÇÃO ---
             cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
             cursor.execute("""
                 SELECT fsp, ont_id, mac_address, client_name
                 FROM ont_data
@@ -580,6 +581,9 @@ def save_pon_traffic_data(olt_ip, fsp, traffic_data):
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+        # --- FIM DA MODIFICAÇÃO ---
         
         query = """
             INSERT INTO pon_traffic_data (

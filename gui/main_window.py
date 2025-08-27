@@ -2886,6 +2886,9 @@ class OLTDatabaseGUI(QMainWindow):
             # É importante usar uma nova conexão para a thread
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
             query = "UPDATE ont_data SET client_name = %s WHERE serial_number = %s"
             cursor.execute(query, (new_name, serial_number))
             conn.commit()
@@ -3012,6 +3015,9 @@ class OLTDatabaseGUI(QMainWindow):
                 # Conexão com o banco de dados
                 conn = psycopg2.connect(**DB_CONFIG)
                 with conn.cursor() as cursor:
+                    # --- INÍCIO DA MODIFICAÇÃO ---
+                    cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+                    # --- FIM DA MODIFICAÇÃO ---
                     for i, row in enumerate(reader):
                         # FIXED: Skip empty rows
                         if not row or all(not cell.strip() for cell in row):

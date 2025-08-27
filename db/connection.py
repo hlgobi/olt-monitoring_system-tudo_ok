@@ -10,8 +10,10 @@ def create_tables():
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         with conn.cursor() as cursor:
-            # Tabela de Dados ONT (Optical Network Terminal)
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            # Define o fuso horário para a sessão atual do banco de dados
             cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ont_data (
                     id SERIAL PRIMARY KEY,
@@ -377,6 +379,11 @@ def check_db_connection():
         conn = None
         try:
             conn = psycopg2.connect(**DB_CONFIG)
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            # Define o fuso horário para a sessão de verificação
+            with conn.cursor() as cursor:
+                cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
             return True
         except Exception as e:
             logging.warning(f"Tentativa {attempt+1}/{max_retries}: Conexão PostgreSQL falhou: {e}")
