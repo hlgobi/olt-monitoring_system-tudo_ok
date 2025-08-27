@@ -344,3 +344,27 @@ def parse_pon_statistics_packets(response):
                     except (ValueError, TypeError):
                         continue
     return stats_data
+
+# Em olt/parsing.py, adicione esta nova função ao final do arquivo
+
+def parse_ont_traffic(response):
+    """Analisa a saída do 'display ont traffic' e retorna uma lista de dicionários."""
+    traffic_list = []
+    # Regex para capturar as linhas de dados: ONT ID, Up Traffic, Down Traffic
+    pattern = re.compile(r"^\s*(\d+)\s+(\d+)\s+(\d+)\s*$")
+    
+    for line in response.splitlines():
+        match = pattern.match(line.strip())
+        if match:
+            try:
+                ont_id = int(match.group(1))
+                up_traffic = int(match.group(2))
+                down_traffic = int(match.group(3))
+                traffic_list.append({
+                    "ont_id": ont_id,
+                    "up_traffic": up_traffic,
+                    "down_traffic": down_traffic
+                })
+            except (ValueError, IndexError):
+                continue
+    return traffic_list

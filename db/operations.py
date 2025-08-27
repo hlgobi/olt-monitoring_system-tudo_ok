@@ -729,3 +729,51 @@ def save_pon_statistics_packets(olt_ip, fsp, stats_data):
     finally:
         if conn:
             conn.close()
+
+# Em db/operations.py, adicione esta função ao final do arquivo
+
+def save_ont_traffic_bulk(olt_ip, fsp, traffic_list):
+    """Salva uma lista de registros de tráfego de ONT no banco de dados."""
+    if not traffic_list:
+        return 0
+
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        olt_identifier = olt_ip.split('.')[-1]
+        
+        # Prepara os dados para uma inserção em lote
+        args_list = [
+            (
+                olt_ip,
+                olt_identifier,
+                fsp,
+                item['ont_id'],
+                item['up_traffic'],
+                item['down_traffic']
+            ) for item in traffic_list
+        ]
+        
+        query = """
+            INSERT INTO ont_traffic_data (
+                olt_ip, olt_identifier, fsp, ont_id, up_traffic_kbps, down_traffic_kbps
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        
+        # psycopg2.extras.execute_batch é mais eficiente para múltiplas inserções
+        from psycopg2.extras import execute_batch
+        execute_batch(cursor, query, args_list)
+        
+        conn.commit()
+        logging.info(f"{len(args_list)} registros de tráfego de ONT para a PON {fsp} salvos com sucesso.")
+        return len(args_list)
+    except Exception as e:
+        logging.error(f"Erro ao salvar tráfego de ONT em lote para a PON {fsp}: {e}")
+        if conn:
+            conn.rollback()
+        return 0
+    finally:
+        if conn:
+            conn.close()

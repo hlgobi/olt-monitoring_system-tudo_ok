@@ -122,6 +122,7 @@ class OLTDatabaseGUI(QMainWindow):
         db_signals.ont_cycle_completed.connect(self.update_ont_cycle_stats)
         db_signals.pon_port_state_updated.connect(self.update_pon_port_state_display)
         db_signals.pon_stats_packets_updated.connect(self.update_pon_stats_display)
+        db_signals.ont_traffic_data_updated.connect(self.update_ont_traffic_display)
         self.log_message_received.connect(self.log_to_gui)
 
     def connect_to_db(self):
@@ -203,6 +204,12 @@ class OLTDatabaseGUI(QMainWindow):
         self.setup_pon_stats_tab()
         # --- FIM DA MODIFICAÇÃO ---
 
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        self.ont_traffic_tab = QWidget()
+        self.tab_widget.addTab(self.ont_traffic_tab, "Dados ONT por PON")
+        self.setup_ont_traffic_tab()
+        # --- FIM DA MODIFICAÇÃO ---
+
         self.caixa_stats_update_timer = QTimer(self)
         self.caixa_stats_update_timer.setInterval(30000)
         self.caixa_stats_update_timer.timeout.connect(self.load_caixa_stats_data)
@@ -277,6 +284,17 @@ class OLTDatabaseGUI(QMainWindow):
             if hasattr(self, 'pon_stats_timer') and self.pon_stats_timer.isActive():
                 logging.info("Saindo da aba de estatísticas PON. Parando timer.")
                 self.pon_stats_timer.stop()
+        # --- FIM DA MODIFICAÇÃO ---
+
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        if current_tab == self.ont_traffic_tab:
+            logging.info("Aba 'Dados ONT por PON' ativada. Iniciando timer.")
+            self.load_ont_traffic_data()
+            self.ont_traffic_timer.start()
+        else:
+            if hasattr(self, 'ont_traffic_timer') and self.ont_traffic_timer.isActive():
+                logging.info("Saindo da aba de tráfego ONT. Parando timer.")
+                self.ont_traffic_timer.stop()
         # --- FIM DA MODIFICAÇÃO ---
 
     def setup_long_offline_tab(self):
@@ -3460,3 +3478,108 @@ class OLTDatabaseGUI(QMainWindow):
         """Atualiza a exibição de estatísticas de pacotes se a aba estiver ativa."""
         if self.tab_widget.currentWidget() == self.pon_stats_tab:
             self.load_pon_stats_data()
+
+    # Em gui/main_window.py, adicione estas novas funções no final da classe
+
+    def setup_ont_traffic_tab(self):
+        """Configura a interface da aba 'Dados ONT por PON'."""
+        layout = QVBoxLayout(self.ont_traffic_tab)
+
+        # Painel de controle
+        control_panel = QWidget()
+        control_layout = QHBoxLayout(control_panel)
+        self.ont_traffic_olt_filter = QComboBox()
+        if self.ont_traffic_olt_filter not in self.olt_filters_to_update:
+            self.olt_filters_to_update.append(self.ont_traffic_olt_filter)
+
+        self.ont_traffic_fsp_filter = QComboBox()
+        self.ont_traffic_olt_filter.currentTextChanged.connect(self.update_ont_traffic_fsp_filter)
+        self.ont_traffic_fsp_filter.currentTextChanged.connect(self.load_ont_traffic_data)
+
+        control_layout.addWidget(QLabel("Filtrar por OLT:"))
+        control_layout.addWidget(self.ont_traffic_olt_filter)
+        control_layout.addWidget(QLabel("Filtrar por F/S/P:"))
+        control_layout.addWidget(self.ont_traffic_fsp_filter)
+        control_layout.addStretch()
+        layout.addWidget(control_panel)
+
+        self.ont_traffic_table = QTableWidget()
+        self.ont_traffic_table.setColumnCount(5)
+        self.ont_traffic_table.setHorizontalHeaderLabels(["F/S/P", "ONT ID", "Hora da Coleta", "Upload (kbps)", "Download (kbps)"])
+        self.ont_traffic_table.setSortingEnabled(True)
+        layout.addWidget(self.ont_traffic_table)
+
+        self.ont_traffic_timer = QTimer(self)
+        self.ont_traffic_timer.setInterval(60000) # Atualiza a cada minuto
+        self.ont_traffic_timer.timeout.connect(self.load_ont_traffic_data)
+
+    def update_ont_traffic_fsp_filter(self):
+        """Atualiza o filtro de F/S/P com base na OLT selecionada."""
+        self.ont_traffic_fsp_filter.blockSignals(True)
+        self.ont_traffic_fsp_filter.clear()
+        self.ont_traffic_fsp_filter.addItem("Todas as PONs")
+
+        selected_olt = self.ont_traffic_olt_filter.currentText()
+        if selected_olt != "Todas as OLTs":
+            try:
+                olt_identifier = selected_olt.split()[-1]
+                query = "SELECT DISTINCT fsp FROM ont_traffic_data WHERE olt_identifier = %s ORDER BY fsp;"
+                self.cursor.execute(query, (olt_identifier,))
+                fsps = [row[0] for row in self.cursor.fetchall()]
+                self.ont_traffic_fsp_filter.addItems(fsps)
+            except Exception as e:
+                logging.error(f"Erro ao carregar FSPs para o filtro de tráfego ONT: {e}")
+        self.ont_traffic_fsp_filter.blockSignals(False)
+        self.load_ont_traffic_data()
+
+    def load_ont_traffic_data(self):
+        """Carrega os dados de tráfego por ONT e os exibe na tabela."""
+        if not self.isVisible() or self.tab_widget.currentWidget() != self.ont_traffic_tab:
+            return
+
+        logging.info("Carregando dados de tráfego por ONT.")
+        self.ont_traffic_table.setSortingEnabled(False)
+        self.ont_traffic_table.setRowCount(0)
+
+        selected_olt = self.ont_traffic_olt_filter.currentText()
+        selected_fsp = self.ont_traffic_fsp_filter.currentText()
+
+        conditions = []
+        params = []
+
+        if selected_olt != "Todas as OLTs":
+            olt_identifier = selected_olt.split()[-1]
+            conditions.append("olt_identifier = %s")
+            params.append(olt_identifier)
+
+        if selected_fsp != "Todas as PONs":
+            conditions.append("fsp = %s")
+            params.append(selected_fsp)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        query = f"SELECT fsp, ont_id, collection_time, up_traffic_kbps, down_traffic_kbps FROM ont_traffic_data {where_clause} ORDER BY collection_time DESC LIMIT 2000;"
+
+        try:
+            self.cursor.execute(query, tuple(params))
+            results = self.cursor.fetchall()
+
+            self.ont_traffic_table.setRowCount(len(results))
+            for row_idx, record in enumerate(results):
+                fsp, ont_id, timestamp, up, down = record
+                self.ont_traffic_table.setItem(row_idx, 0, QTableWidgetItem(fsp))
+                self.ont_traffic_table.setItem(row_idx, 1, QTableWidgetItem(str(ont_id)))
+                self.ont_traffic_table.setItem(row_idx, 2, QTableWidgetItem(timestamp.strftime('%d/%m %H:%M:%S')))
+                self.ont_traffic_table.setItem(row_idx, 3, QTableWidgetItem(str(up)))
+                self.ont_traffic_table.setItem(row_idx, 4, QTableWidgetItem(str(down)))
+
+            self.ont_traffic_table.resizeColumnsToContents()
+        except Exception as e:
+            logging.error(f"Erro ao carregar dados de tráfego de ONT: {e}", exc_info=True)
+        finally:
+            self.ont_traffic_table.setSortingEnabled(True)
+
+    def update_ont_traffic_display(self):
+        """Atualiza a exibição de tráfego de ONT se a aba estiver ativa."""
+        if self.tab_widget.currentWidget() == self.ont_traffic_tab:
+            self.load_ont_traffic_data()

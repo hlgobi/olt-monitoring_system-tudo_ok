@@ -1,3 +1,23 @@
+Esse é minha aplicação, minha ordem de codes .py:
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\db\connection.py
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\db\operations.py
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\db
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\gui
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\gui\dialogs.py
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\gui\main_window.py
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\gui\signals.py
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\olt
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\olt\communication.py
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\olt\parsing.py
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\olt\processing.py
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\utils
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\utils\helpers.py
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\config.py
+C:\Users\Administrator\Downloads\olt-monitoring_system-bolotas\olt-monitoring_system-bolotas\main.py
+Tenha isso em mente.
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
 Comando para colher os dados de banda da porta - PON
 	interface gpon 0/1
 		display port traffic 0
@@ -17,7 +37,7 @@ Goiania-OLT_98(config-if-gpon-0/1)#display port traffic 0
  Traffic of downstream unicast frames(packets/s)    :  1971
  ----------------------------------------------------------------
 
-{Aqui temos de adentrar no modo de config, depois entrar em todas as ponrtas PON, de todos os slots das placas com os clientes, para possamos então executar esse comando de 10 em 10 min para termos uma quantidade boa de dados para gerarmos gráficos no futuro, todas as linhas com texto do resultado podem ser consideradas e atreladas ao F/S/P correspondente, veja:
+{Aqui temos de adentrar no modo de config, depois entrar em todas as ponrtas PON, de todos os slots das placas com os clientes, para possamos então executar esse comando de 10 em 10 min, utilizando um dos threads já existentes, isso para termos uma quantidade boa de dados, e então armazenarmos no banco de dados, e também exibir em uma nova aba, a Dados PON, todas as linhas com texto do resultado podem ser consideradas e atreladas ao F/S/P correspondente, veja:
 | Linha do Resultado                                     | Nome Amigável              | Explicação Detalhada                                                                                                                       |
 | ------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | **F/S/P (contextual, do comando anterior)**            | Identificador da Porta PON | Mostra qual porta GPON (Frame/Slot/Porta) os dados de tráfego pertencem. É essencial para relacionar métricas com a interface correta.     |
@@ -31,9 +51,18 @@ Goiania-OLT_98(config-if-gpon-0/1)#display port traffic 0
 | **Traffic of downstream unicast frames (packets/s)**   | Unicast Descida (p/s)      | Pacotes unicast enviados **da OLT para clientes específicos**. É o tráfego de download “normal” da rede.                                   |
 }
 
-Comando para colher mais dados da porta - PON
-	interface gpon 0/1
-		display port state 5
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Aqui temos de adentrar no modo de config se não estiver, depois entrar em todas as ponrtas PON como informado acima, de todos os slots das placas com os clientes, igual o comando "interface gpon 0/1" entrar de placa em placa e "display port traffic 2", conforme o comando anterior que implementamos, para podemos enviar o comando também de 10 em 10 min, das linhas dos resultados temos de considerar para o parsing e colocar na mesma aba Dados PON, salvar no banco: 
+
+Comando para colher mais dados da porta - PON:
+	interface gpon 0/0 (entra nas placas PON disponíveis dos Slots que contem placas de PON)
+		display port state 0 (exibe o resultado para a PON informada)
+
+Legenga:  
+0 = F
+1 = S
+5 = P
+        
 Resultado:
   ----------------------------------------------------------------------------
   Port Information
@@ -142,25 +171,29 @@ Resultado:
   threshold(C)                 [-13,80]
   ----------------------------------------------------------------------------
 
-{Aqui temos de adentrar no modo de config se não estiver, depois entrar em todas as ponrtas PON, de todos os slots das placas com os clientes, para podemos enviar o comando de 30 em 30 min, das linhas dos resultados temos de considerar: 
+O que eu considerei para fazer o parsing:
+
 | **Campo bruto**                | **Nome amigável**                | **Explicação detalhada**                                                                                                                         |
 | ------------------------------ | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `F/S/P 0/1/5`                  | Identificação da porta PON       | Mostra em qual **Frame/Slot/Porta** está a interface. Essencial para identificar exatamente qual porta está sendo monitorada.                    |
-| `Port state Online`            | Estado da porta                  | Indica se a porta está operacional (**Online**) ou não.                                                                                          |
-| `Last down cause LOS`          | Última causa de queda            | Mostra o motivo da última queda; **LOS (Loss of Signal)** é comum em falhas de fibra/conexão óptica.                                             |
-| `Last up time …`               | Última vez que subiu             | Registra quando a porta voltou ao estado Online. Útil para correlacionar falhas e manutenções.                                                   |
-| `Last down time …`             | Última vez que caiu              | Momento da última queda, para comparação com alarmes/eventos.                                                                                    |
-| `Signal detect Normal`         | Detecção de sinal óptico         | Se está recebendo luz do lado remoto. **Normal** significa que há sinal óptico.                                                                  |
+| `F/S/P`                  | Identificação da porta PON       | Mostra em qual **Frame/Slot/Porta** está a interface. Essencial para identificar exatamente qual porta está sendo monitorada.                    |
+| `Port state`            | Estado da porta                  | Indica se a porta está operacional (**Online**) ou não.                                                                                          |
+| `Last down cause`          | Última causa de queda            | Mostra o motivo da última queda; **LOS (Loss of Signal)** é comum em falhas de fibra/conexão óptica.                                             |
+| `Last up time`               | Última vez que subiu             | Registra quando a porta voltou ao estado Online. Útil para correlacionar falhas e manutenções.                                                   |
+| `Last down time`             | Última vez que caiu              | Momento da última queda, para comparação com alarmes/eventos.                                                                                    |
+| `Signal detect`         | Detecção de sinal óptico         | Se está recebendo luz do lado remoto. **Normal** significa que há sinal óptico.                                                                  |
 | `Available bandwidth(Kbps)`    | Banda disponível                 | Mostra a capacidade de banda ainda livre na porta. Importante para planejamento e expansão.                                                      |
-| `Illegal rogue ONT Inexistent` | ONT rogue detectada              | Indica se há ONTs não autorizadas tentando usar a PON. **Inexistent** = não há tentativa de intrusão.                                            |
-| `Optical Module status Online` | Status do módulo óptico (SFP)    | Mostra se o transceptor óptico está ativo.                                                                                                       |
-| `Laser state Normal`           | Estado do laser TX               | Mostra se o laser do transmissor está em funcionamento normal.                                                                                   |
-| `TX fault Normal`              | Falha no transmissor             | Indica se o transmissor óptico apresentou erro. **Normal** = sem falhas.                                                                         |
-| `Temperature(C) 59`            | Temperatura do módulo óptico     | Temperatura atual do transceptor. Importante monitorar porque valores muito altos podem causar falhas.                                           |
-| `TX Bias current(mA) 45`       | Corrente de polarização do laser | Corrente elétrica usada para manter o laser funcionando. Fora dos limites indica desgaste ou falha iminente.                                     |
-| `Supply Voltage(V) 3.21`       | Tensão de alimentação do módulo  | Tensão fornecida ao transceptor. Desvios podem indicar falhas elétricas.                                                                         |
-| `TX power(dBm) 7.10`           | Potência óptica de transmissão   | Nível de potência que o OLT está transmitindo para a rede. Valores fora da faixa podem indicar problemas no módulo ou risco para ONTs distantes. |
-}
+| `Illegal rogue ONT` | ONT rogue detectada              | Indica se há ONTs não autorizadas tentando usar a PON. **Inexistent** = não há tentativa de intrusão.                                            |
+| `Optical Module status` | Status do módulo óptico (SFP)    | Mostra se o transceptor óptico está ativo.                                                                                                       |
+| `Laser state`           | Estado do laser TX               | Mostra se o laser do transmissor está em funcionamento normal.                                                                                   |
+| `TX fault`              | Falha no transmissor             | Indica se o transmissor óptico apresentou erro. **Normal** = sem falhas.                                                                         |
+| `Temperature(C)`            | Temperatura do módulo óptico     | Temperatura atual do transceptor. Importante monitorar porque valores muito altos podem causar falhas.                                           |
+| `TX Bias current(mA)`       | Corrente de polarização do laser | Corrente elétrica usada para manter o laser funcionando. Fora dos limites indica desgaste ou falha iminente.                                     |
+| `Supply Voltage(V)`       | Tensão de alimentação do módulo  | Tensão fornecida ao transceptor. Desvios podem indicar falhas elétricas.                                                                         |
+| `TX power(dBm)`           | Potência óptica de transmissão   | Nível de potência que o OLT está transmitindo para a rede. Valores fora da faixa podem indicar problemas no módulo ou risco para ONTs distantes. |
+
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
 
 Comando para ter mais detalhes da porta - PON
 	interface gpon 0/1
@@ -186,7 +219,7 @@ Resultado:
   ONT online power threshold(dBm)            -
   -----------------------------------------------------------
 
-{Aqui temos de adentrar no modo de config se não estiver, depois entrar em todas as ponrtas PON, de todos os slots das placas com os clientes, isso de 10 em 10 minutos temos de executar, e considerar as seguintes linhas do resultado:
+{Aqui, da mesma maneira dos demais comandos, temos de adentrar no modo de config se não estiver, depois entrar em todas as portas PON, de todos os slots das placas com os clientes, com mesmo tempo dos demais, e considerar as seguintes linhas do resultado do parsing:
 | **Campo bruto**                           | **Nome amigável**              | **Explicação detalhada**                                                                                                                                                                                                      |
 | ----------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `F/S/P 0/1/5`                             | Identificação da porta PON     | Indica o local físico da porta na OLT: Frame (chassi), Slot (placa) e Porta, neste caso “0/1/5”. Permite localizar exatamente onde está o canal PON. ([zhangjorna.blogspot.com][1])                                           |
@@ -234,7 +267,7 @@ Comando para ter mais e mais detalhes da porta - PON
   Sent buffer overflow frames         :               931296
   -----------------------------------------------------------------------------
 
-{Aqui temos de adentrar no modo de config se não estiver, depois entrar em todas as ponrtas PON, de todos os slots das placas com os clientes, isso de 10 em 10 minutos temos de executar, as linhas que temos de considerar:
+{Aqui, tambem da mesma forma que os demais comandos anteriores, temos de adentrar no modo de config se não estiver, depois entrar em todas as ponrtas PON, igual antes, de todos os slots das placas com os clientes, mesmo tempo também, as linhas que temos de considerar para parsing:
 | **Campo bruto**                             | **Nome amigável**                          | **Explicação detalhada**                                                                                                        |
 | ------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | Received frames                             | Quadros recebidos (total)                  | Total de pacotes (quadros) recebidos pela interface PON.                                                                        |
@@ -266,10 +299,12 @@ Comando para ter mais e mais detalhes da porta - PON
 | Sent 512\~1023-byte frames                  | Quadros de 512-1023 bytes enviados         | Pacotes maiores destinados a transferência de dados consistente.                                                                |
 | Sent 1024\~1518-byte frames                 | Quadros de 1024-1518 bytes enviados        | Pacotes grandes padrão Ethernet transmitidos.                                                                                   |
 | Sent over 1518-byte frames                  | Quadros maiores que 1518 bytes enviados    | Pacotes jumbo ou fragmentados transmitidos.                                                                                     |
-| Sent buffer overflow frames                 | Quadros descartados por overflow de buffer | Pacotes removidos por falta de espaço temporário (buffer).                                                                      |
-| — (no exemplo) – FEC/MPCP/OAM fields (EPON) | Controle EPON/GPON (avançado)              | Estatísticas específicas como FEC, MPCP ou OAM em comandos EPON.                                                                |
-| Up traffic (kbps) / Down traffic (kbps)     | Tráfego em tempo real                      | Taxas de tráfego em tempo real (kbps) na direção upstream e downstream na porta PON.                                            |
+| Sent buffer overflow frames                 | Quadros descartados por overflow de buffer | Pacotes removidos por falta de espaço temporário (buffer).                                                                      |                                          |
 }
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+ONT
 
 Comando para colher os dados de banda da - ONT
 	interface gpon 0/1
@@ -380,288 +415,9 @@ Resultado:
   Statistic duration    : 1 day(s), 4 hour(s), 31 minute(s), 7 second(s)
   -----------------------------------------------------------------------
 
-Comando para verificarmos os alarmes de 24 da OLT:
-	display alarm statistics all
-Resultado:
-  Alarm statistical period : 24 hours
-  The start time of this period: 20/08/2025 05:44:27-03:00
-  --------------------------------------------------------------
-  AlarmID          Current Statistics        Previous Statistics
-  --------------------------------------------------------------
-  0x2e112002              51                        125
-  0x2e112006               0                          4
-  0x2e112007              11                         27
-  0x2e11a00b              71                        129
-  0x2e122002              47                        131
-  0x2e122006               0                          4
-  0x2e122007              11                         27
-  0x2e12a00b              81                        131
-  --------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-{Aqui executar esse comando de hora em hora em todas para termos um relatorio dos alarmes que apareceram e a frequencia deles, veja:
-| **Campo bruto (colunas)**     | **Nome amigável**               | **Explicação detalhada**                                               |
-| ------------------- | ------------------------------- | -------------------------------------------------------------------------------- |
-| AlarmID             | Identificador do alarme         | Código hexadecimal que representa o tipo de alarme específico.                   |
-| Current Statistics  | Ocorrências no período atual    | Quantidade de vezes que o alarme foi disparado nas últimas 24h.                  |
-| Previous Statistics | Ocorrências no período anterior | Quantidade de vezes que o mesmo alarme foi disparado no período anterior de 24h. |
-}
-
-Comando para ver o que é cada alarme:
-	display alarm configuration 0x2e112002
-Resultado:
-  ALARMID: 0x2e112002, NAME: The loss of GEM channel delineation (LCDGi) occurs
-  CLASS: FAULT, TYPE: SERVICE QUALITY
-  LEVEL: WARNING, DEFAULT LEVEL: WARNING
-  SERVICE EFFECT : SA
-  CLI_OUTPUT FLAG: NO
-  CONVERSION FLAG: This alarm hasn't been converted
-  DESCRIPTION: Several consecutive GEM frames can not be delimited because of
-HEC errors,the ONT goes offline
-
-{Aqui temos de criar uma nova aba na aplicação, com um campo de escrita, para quando colocarmos o code do alarme, nos retorne o resultado, e ele, também ele de forma amigável:
-| **Campo bruto**  | **Nome amigável**  | **Explicação detalhada**                                                                |
-| ---------------- | ------------------ | --------------------------------------------------------------------------------------- |
-| ALARMID          | Código do alarme   | Identificador único em hexadecimal para o alarme.                                       |
-| NAME             | Nome do alarme     | Descrição técnica do problema detectado (ex.: perda de delineamento GEM).               |
-| CLASS            | Classe             | Categoria do alarme (FAULT = falha, EVENT = evento).                                    |
-| TYPE             | Tipo               | Área afetada (ex.: SERVICE QUALITY, EQUIPMENT, ENVIRONMENT).                            |
-| LEVEL            | Severidade atual   | Nível do alarme (Critical, Major, Minor, Warning).                                      |
-| DEFAULT LEVEL    | Severidade padrão  | Severidade recomendada pelo fabricante.                                                 |
-| SERVICE EFFECT   | Impacto no serviço | Indica efeito no serviço — SA (Service Affecting) ou NSA (Not Service Affecting).       |
-| CLI\_OUTPUT FLAG | Exibição no CLI    | Se deve ser mostrado automaticamente no CLI.                                            |
-| CONVERSION FLAG  | Conversão          | Indica se o alarme foi convertido para outro formato/protocolo de gerenciamento.        |
-| DESCRIPTION      | Descrição          | Explicação detalhada: no caso, perda de vários quadros GEM por erros HEC → ONT offline. |
-}
-
-Comando para vevirificarmos os alarmes ativos na OLT:
-	display alarm active all detail
-Resultado:
-  ALARM 3247633 FAULT WARNING 0x2e112002 SERVICE QUALITY 20/08/2025
-13:18:22-03:00
-  ALARM NAME  : The loss of GEM channel delineation (LCDGi) occurs
-  SRVEFF      : SA
-  PARAMETERS  : FrameID: 0, SlotID: 3, PortID: 8, ONT ID: 16
-  DESCRIPTION : Several consecutive GEM frames can not be delimited because
-                of HEC errors,the ONT goes offline
-  CAUSE       : (1) The quality of the optical path is poor
-                (2) The ONT is faulty
-  ADVICE      : (1) Check the fiber connection, ensure that the optical fiber
-                is connected correctly and securely
-                (2) Clean the fiber connector
-                (3) Replace the fiber if the optical fiber is aged, bent, or
-                damaged
-                (4) Reset or replace the ONT
-  --- END
-
-  ALARM 3247632 FAULT WARNING 0x2e112002 SERVICE QUALITY 20/08/2025
-13:17:15-03:00
-  ALARM NAME  : The loss of GEM channel delineation (LCDGi) occurs
-  SRVEFF      : SA
-  PARAMETERS  : FrameID: 0, SlotID: 1, PortID: 8, ONT ID: 2
----- More ( Press 'Q' to break ) ----
-  DESCRIPTION : Several consecutive GEM frames can not be delimited because
-                of HEC errors,the ONT goes offline
-  CAUSE       : (1) The quality of the optical path is poor
-                (2) The ONT is faulty
-  ADVICE      : (1) Check the fiber connection, ensure that the optical fiber
-                is connected correctly and securely
-                (2) Clean the fiber connector
-                (3) Replace the fiber if the optical fiber is aged, bent, or
-                damaged
-                (4) Reset or replace the ONT
-  --- END
-
-  ALARM 3247630 FAULT WARNING 0x2e112002 SERVICE QUALITY 20/08/2025
-13:06:12-03:00
-  ALARM NAME  : The loss of GEM channel delineation (LCDGi) occurs
-  SRVEFF      : SA
-  PARAMETERS  : FrameID: 0, SlotID: 2, PortID: 0, ONT ID: 12
-  DESCRIPTION : Several consecutive GEM frames can not be delimited because
-                of HEC errors,the ONT goes offline
-  CAUSE       : (1) The quality of the optical path is poor
-                (2) The ONT is faulty
-  ADVICE      : (1) Check the fiber connection, ensure that the optical fiber
-                is connected correctly and securely
-                (2) Clean the fiber connector
----- More ( Press 'Q' to break ) ----
-                (3) Replace the fiber if the optical fiber is aged, bent, or
-                damaged
-                (4) Reset or replace the ONT
-  --- END
-
-  ALARM 3247629 FAULT WARNING 0x2e112002 SERVICE QUALITY 20/08/2025
-13:05:21-03:00
-  ALARM NAME  : The loss of GEM channel delineation (LCDGi) occurs
-  SRVEFF      : SA
-  PARAMETERS  : FrameID: 0, SlotID: 1, PortID: 6, ONT ID: 81
-  DESCRIPTION : Several consecutive GEM frames can not be delimited because
-                of HEC errors,the ONT goes offline
-  CAUSE       : (1) The quality of the optical path is poor
-                (2) The ONT is faulty
-  ADVICE      : (1) Check the fiber connection, ensure that the optical fiber
-                is connected correctly and securely
-                (2) Clean the fiber connector
-                (3) Replace the fiber if the optical fiber is aged, bent, or
-                damaged
-                (4) Reset or replace the ONT
-  --- END
-
-  ALARM 3247621 FAULT MINOR 0x2e11a00b SERVICE QUALITY 20/08/2025 12:42:41-03:00
-  ALARM NAME  : The dying-gasp of GPON ONTi (DGi) is generated
----- More ( Press 'Q' to break ) ----
-  SRVEFF      : SA
-  PARAMETERS  : FrameID: 0, SlotID: 3, PortID: 8, ONT ID: 19, Equipment ID:
-                HG8546M
-  DESCRIPTION : The ONT is power off
-  CAUSE       : The power supply of the ONT is abnormal
-  ADVICE      : Check the power supply of the ONT and ensure that the power
-                supply works in the normal state
-  --- END
-
-  ALARM 3247620 FAULT WARNING 0x2e112002 SERVICE QUALITY 20/08/2025
-12:31:25-03:00
-  ALARM NAME  : The loss of GEM channel delineation (LCDGi) occurs
-  SRVEFF      : SA
-  PARAMETERS  : FrameID: 0, SlotID: 1, PortID: 11, ONT ID: 11
-  DESCRIPTION : Several consecutive GEM frames can not be delimited because
-                of HEC errors,the ONT goes offline
-  CAUSE       : (1) The quality of the optical path is poor
-                (2) The ONT is faulty
-  ADVICE      : (1) Check the fiber connection, ensure that the optical fiber
-                is connected correctly and securely
-                (2) Clean the fiber connector
-                (3) Replace the fiber if the optical fiber is aged, bent, or
-                damaged
-                (4) Reset or replace the ONT
----- More ( Press 'Q' to break ) ----
-
-{E assim vai até o fim de todos os ativos, e temos de ter um botão na aba que criamos no comando anterior, para que nos dê também a forma amigável também:
-| **Campo bruto**  | **Nome amigável**  | **Explicação detalhada**                                                                |
-| ---------------- | ------------------ | --------------------------------------------------------------------------------------- |
-| ALARMID          | Código do alarme   | Identificador único em hexadecimal para o alarme.                                       |
-| NAME             | Nome do alarme     | Descrição técnica do problema detectado (ex.: perda de delineamento GEM).               |
-| CLASS            | Classe             | Categoria do alarme (FAULT = falha, EVENT = evento).                                    |
-| TYPE             | Tipo               | Área afetada (ex.: SERVICE QUALITY, EQUIPMENT, ENVIRONMENT).                            |
-| LEVEL            | Severidade atual   | Nível do alarme (Critical, Major, Minor, Warning).                                      |
-| DEFAULT LEVEL    | Severidade padrão  | Severidade recomendada pelo fabricante.                                                 |
-| SERVICE EFFECT   | Impacto no serviço | Indica efeito no serviço — SA (Service Affecting) ou NSA (Not Service Affecting).       |
-| CLI\_OUTPUT FLAG | Exibição no CLI    | Se deve ser mostrado automaticamente no CLI.                                            |
-| CONVERSION FLAG  | Conversão          | Indica se o alarme foi convertido para outro formato/protocolo de gerenciamento.        |
-| DESCRIPTION      | Descrição          | Explicação detalhada: no caso, perda de vários quadros GEM por erros HEC → ONT offline. |
-}
-
-Comando para vevirificarmos os alarmes ativos na OLT de forma simples e resumida:
-	display alarm active all detail
-Resultado:
-  ------------------------------------------------------------------------
-  AlarmSN  Date&Time                      Alarm Name/Para
-  ------------------------------------------------------------------------
-  3247646  20/08/2025 13:57:29-03:00      The loss of GEM channel delineation
-                                          (LCDGi) occurs
-                                          FrameID: 0, SlotID: 1, PortID: 8,
-                                          ONT ID: 79
-  3247633  20/08/2025 13:18:22-03:00      The loss of GEM channel delineation
-                                          (LCDGi) occurs
-                                          FrameID: 0, SlotID: 3, PortID: 8,
-                                          ONT ID: 16
-  3247632  20/08/2025 13:17:15-03:00      The loss of GEM channel delineation
-                                          (LCDGi) occurs
-                                          FrameID: 0, SlotID: 1, PortID: 8,
-                                          ONT ID: 2
-  3247630  20/08/2025 13:06:12-03:00      The loss of GEM channel delineation
-                                          (LCDGi) occurs
-                                          FrameID: 0, SlotID: 2, PortID: 0,
-                                          ONT ID: 12
-  3247629  20/08/2025 13:05:21-03:00      The loss of GEM channel delineation
-                                          (LCDGi) occurs
-                                          FrameID: 0, SlotID: 1, PortID: 6,
-                                          ONT ID: 81
----- More ( Press 'Q' to break ) ----
-
-{E assim vai até o fim de todos os ativos, e aqui também temos de ter um botão para tal:
-| **Campo bruto** | **Nome amigável**           | **Explicação detalhada**                                                  |
-| --------------- | --------------------------- | ------------------------------------------------------------------------- |
-| AlarmSN         | Número sequencial do alarme | Identificador único do evento ativo.                                      |
-| Date\&Time      | Data e hora do disparo      | Momento exato em que o alarme foi registrado.                             |
-| Alarm Name/Para | Nome do alarme              | Descrição técnica do problema detectado (ex.: perda de delineamento GEM). |
-| FrameID         | ID do frame                 | Identifica o frame (chassi lógico) onde a placa está localizada.          |
-| SlotID          | ID do slot                  | Indica a posição da placa no chassi da OLT.                               |
-| PortID          | ID da porta                 | Porta PON dentro do slot onde o evento ocorreu.                           |
-| ONT ID          | ID da ONT                   | Número lógico da ONT afetada dentro daquela porta.                        |
-}
-
-Comando par vermos os picos de banda nas portas PON
-	interface gpon-0/1
-		display port peak-rate all
-Resultado:
-  ---------------------------------------------------------------------------
-  Port Up  Up        BW    Time        Down Down      BW     Time
-  ID       Peak      Usage                  Peak      Usage
-           (kbps)    (%)                    (kbps)    (%)
-  ---------------------------------------------------------------------------
-  0    1G  2669      0.21  20/08/2025  2G   46810     1.88   20/08/2025
-                           14:04:17-03                       14:04:17-03
-  ---------------------------------------------------------------------------
-  1    1G  2496      0.20  20/08/2025  2G   53610     2.15   20/08/2025
-                           14:04:17-03                       14:04:17-03
-  ---------------------------------------------------------------------------
-  2    1G  8533      0.68  20/08/2025  2G   98168     3.94   20/08/2025
-                           14:04:36-03                       14:04:36-03
-  ---------------------------------------------------------------------------
-  3    1G  425       0.03  20/08/2025  2G   6012      0.24   20/08/2025
-                           14:04:30-03                       14:04:30-03
-  ---------------------------------------------------------------------------
-  4    1G  18804     1.51  20/08/2025  2G   215977    8.67   20/08/2025
-                           14:04:14-03                       14:04:14-03
-  ---------------------------------------------------------------------------
-  5    1G  12058     0.96  20/08/2025  2G   6325      0.25   20/08/2025
-                           14:04:43-03                       14:04:43-03
-  ---------------------------------------------------------------------------
----- More ( Press 'Q' to break ) ---- {aqui apertamos a tecla espaço no teclado, até parar de aparecer essa mensagem no terminal}
-  ---------------------------------------------------------------------------
-  6    1G  48190     3.87  20/08/2025  2G   225707    9.07   20/08/2025
-                           14:04:30-03                       14:04:30-03
-  ---------------------------------------------------------------------------
-  7    1G  8846      0.71  20/08/2025  2G   123139    4.94   20/08/2025
-                           14:04:31-03                       14:04:31-03
-  ---------------------------------------------------------------------------
-  8    1G  7547      0.60  20/08/2025  2G   203544    8.17   20/08/2025
-                           14:04:42-03                       14:04:42-03
-  ---------------------------------------------------------------------------
-  9    1G  13146     1.05  20/08/2025  2G   186697    7.50   20/08/2025
-                           14:04:13-03                       14:04:13-03
-  ---------------------------------------------------------------------------
-  10   1G  11789     0.94  20/08/2025  2G   177238    7.12   20/08/2025
-                           14:04:29-03                       14:04:29-03
-  ---------------------------------------------------------------------------
-  11   1G  15383     1.23  20/08/2025  2G   102840    4.13   20/08/2025
-                           14:04:41-03                       14:04:41-03
-  ---------------------------------------------------------------------------
-  12   1G  18981     1.52  20/08/2025  2G   200441    8.05   20/08/2025
-                           14:04:21-03                       14:04:21-03
-  ---------------------------------------------------------------------------
-  13   1G  3923      0.31  20/08/2025  2G   160521    6.45   20/08/2025
-                           14:04:38-03                       14:04:38-03
-  ---------------------------------------------------------------------------
----- More ( Press 'Q' to break ) ---- {aqui apertamos a tecla espaço no teclado, até parar de aparecer essa mensagem no terminal}
-  14   1G  113578    9.12  20/08/2025  2G   336503    13.52  20/08/2025
-                           14:03:59-03                       14:03:59-03
-  ---------------------------------------------------------------------------
-  15   1G  2309      0.18  20/08/2025  2G   83708     3.36   20/08/2025
-                           14:04:04-03                       14:04:04-03
-  ---------------------------------------------------------------------------
-
-{Aqui também temos de ter um botão para tal, e não esquecer de entrar no modo de config para essa:
-| **Campo bruto**  | **Nome amigável**         | **Explicação detalhada**                                                    |
-| ---------------- | ------------------------- | --------------------------------------------------------------------------- |
-| Port ID          | ID da porta PON           | Identifica qual porta PON do slot está sendo monitorada.                    |
-| Up Peak (kbps)   | Pico de upstream (kbps)   | Maior taxa de upload registrada na porta, em kbps.                          |
-| Up Usage (%)     | Uso percentual upstream   | Porcentagem do uso em relação à capacidade máxima da porta (geralmente 1G). |
-| Up Time          | Data/hora pico upstream   | Momento em que foi registrado o pico de upstream.                           |
-| Down Peak (kbps) | Pico de downstream (kbps) | Maior taxa de download registrada na porta, em kbps.                        |
-| Down Usage (%)   | Uso percentual downstream | Porcentagem do uso em relação à capacidade máxima da porta (geralmente 2G). |
-| Down Time        | Data/hora pico downstream | Momento em que foi registrado o pico de downstream.                         |
-}
+UPLINK
 
 Comando para vermos os dados da porta no slot de UPLINK da OLT
 	interface giu 0/8
@@ -1038,6 +794,295 @@ Resultado:
 | Multicast transmitido         | **0 p/s**                          | –                                   |
 | Broadcast transmitido         | **0 p/s**                          | –                                   |
 | Ocupação da banda (TX)        | **3%**                             | Do total suportado pela porta (10G) |
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+ALARME
+
+Comando para verificarmos os alarmes de 24 da OLT:
+	display alarm statistics all
+Resultado:
+  Alarm statistical period : 24 hours
+  The start time of this period: 20/08/2025 05:44:27-03:00
+  --------------------------------------------------------------
+  AlarmID          Current Statistics        Previous Statistics
+  --------------------------------------------------------------
+  0x2e112002              51                        125
+  0x2e112006               0                          4
+  0x2e112007              11                         27
+  0x2e11a00b              71                        129
+  0x2e122002              47                        131
+  0x2e122006               0                          4
+  0x2e122007              11                         27
+  0x2e12a00b              81                        131
+  --------------------------------------------------------------
+
+{Aqui executar esse comando de hora em hora em todas para termos um relatorio dos alarmes que apareceram e a frequencia deles, veja:
+| **Campo bruto (colunas)**     | **Nome amigável**               | **Explicação detalhada**                                               |
+| ------------------- | ------------------------------- | -------------------------------------------------------------------------------- |
+| AlarmID             | Identificador do alarme         | Código hexadecimal que representa o tipo de alarme específico.                   |
+| Current Statistics  | Ocorrências no período atual    | Quantidade de vezes que o alarme foi disparado nas últimas 24h.                  |
+| Previous Statistics | Ocorrências no período anterior | Quantidade de vezes que o mesmo alarme foi disparado no período anterior de 24h. |
+}
+
+Comando para ver o que é cada alarme:
+	display alarm configuration 0x2e112002
+Resultado:
+  ALARMID: 0x2e112002, NAME: The loss of GEM channel delineation (LCDGi) occurs
+  CLASS: FAULT, TYPE: SERVICE QUALITY
+  LEVEL: WARNING, DEFAULT LEVEL: WARNING
+  SERVICE EFFECT : SA
+  CLI_OUTPUT FLAG: NO
+  CONVERSION FLAG: This alarm hasn't been converted
+  DESCRIPTION: Several consecutive GEM frames can not be delimited because of
+HEC errors,the ONT goes offline
+
+{Aqui temos de criar uma nova aba na aplicação, com um campo de escrita, para quando colocarmos o code do alarme, nos retorne o resultado, e ele, também ele de forma amigável:
+| **Campo bruto**  | **Nome amigável**  | **Explicação detalhada**                                                                |
+| ---------------- | ------------------ | --------------------------------------------------------------------------------------- |
+| ALARMID          | Código do alarme   | Identificador único em hexadecimal para o alarme.                                       |
+| NAME             | Nome do alarme     | Descrição técnica do problema detectado (ex.: perda de delineamento GEM).               |
+| CLASS            | Classe             | Categoria do alarme (FAULT = falha, EVENT = evento).                                    |
+| TYPE             | Tipo               | Área afetada (ex.: SERVICE QUALITY, EQUIPMENT, ENVIRONMENT).                            |
+| LEVEL            | Severidade atual   | Nível do alarme (Critical, Major, Minor, Warning).                                      |
+| DEFAULT LEVEL    | Severidade padrão  | Severidade recomendada pelo fabricante.                                                 |
+| SERVICE EFFECT   | Impacto no serviço | Indica efeito no serviço — SA (Service Affecting) ou NSA (Not Service Affecting).       |
+| CLI\_OUTPUT FLAG | Exibição no CLI    | Se deve ser mostrado automaticamente no CLI.                                            |
+| CONVERSION FLAG  | Conversão          | Indica se o alarme foi convertido para outro formato/protocolo de gerenciamento.        |
+| DESCRIPTION      | Descrição          | Explicação detalhada: no caso, perda de vários quadros GEM por erros HEC → ONT offline. |
+}
+
+Comando para vevirificarmos os alarmes ativos na OLT:
+	display alarm active all detail
+Resultado:
+  ALARM 3247633 FAULT WARNING 0x2e112002 SERVICE QUALITY 20/08/2025
+13:18:22-03:00
+  ALARM NAME  : The loss of GEM channel delineation (LCDGi) occurs
+  SRVEFF      : SA
+  PARAMETERS  : FrameID: 0, SlotID: 3, PortID: 8, ONT ID: 16
+  DESCRIPTION : Several consecutive GEM frames can not be delimited because
+                of HEC errors,the ONT goes offline
+  CAUSE       : (1) The quality of the optical path is poor
+                (2) The ONT is faulty
+  ADVICE      : (1) Check the fiber connection, ensure that the optical fiber
+                is connected correctly and securely
+                (2) Clean the fiber connector
+                (3) Replace the fiber if the optical fiber is aged, bent, or
+                damaged
+                (4) Reset or replace the ONT
+  --- END
+
+  ALARM 3247632 FAULT WARNING 0x2e112002 SERVICE QUALITY 20/08/2025
+13:17:15-03:00
+  ALARM NAME  : The loss of GEM channel delineation (LCDGi) occurs
+  SRVEFF      : SA
+  PARAMETERS  : FrameID: 0, SlotID: 1, PortID: 8, ONT ID: 2
+---- More ( Press 'Q' to break ) ----
+  DESCRIPTION : Several consecutive GEM frames can not be delimited because
+                of HEC errors,the ONT goes offline
+  CAUSE       : (1) The quality of the optical path is poor
+                (2) The ONT is faulty
+  ADVICE      : (1) Check the fiber connection, ensure that the optical fiber
+                is connected correctly and securely
+                (2) Clean the fiber connector
+                (3) Replace the fiber if the optical fiber is aged, bent, or
+                damaged
+                (4) Reset or replace the ONT
+  --- END
+
+  ALARM 3247630 FAULT WARNING 0x2e112002 SERVICE QUALITY 20/08/2025
+13:06:12-03:00
+  ALARM NAME  : The loss of GEM channel delineation (LCDGi) occurs
+  SRVEFF      : SA
+  PARAMETERS  : FrameID: 0, SlotID: 2, PortID: 0, ONT ID: 12
+  DESCRIPTION : Several consecutive GEM frames can not be delimited because
+                of HEC errors,the ONT goes offline
+  CAUSE       : (1) The quality of the optical path is poor
+                (2) The ONT is faulty
+  ADVICE      : (1) Check the fiber connection, ensure that the optical fiber
+                is connected correctly and securely
+                (2) Clean the fiber connector
+---- More ( Press 'Q' to break ) ----
+                (3) Replace the fiber if the optical fiber is aged, bent, or
+                damaged
+                (4) Reset or replace the ONT
+  --- END
+
+  ALARM 3247629 FAULT WARNING 0x2e112002 SERVICE QUALITY 20/08/2025
+13:05:21-03:00
+  ALARM NAME  : The loss of GEM channel delineation (LCDGi) occurs
+  SRVEFF      : SA
+  PARAMETERS  : FrameID: 0, SlotID: 1, PortID: 6, ONT ID: 81
+  DESCRIPTION : Several consecutive GEM frames can not be delimited because
+                of HEC errors,the ONT goes offline
+  CAUSE       : (1) The quality of the optical path is poor
+                (2) The ONT is faulty
+  ADVICE      : (1) Check the fiber connection, ensure that the optical fiber
+                is connected correctly and securely
+                (2) Clean the fiber connector
+                (3) Replace the fiber if the optical fiber is aged, bent, or
+                damaged
+                (4) Reset or replace the ONT
+  --- END
+
+  ALARM 3247621 FAULT MINOR 0x2e11a00b SERVICE QUALITY 20/08/2025 12:42:41-03:00
+  ALARM NAME  : The dying-gasp of GPON ONTi (DGi) is generated
+---- More ( Press 'Q' to break ) ----
+  SRVEFF      : SA
+  PARAMETERS  : FrameID: 0, SlotID: 3, PortID: 8, ONT ID: 19, Equipment ID:
+                HG8546M
+  DESCRIPTION : The ONT is power off
+  CAUSE       : The power supply of the ONT is abnormal
+  ADVICE      : Check the power supply of the ONT and ensure that the power
+                supply works in the normal state
+  --- END
+
+  ALARM 3247620 FAULT WARNING 0x2e112002 SERVICE QUALITY 20/08/2025
+12:31:25-03:00
+  ALARM NAME  : The loss of GEM channel delineation (LCDGi) occurs
+  SRVEFF      : SA
+  PARAMETERS  : FrameID: 0, SlotID: 1, PortID: 11, ONT ID: 11
+  DESCRIPTION : Several consecutive GEM frames can not be delimited because
+                of HEC errors,the ONT goes offline
+  CAUSE       : (1) The quality of the optical path is poor
+                (2) The ONT is faulty
+  ADVICE      : (1) Check the fiber connection, ensure that the optical fiber
+                is connected correctly and securely
+                (2) Clean the fiber connector
+                (3) Replace the fiber if the optical fiber is aged, bent, or
+                damaged
+                (4) Reset or replace the ONT
+---- More ( Press 'Q' to break ) ----
+
+{E assim vai até o fim de todos os ativos, e temos de ter um botão na aba que criamos no comando anterior, para que nos dê também a forma amigável também:
+| **Campo bruto**  | **Nome amigável**  | **Explicação detalhada**                                                                |
+| ---------------- | ------------------ | --------------------------------------------------------------------------------------- |
+| ALARMID          | Código do alarme   | Identificador único em hexadecimal para o alarme.                                       |
+| NAME             | Nome do alarme     | Descrição técnica do problema detectado (ex.: perda de delineamento GEM).               |
+| CLASS            | Classe             | Categoria do alarme (FAULT = falha, EVENT = evento).                                    |
+| TYPE             | Tipo               | Área afetada (ex.: SERVICE QUALITY, EQUIPMENT, ENVIRONMENT).                            |
+| LEVEL            | Severidade atual   | Nível do alarme (Critical, Major, Minor, Warning).                                      |
+| DEFAULT LEVEL    | Severidade padrão  | Severidade recomendada pelo fabricante.                                                 |
+| SERVICE EFFECT   | Impacto no serviço | Indica efeito no serviço — SA (Service Affecting) ou NSA (Not Service Affecting).       |
+| CLI\_OUTPUT FLAG | Exibição no CLI    | Se deve ser mostrado automaticamente no CLI.                                            |
+| CONVERSION FLAG  | Conversão          | Indica se o alarme foi convertido para outro formato/protocolo de gerenciamento.        |
+| DESCRIPTION      | Descrição          | Explicação detalhada: no caso, perda de vários quadros GEM por erros HEC → ONT offline. |
+}
+
+Comando para vevirificarmos os alarmes ativos na OLT de forma simples e resumida:
+	display alarm active all detail
+Resultado:
+  ------------------------------------------------------------------------
+  AlarmSN  Date&Time                      Alarm Name/Para
+  ------------------------------------------------------------------------
+  3247646  20/08/2025 13:57:29-03:00      The loss of GEM channel delineation
+                                          (LCDGi) occurs
+                                          FrameID: 0, SlotID: 1, PortID: 8,
+                                          ONT ID: 79
+  3247633  20/08/2025 13:18:22-03:00      The loss of GEM channel delineation
+                                          (LCDGi) occurs
+                                          FrameID: 0, SlotID: 3, PortID: 8,
+                                          ONT ID: 16
+  3247632  20/08/2025 13:17:15-03:00      The loss of GEM channel delineation
+                                          (LCDGi) occurs
+                                          FrameID: 0, SlotID: 1, PortID: 8,
+                                          ONT ID: 2
+  3247630  20/08/2025 13:06:12-03:00      The loss of GEM channel delineation
+                                          (LCDGi) occurs
+                                          FrameID: 0, SlotID: 2, PortID: 0,
+                                          ONT ID: 12
+  3247629  20/08/2025 13:05:21-03:00      The loss of GEM channel delineation
+                                          (LCDGi) occurs
+                                          FrameID: 0, SlotID: 1, PortID: 6,
+                                          ONT ID: 81
+---- More ( Press 'Q' to break ) ----
+
+{E assim vai até o fim de todos os ativos, e aqui também temos de ter um botão para tal:
+| **Campo bruto** | **Nome amigável**           | **Explicação detalhada**                                                  |
+| --------------- | --------------------------- | ------------------------------------------------------------------------- |
+| AlarmSN         | Número sequencial do alarme | Identificador único do evento ativo.                                      |
+| Date\&Time      | Data e hora do disparo      | Momento exato em que o alarme foi registrado.                             |
+| Alarm Name/Para | Nome do alarme              | Descrição técnica do problema detectado (ex.: perda de delineamento GEM). |
+| FrameID         | ID do frame                 | Identifica o frame (chassi lógico) onde a placa está localizada.          |
+| SlotID          | ID do slot                  | Indica a posição da placa no chassi da OLT.                               |
+| PortID          | ID da porta                 | Porta PON dentro do slot onde o evento ocorreu.                           |
+| ONT ID          | ID da ONT                   | Número lógico da ONT afetada dentro daquela porta.                        |
+}
+
+Comando par vermos os picos de banda nas portas PON
+	interface gpon-0/1
+		display port peak-rate all
+Resultado:
+  ---------------------------------------------------------------------------
+  Port Up  Up        BW    Time        Down Down      BW     Time
+  ID       Peak      Usage                  Peak      Usage
+           (kbps)    (%)                    (kbps)    (%)
+  ---------------------------------------------------------------------------
+  0    1G  2669      0.21  20/08/2025  2G   46810     1.88   20/08/2025
+                           14:04:17-03                       14:04:17-03
+  ---------------------------------------------------------------------------
+  1    1G  2496      0.20  20/08/2025  2G   53610     2.15   20/08/2025
+                           14:04:17-03                       14:04:17-03
+  ---------------------------------------------------------------------------
+  2    1G  8533      0.68  20/08/2025  2G   98168     3.94   20/08/2025
+                           14:04:36-03                       14:04:36-03
+  ---------------------------------------------------------------------------
+  3    1G  425       0.03  20/08/2025  2G   6012      0.24   20/08/2025
+                           14:04:30-03                       14:04:30-03
+  ---------------------------------------------------------------------------
+  4    1G  18804     1.51  20/08/2025  2G   215977    8.67   20/08/2025
+                           14:04:14-03                       14:04:14-03
+  ---------------------------------------------------------------------------
+  5    1G  12058     0.96  20/08/2025  2G   6325      0.25   20/08/2025
+                           14:04:43-03                       14:04:43-03
+  ---------------------------------------------------------------------------
+---- More ( Press 'Q' to break ) ---- {aqui apertamos a tecla espaço no teclado, até parar de aparecer essa mensagem no terminal}
+  ---------------------------------------------------------------------------
+  6    1G  48190     3.87  20/08/2025  2G   225707    9.07   20/08/2025
+                           14:04:30-03                       14:04:30-03
+  ---------------------------------------------------------------------------
+  7    1G  8846      0.71  20/08/2025  2G   123139    4.94   20/08/2025
+                           14:04:31-03                       14:04:31-03
+  ---------------------------------------------------------------------------
+  8    1G  7547      0.60  20/08/2025  2G   203544    8.17   20/08/2025
+                           14:04:42-03                       14:04:42-03
+  ---------------------------------------------------------------------------
+  9    1G  13146     1.05  20/08/2025  2G   186697    7.50   20/08/2025
+                           14:04:13-03                       14:04:13-03
+  ---------------------------------------------------------------------------
+  10   1G  11789     0.94  20/08/2025  2G   177238    7.12   20/08/2025
+                           14:04:29-03                       14:04:29-03
+  ---------------------------------------------------------------------------
+  11   1G  15383     1.23  20/08/2025  2G   102840    4.13   20/08/2025
+                           14:04:41-03                       14:04:41-03
+  ---------------------------------------------------------------------------
+  12   1G  18981     1.52  20/08/2025  2G   200441    8.05   20/08/2025
+                           14:04:21-03                       14:04:21-03
+  ---------------------------------------------------------------------------
+  13   1G  3923      0.31  20/08/2025  2G   160521    6.45   20/08/2025
+                           14:04:38-03                       14:04:38-03
+  ---------------------------------------------------------------------------
+---- More ( Press 'Q' to break ) ---- {aqui apertamos a tecla espaço no teclado, até parar de aparecer essa mensagem no terminal}
+  14   1G  113578    9.12  20/08/2025  2G   336503    13.52  20/08/2025
+                           14:03:59-03                       14:03:59-03
+  ---------------------------------------------------------------------------
+  15   1G  2309      0.18  20/08/2025  2G   83708     3.36   20/08/2025
+                           14:04:04-03                       14:04:04-03
+  ---------------------------------------------------------------------------
+
+{Aqui também temos de ter um botão para tal, e não esquecer de entrar no modo de config para essa:
+| **Campo bruto**  | **Nome amigável**         | **Explicação detalhada**                                                    |
+| ---------------- | ------------------------- | --------------------------------------------------------------------------- |
+| Port ID          | ID da porta PON           | Identifica qual porta PON do slot está sendo monitorada.                    |
+| Up Peak (kbps)   | Pico de upstream (kbps)   | Maior taxa de upload registrada na porta, em kbps.                          |
+| Up Usage (%)     | Uso percentual upstream   | Porcentagem do uso em relação à capacidade máxima da porta (geralmente 1G). |
+| Up Time          | Data/hora pico upstream   | Momento em que foi registrado o pico de upstream.                           |
+| Down Peak (kbps) | Pico de downstream (kbps) | Maior taxa de download registrada na porta, em kbps.                        |
+| Down Usage (%)   | Uso percentual downstream | Porcentagem do uso em relação à capacidade máxima da porta (geralmente 2G). |
+| Down Time        | Data/hora pico downstream | Momento em que foi registrado o pico de downstream.                         |
+}
+
 
 Comando para mostrar toda lista de ALARMID
 	display alarm list all

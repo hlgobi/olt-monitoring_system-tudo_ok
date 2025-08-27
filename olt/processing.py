@@ -17,9 +17,9 @@ from olt.communication import send_command, connect_to_olt # Funções para cone
 # CÓDIGO CORRIGIDO
 # No topo de olt/processing.py
 from olt.parsing import (extract_service_mac, extract_ont_info, parse_ont_info_details, 
-                         parse_pon_port_state, parse_port_info, parse_pon_statistics_packets) # Adicione parse_port_info
+                         parse_pon_port_state, parse_port_info, parse_pon_statistics_packets, parse_ont_traffic) # Adicione parse_port_info
 from db.operations import (save_ont_data, save_pon_status, save_temp_data, 
-                           save_resource_data, save_pon_traffic_data, save_pon_port_state, save_pon_statistics_packets)
+                           save_resource_data, save_pon_traffic_data, save_pon_port_state, save_pon_statistics_packets, save_ont_traffic_bulk)
 # --- FIM DA MODIFICAÇÃO ---
 from gui.signals import db_signals
 
@@ -236,6 +236,41 @@ def collect_pon_statistics_packets(shell, slot, port):
         logging.error(f"{log_prefix} Erro durante coleta de estatísticas: {e}", exc_info=True)
         return None
 
+# Em olt/processing.py, adicione esta função antes de process_pon_worker
+
+def collect_ont_traffic(shell, slot, port):
+    """Coleta dados de tráfego de todas as ONTs em uma porta PON."""
+    fsp = f"0/{slot}/{port}"
+    log_prefix = f"[ONT Traffic {fsp}]"
+
+    try:
+        # O comando `display ont traffic PORT all` é o correto
+        command = f"display ont traffic {port} all\n"
+        logging.info(f"{log_prefix} Executando comando: {command.strip()}")
+        shell.send(command)
+        time.sleep(2) # Este comando pode ser demorado
+
+        response = ""
+        timeout = time.time() + 90 # Timeout estendido para este comando
+        while time.time() < timeout:
+            if shell.recv_ready():
+                chunk = shell.recv(8192).decode('utf-8', errors='ignore')
+                response += chunk
+                if "---- More" in chunk:
+                    shell.send(" ")
+                    time.sleep(0.8)
+
+            elif f"(config-if-gpon-0/{slot})" in response and not shell.recv_ready():
+                break
+            time.sleep(0.2)
+
+        logging.info(f"{log_prefix} Resposta recebida ({len(response)} bytes)")
+        return parse_ont_traffic(response)
+
+    except Exception as e:
+        logging.error(f"{log_prefix} Erro durante coleta de tráfego de ONT: {e}", exc_info=True)
+        return None
+
 def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instance, log_callback):
     """
     (VERSÃO FINAL E ROBUSTA) Worker que conecta, gerencia a navegação com verificação de prompt
@@ -334,6 +369,14 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
         if stats_data:
             save_pon_statistics_packets(olt_ip, pon_fsp, stats_data)
             log_callback(f"{log_prefix} Dados de estatísticas de pacotes salvos.")
+
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        ont_traffic_list = collect_ont_traffic(shell, slot, port)
+        if ont_traffic_list:
+            save_ont_traffic_bulk(olt_ip, pon_fsp, ont_traffic_list)
+        else:
+            log_callback(f"{log_prefix} Falha ao coletar dados de tráfego das ONTs.")
+        # --- FIM DA MODIFICAÇÃO ---
 
         # Sai dos modos de configuração
         log_callback(f"{log_prefix} Saindo dos modos de configuração...")
@@ -546,6 +589,7 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
 
             db_signals.pon_stats_packets_updated.emit()
 
+            db_signals.ont_traffic_data_updated.emit()
 
             # Define o tempo de espera para o próximo ciclo (5 minutos).
             wait_time_seconds = 60
