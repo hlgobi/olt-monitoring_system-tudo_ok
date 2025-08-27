@@ -11,6 +11,7 @@ def create_tables():
         conn = psycopg2.connect(**DB_CONFIG)
         with conn.cursor() as cursor:
             # Tabela de Dados ONT (Optical Network Terminal)
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ont_data (
                     id SERIAL PRIMARY KEY,

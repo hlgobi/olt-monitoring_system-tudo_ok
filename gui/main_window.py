@@ -132,6 +132,10 @@ class OLTDatabaseGUI(QMainWindow):
             self.conn = psycopg2.connect(**DB_CONFIG)
             self.cursor = self.conn.cursor()
             
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            self.cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
+            
             # Verify schema before proceeding
             if not self.verify_database_schema():
                 raise Exception("Schema do banco de dados está incompleto")

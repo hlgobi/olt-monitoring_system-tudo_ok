@@ -54,6 +54,7 @@ def save_ont_data(olt_ip, ont_info):
         # Utiliza um cursor para executar comandos SQL
         with conn.cursor() as cursor:
             # Verifica o registro anterior desta ONT para detectar mudanças e preservar o nome do cliente
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
             cursor.execute("""
                 SELECT fsp, ont_id, mac_address, client_name
                 FROM ont_data
@@ -196,7 +197,8 @@ def save_pon_status(olt_ip, fsp, online_count, total_count):
         
         # Estabelece conexão com o banco de dados
         conn = psycopg2.connect(**DB_CONFIG)
-        
+        with conn.cursor() as cursor:
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
         # Determina o status da PON com base na proporção de ONTs online
         if total_count == 0:
             status = "empty"
@@ -261,6 +263,9 @@ def save_temp_data(olt_ip, temp_data):
         
         # Utiliza um cursor para executar comandos SQL
         with conn.cursor() as cursor:
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
             # Itera sobre cada conjunto de dados de temperatura
             for data in temp_data:
                 # Comando SQL para inserir os dados de temperatura
@@ -331,6 +336,9 @@ def save_resource_data(olt_ip, resource_data):
         
         # Utiliza um cursor para executar comandos SQL
         with conn.cursor() as cursor:
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+            # --- FIM DA MODIFICAÇÃO ---
             # Itera sobre cada conjunto de dados de recursos
             for data in resource_data:
                 # Comando SQL para inserir os dados de recursos
@@ -414,6 +422,10 @@ def get_ont_diagnostic_history(ont_serial_number: str, olt_identifier: str = Non
         # Estabelece conexão com o banco de dados
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+        # --- FIM DA MODIFICAÇÃO ---
+        cursor.execute(sql, tuple(params))
         
         # Executa a consulta SQL
         cursor.execute(sql, tuple(params))
@@ -460,6 +472,9 @@ def save_ont_diagnostic_data(diag_info: dict):
         # Estabelece conexão com o banco de dados
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+        # --- FIM DA MODIFICAÇÃO ---
         
         # Extrai os dados parseados do dicionário de informações de diagnóstico
         p_data = diag_info.get('parsed_data_dict', {})
@@ -510,6 +525,9 @@ def get_existing_ont_data(olt_ip, serial_number):
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        cursor.execute("SET TIME ZONE 'America/Sao_Paulo'")
+        # --- FIM DA MODIFICAÇÃO ---
         
         query = """
             SELECT connection_code, client_name 
