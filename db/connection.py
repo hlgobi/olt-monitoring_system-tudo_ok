@@ -233,6 +233,28 @@ def create_tables():
             logging.info("Tabela 'ont_diagnostics_history' verificada/criada.")
         
             # --- INÍCIO DA MODIFICAÇÃO ---
+            # Tabela de Estatísticas de Pacotes por ONT
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ont_statistics_packets (
+                    id SERIAL PRIMARY KEY,
+                    olt_ip VARCHAR(50) NOT NULL,
+                    olt_identifier VARCHAR(10) NOT NULL,
+                    fsp VARCHAR(20) NOT NULL,
+                    ont_id INTEGER NOT NULL,
+                    collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                    upstream_frames BIGINT,
+                    upstream_bytes BIGINT,
+                    upstream_discarded_frames BIGINT,
+                    downstream_frames BIGINT,
+                    downstream_bytes BIGINT,
+                    downstream_discarded_frames BIGINT
+                );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_stats_packets_fsp_ont_id_time ON ont_statistics_packets(fsp, ont_id, collection_time DESC);")
+            logging.info("Tabela 'ont_statistics_packets' verificada/criada.")
+            # --- FIM DA MODIFICAÇÃO ---
+
+            # --- INÍCIO DA MODIFICAÇÃO ---
             # Tabela de Estatísticas de Pacotes da PON
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pon_statistics_packets (

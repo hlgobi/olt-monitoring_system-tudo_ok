@@ -777,3 +777,42 @@ def save_ont_traffic_bulk(olt_ip, fsp, traffic_list):
     finally:
         if conn:
             conn.close()
+
+# Em db/operations.py, adicione esta função ao final do arquivo
+
+def save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list):
+    """Salva uma lista de registros de estatísticas de pacotes de ONTs."""
+    if not stats_list:
+        return 0
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        olt_identifier = olt_ip.split('.')[-1]
+        
+        args_list = [
+            (
+                olt_ip, olt_identifier, fsp, item['ont_id'],
+                item.get('upstream_frames'), item.get('upstream_bytes'), item.get('upstream_discarded_frames'),
+                item.get('downstream_frames'), item.get('downstream_bytes'), item.get('downstream_discarded_frames')
+            ) for item in stats_list
+        ]
+        
+        query = """
+            INSERT INTO ont_statistics_packets (
+                olt_ip, olt_identifier, fsp, ont_id,
+                upstream_frames, upstream_bytes, upstream_discarded_frames,
+                downstream_frames, downstream_bytes, downstream_discarded_frames
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        from psycopg2.extras import execute_batch
+        execute_batch(cursor, query, args_list)
+        conn.commit()
+        logging.info(f"{len(args_list)} registros de estatísticas de pacotes de ONT para a PON {fsp} salvos.")
+        return len(args_list)
+    except Exception as e:
+        logging.error(f"Erro ao salvar estatísticas de pacotes de ONT para a PON {fsp}: {e}")
+        if conn: conn.rollback()
+        return 0
+    finally:
+        if conn: conn.close()

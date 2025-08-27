@@ -123,6 +123,7 @@ class OLTDatabaseGUI(QMainWindow):
         db_signals.pon_port_state_updated.connect(self.update_pon_port_state_display)
         db_signals.pon_stats_packets_updated.connect(self.update_pon_stats_display)
         db_signals.ont_traffic_data_updated.connect(self.update_ont_traffic_display)
+        db_signals.pon_port_state_updated.connect(self.update_pon_port_state_display)
         self.log_message_received.connect(self.log_to_gui)
 
     def connect_to_db(self):
@@ -210,6 +211,12 @@ class OLTDatabaseGUI(QMainWindow):
         self.setup_ont_traffic_tab()
         # --- FIM DA MODIFICAÇÃO ---
 
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        self.ont_stats_tab = QWidget()
+        self.tab_widget.addTab(self.ont_stats_tab, "Estatísticas de ONT")
+        self.setup_ont_stats_tab()
+        # --- FIM DA MODIFICAÇÃO ---
+
         self.caixa_stats_update_timer = QTimer(self)
         self.caixa_stats_update_timer.setInterval(30000)
         self.caixa_stats_update_timer.timeout.connect(self.load_caixa_stats_data)
@@ -284,6 +291,18 @@ class OLTDatabaseGUI(QMainWindow):
             if hasattr(self, 'pon_stats_timer') and self.pon_stats_timer.isActive():
                 logging.info("Saindo da aba de estatísticas PON. Parando timer.")
                 self.pon_stats_timer.stop()
+        # --- FIM DA MODIFICAÇÃO ---
+
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        if current_tab == self.ont_stats_tab:
+            logging.info("Aba 'Estatísticas de ONT' ativada. Iniciando timer.")
+            self.load_ont_stats_data()
+            if hasattr(self, 'ont_stats_timer'):
+                self.ont_stats_timer.start()
+        else:
+            if hasattr(self, 'ont_stats_timer') and self.ont_stats_timer.isActive():
+                logging.info("Saindo da aba de estatísticas de ONT. Parando timer.")
+                self.ont_stats_timer.stop()
         # --- FIM DA MODIFICAÇÃO ---
 
         # --- INÍCIO DA MODIFICAÇÃO ---
@@ -3583,3 +3602,139 @@ class OLTDatabaseGUI(QMainWindow):
         """Atualiza a exibição de tráfego de ONT se a aba estiver ativa."""
         if self.tab_widget.currentWidget() == self.ont_traffic_tab:
             self.load_ont_traffic_data()
+
+
+    def setup_ont_stats_tab(self):
+        """Configura a interface da aba 'Estatísticas de ONT'."""
+        layout = QVBoxLayout(self.ont_stats_tab)
+        
+        # --- PAINEL DE CONTROLE COM FILTROS ---
+        control_panel = QWidget()
+        control_layout = QHBoxLayout(control_panel)
+        self.ont_stats_olt_filter = QComboBox()
+        if self.ont_stats_olt_filter not in self.olt_filters_to_update:
+            self.olt_filters_to_update.append(self.ont_stats_olt_filter)
+        
+        self.ont_stats_fsp_filter = QComboBox()
+        # Conecta os sinais para atualização dinâmica
+        self.ont_stats_olt_filter.currentTextChanged.connect(self.update_ont_stats_fsp_filter)
+        self.ont_stats_fsp_filter.currentTextChanged.connect(self.load_ont_stats_data)
+
+        control_layout.addWidget(QLabel("Filtrar por OLT:"))
+        control_layout.addWidget(self.ont_stats_olt_filter)
+        control_layout.addWidget(QLabel("Filtrar por F/S/P:"))
+        control_layout.addWidget(self.ont_stats_fsp_filter)
+        control_layout.addStretch()
+        layout.addWidget(control_panel)
+
+        # --- TABELA DE DADOS ---
+        self.ont_stats_table = QTableWidget()
+        self.ont_stats_table.setColumnCount(9) # Corrigido para 9 colunas
+        self.ont_stats_table.setHorizontalHeaderLabels([
+            "F/S/P", "ONT ID", "Hora", "Up Frames", "Up Bytes", "Up Discard",
+            "Down Frames", "Down Bytes", "Down Discard"
+        ])
+        self.ont_stats_table.setSortingEnabled(True)
+        self.ont_stats_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        layout.addWidget(self.ont_stats_table)
+
+        # --- TIMER PARA ATUALIZAÇÃO AUTOMÁTICA ---
+        self.ont_stats_timer = QTimer(self)
+        self.ont_stats_timer.setInterval(60000) # Atualiza a cada 60 segundos
+        self.ont_stats_timer.timeout.connect(self.load_ont_stats_data)
+
+    def update_ont_stats_fsp_filter(self):
+        """Atualiza o filtro de F/S/P com base na OLT selecionada para a aba de estatísticas."""
+        self.ont_stats_fsp_filter.blockSignals(True)
+        self.ont_stats_fsp_filter.clear()
+        self.ont_stats_fsp_filter.addItem("Todas as PONs")
+        
+        selected_olt = self.ont_stats_olt_filter.currentText()
+        if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            try:
+                olt_identifier = selected_olt.split()[-1]
+                query = "SELECT DISTINCT fsp FROM ont_statistics_packets WHERE olt_identifier = %s ORDER BY fsp;"
+                self.cursor.execute(query, (olt_identifier,))
+                fsps = [row[0] for row in self.cursor.fetchall()]
+                self.ont_stats_fsp_filter.addItems(fsps)
+            except Exception as e:
+                logging.error(f"Erro ao carregar FSPs para o filtro de estatísticas de ONT: {e}")
+                if self.conn: self.conn.rollback() # Limpa a transação em caso de erro
+        
+        self.ont_stats_fsp_filter.blockSignals(False)
+        self.load_ont_stats_data() # Força o recarregamento dos dados com o novo filtro de OLT
+
+    def load_ont_stats_data(self):
+        """Carrega os dados de estatísticas de pacotes por ONT."""
+        if not self.isVisible() or self.tab_widget.currentWidget() != self.ont_stats_tab:
+            return
+
+        logging.info("Carregando estatísticas de pacotes de ONT.")
+        self.ont_stats_table.setSortingEnabled(False)
+        self.ont_stats_table.setRowCount(0)
+        
+        selected_olt = self.ont_stats_olt_filter.currentText()
+        selected_fsp = self.ont_stats_fsp_filter.currentText()
+        
+        conditions = []
+        params = []
+
+        if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            olt_identifier = selected_olt.split()[-1]
+            conditions.append("olt_identifier = %s")
+            params.append(olt_identifier)
+        
+        if selected_fsp != "Todas as PONs":
+            conditions.append("fsp = %s")
+            params.append(selected_fsp)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        
+        query = f"""
+            SELECT fsp, ont_id, collection_time, upstream_frames, upstream_bytes,
+                   upstream_discarded_frames, downstream_frames, downstream_bytes,
+                   downstream_discarded_frames
+            FROM ont_statistics_packets {where_clause} ORDER BY collection_time DESC LIMIT 1000;
+        """
+        try:
+            self.cursor.execute(query, tuple(params))
+            results = self.cursor.fetchall()
+            
+            self.ont_stats_table.setRowCount(len(results))
+            for row_idx, record in enumerate(results):
+                (fsp, ont_id, ts, up_f, up_b, up_d, down_f, down_b, down_d) = record
+                
+                # Cria os itens da tabela
+                items = [
+                    QTableWidgetItem(fsp),
+                    QTableWidgetItem(str(ont_id)),
+                    QTableWidgetItem(ts.strftime('%d/%m %H:%M:%S')),
+                    QTableWidgetItem(f"{up_f:,}" if up_f is not None else "0"),
+                    QTableWidgetItem(f"{up_b:,}" if up_b is not None else "0"),
+                    QTableWidgetItem(f"{up_d:,}" if up_d is not None else "0"),
+                    QTableWidgetItem(f"{down_f:,}" if down_f is not None else "0"),
+                    QTableWidgetItem(f"{down_b:,}" if down_b is not None else "0"),
+                    QTableWidgetItem(f"{down_d:,}" if down_d is not None else "0")
+                ]
+                
+                # Preenche a linha na tabela
+                for col_idx, item in enumerate(items):
+                    self.ont_stats_table.setItem(row_idx, col_idx, item)
+                
+                # Colore a linha inteira se houver pacotes descartados
+                if (up_d and up_d > 0) or (down_d and down_d > 0):
+                    for col in range(self.ont_stats_table.columnCount()):
+                        self.ont_stats_table.item(row_idx, col).setBackground(QColor("#FFCDD2")) # Vermelho claro
+
+            self.ont_stats_table.resizeColumnsToContents()
+        except Exception as e:
+            logging.error(f"Erro ao carregar estatísticas de pacotes de ONT: {e}", exc_info=True)
+            if self.conn: self.conn.rollback() # Limpa a transação em caso de erro
+        finally:
+            self.ont_stats_table.setSortingEnabled(True)
+
+
+    def update_ont_stats_display(self):
+        """Atualiza a exibição de estatísticas de pacotes de ONT se a aba estiver ativa."""
+        if hasattr(self, 'ont_stats_tab') and self.tab_widget.currentWidget() == self.ont_stats_tab:
+            self.load_ont_stats_data()

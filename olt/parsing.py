@@ -368,3 +368,28 @@ def parse_ont_traffic(response):
             except (ValueError, IndexError):
                 continue
     return traffic_list
+
+# Em olt/parsing.py, adicione esta nova função
+
+def parse_ont_statistics_bulk(response):
+    """Analisa a saída do 'display statistics ont-eth' e retorna uma lista."""
+    stats_list = []
+    # Regex para capturar: ONT-ID, Up-Frames, Up-Bytes, Up-Discard, Down-Frames, Down-Bytes, Down-Discard
+    pattern = re.compile(r"^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)")
+
+    for line in response.splitlines():
+        match = pattern.match(line.strip())
+        if match:
+            try:
+                stats_list.append({
+                    "ont_id": int(match.group(1)),
+                    "upstream_frames": int(match.group(2)),
+                    "upstream_bytes": int(match.group(3)),
+                    "upstream_discarded_frames": int(match.group(4)),
+                    "downstream_frames": int(match.group(5)),
+                    "downstream_bytes": int(match.group(6)),
+                    "downstream_discarded_frames": int(match.group(7))
+                })
+            except (ValueError, IndexError):
+                continue
+    return stats_list

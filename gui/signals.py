@@ -29,6 +29,8 @@ class DatabaseSignals(QObject): # Define a classe DatabaseSignals que herda de Q
 
     ont_traffic_data_updated = pyqtSignal()
 
+    ont_stats_packets_updated = pyqtSignal()
+
     # Sinal para Alarmes de Caixa Parada
     caixa_parada_alarms_updated = pyqtSignal(list)
 
