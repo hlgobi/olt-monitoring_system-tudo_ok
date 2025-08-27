@@ -306,3 +306,41 @@ def parse_port_info(response):
                     info_data[db_key] = value
     
     return info_data
+
+# Em olt/parsing.py, adicione esta nova função
+
+def parse_pon_statistics_packets(response):
+    """Analisa a saída do 'display statistics port ethernet' e extrai os contadores."""
+    stats_data = {}
+    key_map = {
+        'Received frames': 'rx_frames', 'Received bytes': 'rx_bytes',
+        'Received unicast frames': 'rx_unicast_frames', 'Received multicast frames': 'rx_multicast_frames',
+        'Received broadcast frames': 'rx_broadcast_frames', 'Received 64-byte frames': 'rx_64_byte_frames',
+        'Received 65~127-byte frames': 'rx_65_127_byte_frames', 'Received 128~255-byte frames': 'rx_128_255_byte_frames',
+        'Received 256~511-byte frames': 'rx_256_511_byte_frames', 'Received 512~1023-byte frames': 'rx_512_1023_byte_frames',
+        'Received 1024~1518-byte frames': 'rx_1024_1518_byte_frames', 'Received over 1518-byte frames': 'rx_over_1518_byte_frames',
+        'Received undersize discarded frames': 'rx_undersize_discarded_frames', 'Received oversize discarded frames': 'rx_oversize_discarded_frames',
+        'Received CRC error frames': 'rx_crc_error_frames', 'Received discarded frames': 'rx_discarded_frames',
+        'Received error frames': 'rx_error_frames',
+        'Sent frames': 'tx_frames', 'Sent bytes': 'tx_bytes',
+        'Sent unicast frames': 'tx_unicast_frames', 'Sent multicast frames': 'tx_multicast_frames',
+        'Sent broadcast frames': 'tx_broadcast_frames', 'Sent 64-byte frames': 'tx_64_byte_frames',
+        'Sent 65~127-byte frames': 'tx_65_127_byte_frames', 'Sent 128~255-byte frames': 'tx_128_255_byte_frames',
+        'Sent 256~511-byte frames': 'tx_256_511_byte_frames', 'Sent 512~1023-byte frames': 'tx_512_1023_byte_frames',
+        'Sent 1024~1518-byte frames': 'tx_1024_1518_byte_frames', 'Sent over 1518-byte frames': 'tx_over_1518_byte_frames',
+        'Sent buffer overflow frames': 'tx_buffer_overflow_frames'
+    }
+
+    for line in response.splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            key = key.strip()
+            if key in key_map:
+                # O valor é o primeiro número encontrado na string de valor
+                numeric_value = re.search(r'^\s*(\d+)', value.strip())
+                if numeric_value:
+                    try:
+                        stats_data[key_map[key]] = int(numeric_value.group(1))
+                    except (ValueError, TypeError):
+                        continue
+    return stats_data

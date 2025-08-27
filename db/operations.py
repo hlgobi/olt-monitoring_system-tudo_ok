@@ -671,3 +671,61 @@ def save_pon_port_state(olt_ip, fsp, state_data):
     finally:
         if conn:
             conn.close()
+
+# Em db/operations.py, adicione esta função ao final do arquivo
+
+def save_pon_statistics_packets(olt_ip, fsp, stats_data):
+    """Salva as estatísticas de pacotes de uma porta PON no banco de dados."""
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        olt_identifier = olt_ip.split('.')[-1]
+        
+        columns = [
+            'olt_ip', 'olt_identifier', 'fsp',
+            'rx_frames', 'rx_bytes', 'rx_unicast_frames', 'rx_multicast_frames', 'rx_broadcast_frames',
+            'rx_64_byte_frames', 'rx_65_127_byte_frames', 'rx_128_255_byte_frames',
+            'rx_256_511_byte_frames', 'rx_512_1023_byte_frames', 'rx_1024_1518_byte_frames',
+            'rx_over_1518_byte_frames', 'rx_undersize_discarded_frames',
+            'rx_oversize_discarded_frames', 'rx_crc_error_frames', 'rx_discarded_frames',
+            'rx_error_frames', 'tx_frames', 'tx_bytes', 'tx_unicast_frames',
+            'tx_multicast_frames', 'tx_broadcast_frames', 'tx_64_byte_frames',
+            'tx_65_127_byte_frames', 'tx_128_255_byte_frames', 'tx_256_511_byte_frames',
+            'tx_512_1023_byte_frames', 'tx_1024_1518_byte_frames', 'tx_over_1518_byte_frames',
+            'tx_buffer_overflow_frames'
+        ]
+        
+        values = [
+            olt_ip, olt_identifier, fsp,
+            stats_data.get('rx_frames'), stats_data.get('rx_bytes'), stats_data.get('rx_unicast_frames'),
+            stats_data.get('rx_multicast_frames'), stats_data.get('rx_broadcast_frames'),
+            stats_data.get('rx_64_byte_frames'), stats_data.get('rx_65_127_byte_frames'),
+            stats_data.get('rx_128_255_byte_frames'), stats_data.get('rx_256_511_byte_frames'),
+            stats_data.get('rx_512_1023_byte_frames'), stats_data.get('rx_1024_1518_byte_frames'),
+            stats_data.get('rx_over_1518_byte_frames'), stats_data.get('rx_undersize_discarded_frames'),
+            stats_data.get('rx_oversize_discarded_frames'), stats_data.get('rx_crc_error_frames'),
+            stats_data.get('rx_discarded_frames'), stats_data.get('rx_error_frames'),
+            stats_data.get('tx_frames'), stats_data.get('tx_bytes'), stats_data.get('tx_unicast_frames'),
+            stats_data.get('tx_multicast_frames'), stats_data.get('tx_broadcast_frames'),
+            stats_data.get('tx_64_byte_frames'), stats_data.get('tx_65_127_byte_frames'),
+            stats_data.get('tx_128_255_byte_frames'), stats_data.get('tx_256_511_byte_frames'),
+            stats_data.get('tx_512_1023_byte_frames'), stats_data.get('tx_1024_1518_byte_frames'),
+            stats_data.get('tx_over_1518_byte_frames'), stats_data.get('tx_buffer_overflow_frames')
+        ]
+
+        query = f"INSERT INTO pon_statistics_packets ({', '.join(columns)}) VALUES ({', '.join(['%s'] * len(values))})"
+        
+        cursor.execute(query, tuple(values))
+        conn.commit()
+        logging.info(f"Estatísticas de pacotes da PON {fsp} salvas com sucesso.")
+        return True
+    except Exception as e:
+        logging.error(f"Erro ao salvar estatísticas de pacotes da PON {fsp}: {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()

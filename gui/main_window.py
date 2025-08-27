@@ -121,6 +121,7 @@ class OLTDatabaseGUI(QMainWindow):
         db_signals.ont_command_output_received.connect(self._handle_ont_command_output_received)
         db_signals.ont_cycle_completed.connect(self.update_ont_cycle_stats)
         db_signals.pon_port_state_updated.connect(self.update_pon_port_state_display)
+        db_signals.pon_stats_packets_updated.connect(self.update_pon_stats_display)
         self.log_message_received.connect(self.log_to_gui)
 
     def connect_to_db(self):
@@ -196,6 +197,12 @@ class OLTDatabaseGUI(QMainWindow):
         self.tab_widget.addTab(self.pon_traffic_tab, "Dados PON")
         self.setup_pon_traffic_tab()
 
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        self.pon_stats_tab = QWidget()
+        self.tab_widget.addTab(self.pon_stats_tab, "Estatísticas da PON")
+        self.setup_pon_stats_tab()
+        # --- FIM DA MODIFICAÇÃO ---
+
         self.caixa_stats_update_timer = QTimer(self)
         self.caixa_stats_update_timer.setInterval(30000)
         self.caixa_stats_update_timer.timeout.connect(self.load_caixa_stats_data)
@@ -260,6 +267,17 @@ class OLTDatabaseGUI(QMainWindow):
             if self.pon_traffic_timer and self.pon_traffic_timer.isActive():
                 logging.info("Saindo da aba de dados PON. Parando timer.")
                 self.pon_traffic_timer.stop()
+
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        if current_tab == self.pon_stats_tab:
+            logging.info("Aba 'Estatísticas da PON' ativada. Iniciando timer.")
+            self.load_pon_stats_data()
+            self.pon_stats_timer.start()
+        else:
+            if hasattr(self, 'pon_stats_timer') and self.pon_stats_timer.isActive():
+                logging.info("Saindo da aba de estatísticas PON. Parando timer.")
+                self.pon_stats_timer.stop()
+        # --- FIM DA MODIFICAÇÃO ---
 
     def setup_long_offline_tab(self):
         """Configura a interface da aba 'Longo Tempo Offline'."""
@@ -3333,3 +3351,112 @@ class OLTDatabaseGUI(QMainWindow):
         """Atualiza a exibição dos dados de tráfego PON."""
         if hasattr(self, 'pon_traffic_table') and self.tab_widget.currentWidget() == self.pon_traffic_tab:
             self.load_pon_traffic_data()
+
+    def setup_pon_stats_tab(self):
+        """Configura a interface da aba 'Estatísticas da PON'."""
+        layout = QVBoxLayout(self.pon_stats_tab)
+
+        # Painel de controle
+        control_panel = QWidget()
+        control_layout = QHBoxLayout(control_panel)
+        self.pon_stats_olt_filter = QComboBox()
+        if self.pon_stats_olt_filter not in self.olt_filters_to_update:
+            self.olt_filters_to_update.append(self.pon_stats_olt_filter)
+        self.pon_stats_olt_filter.currentTextChanged.connect(self.load_pon_stats_data)
+
+        control_layout.addWidget(QLabel("Filtrar por OLT:"))
+        control_layout.addWidget(self.pon_stats_olt_filter)
+        control_layout.addStretch()
+        layout.addWidget(control_panel)
+
+        # Usaremos duas tabelas lado a lado para melhor visualização
+        splitter = QSplitter(Qt.Horizontal)
+
+        # Tabela de Recebimento (RX)
+        rx_group = QGroupBox("Estatísticas de Recebimento (RX)")
+        rx_layout = QVBoxLayout(rx_group)
+        self.pon_stats_rx_table = QTableWidget()
+        self.pon_stats_rx_table.setColumnCount(4)
+        self.pon_stats_rx_table.setHorizontalHeaderLabels(["F/S/P", "Hora", "Métrica", "Valor"])
+        rx_layout.addWidget(self.pon_stats_rx_table)
+        splitter.addWidget(rx_group)
+
+        # Tabela de Envio (TX)
+        tx_group = QGroupBox("Estatísticas de Envio (TX)")
+        tx_layout = QVBoxLayout(tx_group)
+        self.pon_stats_tx_table = QTableWidget()
+        self.pon_stats_tx_table.setColumnCount(4)
+        self.pon_stats_tx_table.setHorizontalHeaderLabels(["F/S/P", "Hora", "Métrica", "Valor"])
+        tx_layout.addWidget(self.pon_stats_tx_table)
+        splitter.addWidget(tx_group)
+
+        layout.addWidget(splitter)
+
+        self.pon_stats_timer = QTimer(self)
+        self.pon_stats_timer.setInterval(60000)
+        self.pon_stats_timer.timeout.connect(self.load_pon_stats_data)
+
+# Em gui/main_window.py, substitua a sua função load_pon_stats_data por esta:
+
+    def load_pon_stats_data(self):
+        """Carrega os dados de estatísticas de pacotes e os exibe nas tabelas."""
+        logging.info("Carregando estatísticas de pacotes da PON.")
+        self.pon_stats_rx_table.setRowCount(0)
+        self.pon_stats_tx_table.setRowCount(0)
+        
+        selected_olt = self.pon_stats_olt_filter.currentText()
+        params = []
+        where_clause = ""
+        if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            olt_identifier = selected_olt.split()[-1]
+            where_clause = "WHERE olt_identifier = %s"
+            params.append(olt_identifier)
+            
+        query = f"SELECT * FROM pon_statistics_packets {where_clause} ORDER BY collection_time DESC LIMIT 500;"
+
+        try:
+            self.cursor.execute(query, tuple(params))
+            results = self.cursor.fetchall()
+            
+            # --- INÍCIO DA CORREÇÃO ---
+            # Adiciona a função enumerate() para obter o índice (i) e o item (desc) corretamente.
+            col_map = {desc[0]: i for i, desc in enumerate(self.cursor.description)}
+            # --- FIM DA CORREÇÃO ---
+            
+            rx_metrics = [k for k in col_map if k.startswith('rx_')]
+            tx_metrics = [k for k in col_map if k.startswith('tx_')]
+            
+            self.pon_stats_rx_table.setRowCount(len(results) * len(rx_metrics))
+            self.pon_stats_tx_table.setRowCount(len(results) * len(tx_metrics))
+            
+            rx_row, tx_row = 0, 0
+            for record in results:
+                fsp = record[col_map['fsp']]
+                timestamp = record[col_map['collection_time']].strftime('%H:%M:%S')
+                
+                for metric in rx_metrics:
+                    value = record[col_map[metric]]
+                    self.pon_stats_rx_table.setItem(rx_row, 0, QTableWidgetItem(fsp))
+                    self.pon_stats_rx_table.setItem(rx_row, 1, QTableWidgetItem(timestamp))
+                    self.pon_stats_rx_table.setItem(rx_row, 2, QTableWidgetItem(metric.replace('rx_', '').replace('_', ' ').title()))
+                    self.pon_stats_rx_table.setItem(rx_row, 3, QTableWidgetItem(f"{value:,}" if value is not None else "0"))
+                    rx_row += 1
+                
+                for metric in tx_metrics:
+                    value = record[col_map[metric]]
+                    self.pon_stats_tx_table.setItem(tx_row, 0, QTableWidgetItem(fsp))
+                    self.pon_stats_tx_table.setItem(tx_row, 1, QTableWidgetItem(timestamp))
+                    self.pon_stats_tx_table.setItem(tx_row, 2, QTableWidgetItem(metric.replace('tx_', '').replace('_', ' ').title()))
+                    self.pon_stats_tx_table.setItem(tx_row, 3, QTableWidgetItem(f"{value:,}" if value is not None else "0"))
+                    tx_row += 1
+
+            self.pon_stats_rx_table.resizeColumnsToContents()
+            self.pon_stats_tx_table.resizeColumnsToContents()
+
+        except Exception as e:
+            logging.error(f"Erro ao carregar estatísticas de pacotes: {e}", exc_info=True)
+
+    def update_pon_stats_display(self):
+        """Atualiza a exibição de estatísticas de pacotes se a aba estiver ativa."""
+        if self.tab_widget.currentWidget() == self.pon_stats_tab:
+            self.load_pon_stats_data()

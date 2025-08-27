@@ -232,6 +232,55 @@ def create_tables():
             """)
             logging.info("Tabela 'ont_diagnostics_history' verificada/criada.")
         
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            # Tabela de Estatísticas de Pacotes da PON
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS pon_statistics_packets (
+                    id SERIAL PRIMARY KEY,
+                    olt_ip VARCHAR(50) NOT NULL,
+                    olt_identifier VARCHAR(10) NOT NULL,
+                    fsp VARCHAR(20) NOT NULL,
+                    collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                    
+                    -- Estatísticas de Recebimento
+                    rx_frames BIGINT,
+                    rx_bytes BIGINT,
+                    rx_unicast_frames BIGINT,
+                    rx_multicast_frames BIGINT,
+                    rx_broadcast_frames BIGINT,
+                    rx_64_byte_frames BIGINT,
+                    rx_65_127_byte_frames BIGINT,
+                    rx_128_255_byte_frames BIGINT,
+                    rx_256_511_byte_frames BIGINT,
+                    rx_512_1023_byte_frames BIGINT,
+                    rx_1024_1518_byte_frames BIGINT,
+                    rx_over_1518_byte_frames BIGINT,
+                    rx_undersize_discarded_frames BIGINT,
+                    rx_oversize_discarded_frames BIGINT,
+                    rx_crc_error_frames BIGINT,
+                    rx_discarded_frames BIGINT,
+                    rx_error_frames BIGINT,
+                    
+                    -- Estatísticas de Envio
+                    tx_frames BIGINT,
+                    tx_bytes BIGINT,
+                    tx_unicast_frames BIGINT,
+                    tx_multicast_frames BIGINT,
+                    tx_broadcast_frames BIGINT,
+                    tx_64_byte_frames BIGINT,
+                    tx_65_127_byte_frames BIGINT,
+                    tx_128_255_byte_frames BIGINT,
+                    tx_256_511_byte_frames BIGINT,
+                    tx_512_1023_byte_frames BIGINT,
+                    tx_1024_1518_byte_frames BIGINT,
+                    tx_over_1518_byte_frames BIGINT,
+                    tx_buffer_overflow_frames BIGINT
+                );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_pon_stats_packets_fsp_time ON pon_statistics_packets(fsp, collection_time DESC);")
+            logging.info("Tabela 'pon_statistics_packets' verificada/criada.")
+            # --- FIM DA MODIFICAÇÃO ---
+        
         conn.commit()
         logging.info("Todas as tabelas e colunas foram verificadas/criadas com sucesso.")
         return True
