@@ -49,7 +49,8 @@ DB_CONFIG = {
     'database': 'olt_monitoring', # Nome do banco de dados a ser utilizado.
     'user': 'olt_user',         # Nome do usuário para autenticação.
     'password': 'gigamatriz',   # Senha do usuário.
-    'port': '5432'              # Porta padrão do PostgreSQL.
+    'port': '5432',              # Porta padrão do PostgreSQL.
+    'client_encoding': 'latin1'  # --- LINHA ADICIONADA PARA CORRIGIR O ERRO DE DECODIFICAÇÃO ---
 }
 
 # --- MODIFICAÇÃO: Lista de OLTs definida diretamente no código ---

@@ -38,6 +38,12 @@ def save_ont_data(olt_ip, ont_info):
     # Inicializa a variável de conexão como None
     conn = None
     try:
+        # --- FUNÇÃO AUXILIAR PARA TRATAR TIMESTAMPS INVÁLIDOS ---
+        def to_db_timestamp(ts_str):
+            if ts_str in ['N/A', '-', None, '']:
+                return None
+            return ts_str
+            
         # Extrai o identificador da OLT a partir do último octeto do endereço IP
         olt_identifier = olt_ip.split('.')[-1]
         
@@ -56,7 +62,7 @@ def save_ont_data(olt_ip, ont_info):
             # Verifica o registro anterior desta ONT para detectar mudanças e preservar o nome do cliente
             cursor.execute("""
                 SELECT fsp, ont_id, mac_address, client_name
-                FROM ont_data
+                FROM public.ont_data
                 WHERE serial_number = %s
                 ORDER BY collection_time DESC
                 LIMIT 1
@@ -81,7 +87,7 @@ def save_ont_data(olt_ip, ont_info):
             
             # Comando SQL para inserir os dados da ONT na tabela ont_data
             sql = """
-                INSERT INTO ont_data
+                INSERT INTO public.ont_data
                 (olt_ip, olt_identifier, fsp, ont_id, mac_address, client_name,
                 previous_mac_address, serial_number, rx_power, tx_power,
                 description, primaria, secundaria, porta_secundaria, 
@@ -116,26 +122,24 @@ def save_ont_data(olt_ip, ont_info):
                 previous_fsp if fsp_changed else None,
                 previous_ont_id if ont_id_changed else None,
                 ont_info['status'],
-                # Campos de detalhes (Fase 1)
                 ont_info.get('last_down_cause'),
-                ont_info.get('last_up_time'),
-                ont_info.get('last_down_time'),
-                ont_info.get('last_dying_gasp_time'),
+                # --- CORREÇÃO APLICADA AQUI ---
+                to_db_timestamp(ont_info.get('last_up_time')),
+                to_db_timestamp(ont_info.get('last_down_time')),
+                to_db_timestamp(ont_info.get('last_dying_gasp_time')),
                 ont_info.get('line_profile_name'),
-                ont_info.get('services'), # Este já é uma string JSON
-                # Novos campos de detalhes (Fase 2)
+                ont_info.get('services'),
                 ont_info.get('ont_distance'),
                 ont_info.get('memory_occupation'),
                 ont_info.get('cpu_occupation'),
                 ont_info.get('temperature'),
                 ont_info.get('ont_ip_address'),
                 ont_info.get('line_profile_id'),
-                ont_info.get('service_profile_id'),  # Adicionado aqui
+                ont_info.get('service_profile_id'),
                 ont_info.get('service_profile_name'),
-                ont_info.get('connection_code')  # Coluna para o código de conexão (Cod)
+                ont_info.get('connection_code')
             )
             
-            # Log para exibir os detalhes de diagnóstico que foram coletados para a ONT
             log_details = (
                 f"[DETALHES COLETADOS] S/N: {ont_info.get('sn', 'N/A')} | "
                 f"Causa Queda: '{ont_info.get('last_down_cause', 'N/A')}' | "
@@ -145,16 +149,11 @@ def save_ont_data(olt_ip, ont_info):
             )
             logging.info(log_details)
             
-            # Executa o comando SQL com os parâmetros
             cursor.execute(sql, params)
-            
-            # Confirma as alterações no banco de dados
             conn.commit()
             
-            # Log para confirmar que a inserção no BD ocorreu
             logging.info(f"Dados da ONT {ont_info['sn']} (Cliente: {existing_client_name}) inseridos com sucesso no banco.")
             
-            # Loga mudanças se detectadas
             if fsp_changed or ont_id_changed or mac_changed:
                 change_msg = f"Mudança detectada para ONT {ont_info['sn']}:"
                 if fsp_changed:
@@ -166,13 +165,10 @@ def save_ont_data(olt_ip, ont_info):
                 logging.warning(change_msg)
                 
     except Exception as e:
-        # Em caso de erro, registra a exceção com detalhes
         logging.error(f"Erro ao salvar ONT {ont_info.get('sn', 'N/A')} ({ont_info.get('fsp', 'N/A')}/{ont_info.get('ont_id', 'N/A')}): {str(e)}", exc_info=True)
-        # Se houver uma conexão ativa, desfaz as alterações
         if conn:
             conn.rollback()
     finally:
-        # Garante que a conexão seja fechada, mesmo que ocorra um erro
         if conn is not None:
             conn.close()
             
