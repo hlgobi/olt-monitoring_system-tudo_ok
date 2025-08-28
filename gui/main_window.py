@@ -211,15 +211,11 @@ class OLTDatabaseGUI(QMainWindow):
         self.setup_ont_traffic_tab()
         # --- FIM DA MODIFICAÇÃO ---
 
-# --- INÍCIO DA MODIFICAÇÃO ---
+        # --- INÍCIO DA MODIFICAÇÃO ---
         self.ont_stats_tab = QWidget()
         self.tab_widget.addTab(self.ont_stats_tab, "Estatísticas de ONT")
         self.setup_ont_stats_tab()
-        
-        self.ont_eth_stats_tab = QWidget()
-        self.tab_widget.addTab(self.ont_eth_stats_tab, "Estatísticas ETH ONT")
-        self.setup_ont_eth_stats_tab()
-# --- FIM DA MODIFICAÇÃO ---
+        # --- FIM DA MODIFICAÇÃO ---
 
         self.caixa_stats_update_timer = QTimer(self)
         self.caixa_stats_update_timer.setInterval(30000)
@@ -230,8 +226,6 @@ class OLTDatabaseGUI(QMainWindow):
         self.long_offline_update_timer.timeout.connect(self.load_long_offline_data)
 
         self.tab_widget.currentChanged.connect(self.handle_tab_change)
-
-
 
     def handle_tab_change(self, index):
         """Manipula eventos de mudança de aba, controlando timers e sessões."""
@@ -309,24 +303,6 @@ class OLTDatabaseGUI(QMainWindow):
             if hasattr(self, 'ont_stats_timer') and self.ont_stats_timer.isActive():
                 logging.info("Saindo da aba de estatísticas de ONT. Parando timer.")
                 self.ont_stats_timer.stop()
-        # --- FIM DA MODIFICAÇÃO ---
-
-        # --- INÍCIO DA MODIFICAÇÃO ---
-            # ... (após a lógica da aba 'Estatísticas de ONT') ...
-            else:
-                if hasattr(self, 'ont_stats_timer') and self.ont_stats_timer.isActive():
-                    logging.info("Saindo da aba de estatísticas de ONT. Parando timer.")
-                    self.ont_stats_timer.stop()
-            
-            if current_tab == self.ont_eth_stats_tab:
-                logging.info("Aba 'Estatísticas ETH ONT' ativada. Iniciando timer.")
-                self.load_ont_eth_stats_data()
-                if hasattr(self, 'ont_eth_stats_timer'):
-                    self.ont_eth_stats_timer.start()
-            else:
-                if hasattr(self, 'ont_eth_stats_timer') and self.ont_eth_stats_timer.isActive():
-                    logging.info("Saindo da aba de estatísticas ETH ONT. Parando timer.")
-                    self.ont_eth_stats_timer.stop()
         # --- FIM DA MODIFICAÇÃO ---
 
         # --- INÍCIO DA MODIFICAÇÃO ---
@@ -3762,144 +3738,3 @@ class OLTDatabaseGUI(QMainWindow):
         """Atualiza a exibição de estatísticas de pacotes de ONT se a aba estiver ativa."""
         if hasattr(self, 'ont_stats_tab') and self.tab_widget.currentWidget() == self.ont_stats_tab:
             self.load_ont_stats_data()
-
-# --- INÍCIO DA MODIFICAÇÃO ---
-    def setup_ont_eth_stats_tab(self):
-        """Configura a interface da aba 'Estatísticas ETH ONT'."""
-        layout = QVBoxLayout(self.ont_eth_stats_tab)
-        
-        control_panel = QWidget()
-        control_layout = QHBoxLayout(control_panel)
-        self.ont_eth_stats_olt_filter = QComboBox()
-        if self.ont_eth_stats_olt_filter not in self.olt_filters_to_update:
-            self.olt_filters_to_update.append(self.ont_eth_stats_olt_filter)
-        
-        self.ont_eth_stats_fsp_filter = QComboBox()
-        self.ont_eth_stats_olt_filter.currentTextChanged.connect(self.update_ont_eth_stats_fsp_filter)
-        self.ont_eth_stats_fsp_filter.currentTextChanged.connect(self.load_ont_eth_stats_data)
-
-        control_layout.addWidget(QLabel("OLT:"))
-        control_layout.addWidget(self.ont_eth_stats_olt_filter)
-        control_layout.addWidget(QLabel("F/S/P:"))
-        control_layout.addWidget(self.ont_eth_stats_fsp_filter)
-        control_layout.addStretch()
-        layout.addWidget(control_panel)
-
-        self.ont_eth_stats_table = QTableWidget()
-        self.ont_eth_stats_table.setColumnCount(11)
-        self.ont_eth_stats_table.setHorizontalHeaderLabels([
-            "F/S/P", "ONT ID", "ETH", "Hora", "RX Frames", "RX Bytes", "RX Erros",
-            "TX Frames", "TX Bytes", "TX Overflows"
-        ])
-        self.ont_eth_stats_table.setSortingEnabled(True)
-        layout.addWidget(self.ont_eth_stats_table)
-        
-        self.ont_eth_stats_timer = QTimer(self)
-        self.ont_eth_stats_timer.setInterval(60000)
-        self.ont_eth_stats_timer.timeout.connect(self.load_ont_eth_stats_data)
-
-    def update_ont_eth_stats_fsp_filter(self):
-        """Atualiza o filtro de F/S/P para a aba de estatísticas ETH."""
-        self.ont_eth_stats_fsp_filter.blockSignals(True)
-        self.ont_eth_stats_fsp_filter.clear()
-        self.ont_eth_stats_fsp_filter.addItem("Todas as PONs")
-        
-        selected_olt = self.ont_eth_stats_olt_filter.currentText()
-        if selected_olt != "Todas as OLTs":
-            try:
-                olt_identifier = selected_olt.split()[-1]
-                query = "SELECT DISTINCT fsp FROM ont_eth_port_statistics WHERE olt_identifier = %s ORDER BY fsp;"
-                self.cursor.execute(query, (olt_identifier,))
-                fsps = [row[0] for row in self.cursor.fetchall()]
-                self.ont_eth_stats_fsp_filter.addItems(fsps)
-            except Exception as e:
-                logging.error(f"Erro ao carregar FSPs para o filtro de stats ETH: {e}")
-                if self.conn: self.conn.rollback()
-        
-        self.ont_eth_stats_fsp_filter.blockSignals(False)
-        self.load_ont_eth_stats_data()
-
-# Em gui/main_window.py, substitua a sua função load_ont_eth_stats_data inteira por esta versão completa e corrigida.
-
-    def load_ont_eth_stats_data(self):
-        """Carrega e exibe os dados de estatísticas das portas Ethernet das ONTs."""
-        if not self.isVisible() or self.tab_widget.currentWidget() != self.ont_eth_stats_tab:
-            return
-
-        logging.info("Carregando estatísticas de portas ETH de ONTs.")
-        self.ont_eth_stats_table.setSortingEnabled(False)
-        self.ont_eth_stats_table.setRowCount(0)
-        
-        # --- INÍCIO DA CORREÇÃO ---
-        # Lógica de filtro que estava faltando
-        selected_olt = self.ont_eth_stats_olt_filter.currentText()
-        selected_fsp = self.ont_eth_stats_fsp_filter.currentText()
-        
-        conditions = []
-        params = []
-
-        if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
-            olt_identifier = selected_olt.split()[-1]
-            conditions.append("olt_identifier = %s")
-            params.append(olt_identifier)
-        
-        if selected_fsp != "Todas as PONs":
-            conditions.append("fsp = %s")
-            params.append(selected_fsp)
-
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        # --- FIM DA CORREÇÃO ---
-        
-        query = f"""
-            SELECT fsp, ont_id, eth_port_id, collection_time, 
-                   rx_frames, rx_bytes, rx_error_frames,
-                   tx_frames, tx_bytes, tx_buffer_overflow_frames
-            FROM ont_eth_port_statistics 
-            {where_clause} 
-            ORDER BY collection_time DESC, fsp, ont_id, eth_port_id 
-            LIMIT 2000;
-        """
-        try:
-            self.cursor.execute(query, tuple(params))
-            results = self.cursor.fetchall()
-            
-            self.ont_eth_stats_table.setRowCount(len(results))
-            for row_idx, record in enumerate(results):
-                (fsp, ont_id, eth_id, ts, rx_f, rx_b, rx_e, tx_f, tx_b, tx_o) = record
-                
-                items = [
-                    QTableWidgetItem(fsp),
-                    QTableWidgetItem(str(ont_id)),
-                    QTableWidgetItem(str(eth_id)),
-                    QTableWidgetItem(ts.strftime('%d/%m %H:%M:%S')),
-                    QTableWidgetItem(f"{rx_f:,}" if rx_f is not None else "0"),
-                    QTableWidgetItem(f"{rx_b:,}" if rx_b is not None else "0"),
-                    QTableWidgetItem(f"{rx_e:,}" if rx_e is not None else "0"),
-                    QTableWidgetItem(f"{tx_f:,}" if tx_f is not None else "0"),
-                    QTableWidgetItem(f"{tx_b:,}" if tx_b is not None else "0"),
-                    QTableWidgetItem(f"{tx_o:,}" if tx_o is not None else "0")
-                ]
-                
-                # Preenche a linha na tabela
-                for col_idx, item in enumerate(items):
-                    self.ont_eth_stats_table.setItem(row_idx, col_idx, item)
-                
-                # Colore a linha inteira se houver erros ou overflows
-                if (rx_e and rx_e > 0) or (tx_o and tx_o > 0):
-                    for col in range(self.ont_eth_stats_table.columnCount()):
-                        # Garante que o item existe antes de tentar colorir
-                        if self.ont_eth_stats_table.item(row_idx, col):
-                            self.ont_eth_stats_table.item(row_idx, col).setBackground(QColor("#FFCDD2"))
-
-            self.ont_eth_stats_table.resizeColumnsToContents()
-        except Exception as e:
-            logging.error(f"Erro ao carregar estatísticas de porta ETH: {e}", exc_info=True)
-            if self.conn: self.conn.rollback()
-        finally:
-            self.ont_eth_stats_table.setSortingEnabled(True)
-
-    def update_ont_eth_stats_display(self):
-        """Atualiza a exibição de estatísticas de ETH se a aba estiver ativa."""
-        if hasattr(self, 'ont_eth_stats_tab') and self.tab_widget.currentWidget() == self.ont_eth_stats_tab:
-            self.load_ont_eth_stats_data()
-# --- FIM DA MODIFICAÇÃO ---
