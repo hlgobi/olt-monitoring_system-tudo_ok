@@ -21,21 +21,24 @@ from PyQt5.QtCore import (QObject, pyqtSignal, QTimer, Qt, QEvent, QMetaObject,
 from PyQt5 import QtGui
 from PyQt5.QtGui import QColor
 import pyqtgraph as pg
-
+import queue
 from config import DB_CONFIG, get_olt_configs
 from gui.dialogs import CleanupDialog, OntDiagnosticsHistoryDialog
-from olt.processing import run_data_collection
-from gui.signals import db_signals
-from db.connection import create_tables, check_db_connection
-from olt.processing import (run_temp_monitoring, run_resource_monitoring,
+# --- INÍCIO DA CORREÇÃO ---
+from olt.processing import (run_data_collection, process_ont_eth_worker,
+                            run_temp_monitoring, run_resource_monitoring,
                             get_active_gpon_slots, parse_board_info as olt_parse_board_info,
                             get_slot_cpu_usage, get_slot_memory_usage, get_resource_status)
+# --- FIM DA CORREÇÃO ---
+from gui.signals import db_signals
+from db.connection import create_tables, check_db_connection
 from db.operations import (save_ont_data, save_pon_status, save_temp_data,
                            save_resource_data, save_ont_diagnostic_data)
 from olt.communication import connect_to_olt, send_command as send_olt_command
 from utils.helpers import (clean_response, parse_ont_device_info, parse_ont_optic_status, 
                            parse_ont_wan_status, parse_lan_wifi_devices, parse_wifi_neighbors, 
                            parse_wifi_config, parse_connectivity_tests, parse_voip_status, parse_ip_routes)
+
 
 class OLTDatabaseGUI(QMainWindow):
     log_message_received = pyqtSignal(str)
@@ -45,6 +48,11 @@ class OLTDatabaseGUI(QMainWindow):
         
         self.olt_configs = get_olt_configs()
         self.collection_threads = {}
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        # Inicializa os dicionários para as novas threads e filas
+        self.eth_collection_threads = {}
+        self.eth_task_queues = {}
+        # --- FIM DA MODIFICAÇÃO ---
         self.olt_ip = None
         self.username = None
         self.password = None
@@ -124,6 +132,7 @@ class OLTDatabaseGUI(QMainWindow):
         db_signals.pon_stats_packets_updated.connect(self.update_pon_stats_display)
         db_signals.ont_traffic_data_updated.connect(self.update_ont_traffic_display)
         db_signals.pon_port_state_updated.connect(self.update_pon_port_state_display)
+        db_signals.ont_eth_stats_updated.connect(self.update_ont_eth_display) # Conecta o novo sinal
         self.log_message_received.connect(self.log_to_gui)
 
     def connect_to_db(self):
@@ -160,7 +169,6 @@ class OLTDatabaseGUI(QMainWindow):
         self.tab_widget = QTabWidget()
         central_widget.setLayout(QVBoxLayout())
         central_widget.layout().addWidget(self.tab_widget)
-
     
         self.logs_tab = QWidget()
         self.tab_widget.addTab(self.logs_tab, "Logs")
@@ -215,6 +223,13 @@ class OLTDatabaseGUI(QMainWindow):
         self.ont_stats_tab = QWidget()
         self.tab_widget.addTab(self.ont_stats_tab, "Estatísticas de ONT")
         self.setup_ont_stats_tab()
+        # --- FIM DA MODIFICAÇÃO ---
+
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        # Adicione a criação da nova aba
+        self.ont_eth_tab = QWidget()
+        self.tab_widget.addTab(self.ont_eth_tab, "ONT Ethernet")
+        self.setup_ont_eth_tab()
         # --- FIM DA MODIFICAÇÃO ---
 
         self.caixa_stats_update_timer = QTimer(self)
@@ -314,6 +329,19 @@ class OLTDatabaseGUI(QMainWindow):
             if hasattr(self, 'ont_traffic_timer') and self.ont_traffic_timer.isActive():
                 logging.info("Saindo da aba de tráfego ONT. Parando timer.")
                 self.ont_traffic_timer.stop()
+        # --- FIM DA MODIFICAÇÃO ---
+
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        # Adicione a lógica para a nova aba
+        if current_tab == self.ont_eth_tab:
+            logging.info("Aba 'ONT Ethernet' ativada. Iniciando timer.")
+            self.load_ont_eth_data()
+            if hasattr(self, 'ont_eth_timer'):
+                self.ont_eth_timer.start()
+        else:
+            if hasattr(self, 'ont_eth_timer') and self.ont_eth_timer.isActive():
+                logging.info("Saindo da aba de estatísticas ETH de ONT. Parando timer.")
+                self.ont_eth_timer.stop()
         # --- FIM DA MODIFICAÇÃO ---
 
     def setup_long_offline_tab(self):
@@ -1181,46 +1209,63 @@ class OLTDatabaseGUI(QMainWindow):
         return panel
 
     def start_selected_collections(self):
-        """Inicia threads de coleta para cada OLT selecionada na lista."""
-        selected_items = self.olt_list_widget.selectedItems()
-        if not selected_items:
-            QMessageBox.warning(self, "Nenhuma OLT Selecionada", "Por favor, selecione pelo menos uma OLT da lista.")
-            return
+            """Inicia threads de coleta para cada OLT selecionada na lista."""
+            selected_items = self.olt_list_widget.selectedItems()
+            if not selected_items:
+                QMessageBox.warning(self, "Nenhuma OLT Selecionada", "Por favor, selecione pelo menos uma OLT da lista.")
+                return
 
-        self.collection_running = True
-        self.stop_all_btn.setEnabled(True)
-        self.start_selected_btn.setEnabled(False)
-        self.log_to_gui("--- Iniciando coletas... ---")
+            self.collection_running = True
+            self.stop_all_btn.setEnabled(True)
+            self.start_selected_btn.setEnabled(False)
+            self.log_to_gui("--- Iniciando coletas... ---")
 
-        for item in selected_items:
-            ip_match = re.search(r'\((\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\)', item.text())
-            if not ip_match: continue
-            
-            olt_ip = ip_match.group(1)
-            olt_config = next((olt for olt in self.olt_configs if olt['ip'] == olt_ip), None)
-            
-            if not olt_config:
-                self.log_to_gui(f"ERRO: Configuração não encontrada para o IP {olt_ip}")
-                continue
+            for item in selected_items:
+                # --- INÍCIO DA CORREÇÃO (CÓDIGO REINSERIDO) ---
+                ip_match = re.search(r'\((\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\)', item.text())
+                if not ip_match: continue
+                
+                olt_ip = ip_match.group(1)
+                olt_config = next((olt for olt in self.olt_configs if olt['ip'] == olt_ip), None)
+                
+                if not olt_config:
+                    self.log_to_gui(f"ERRO: Configuração não encontrada para o IP {olt_ip}")
+                    continue
 
-            if olt_ip in self.collection_threads and self.collection_threads[olt_ip].is_alive():
-                self.log_to_gui(f"AVISO: A coleta para a OLT {olt_config['name']} já está em execução.")
-                continue
+                if olt_ip in self.collection_threads and self.collection_threads[olt_ip].is_alive():
+                    self.log_to_gui(f"AVISO: A coleta para a OLT {olt_config['name']} já está em execução.")
+                    continue
+                # --- FIM DA CORREÇÃO ---
 
-            self.log_to_gui(f"Iniciando thread para OLT: {olt_config['name']}...")
-            thread = threading.Thread(
-                target=run_data_collection,
-                args=(
-                    olt_config['ip'], 
-                    olt_config['username'], 
-                    olt_config['password'], 
-                    self, 
-                    self.log_message_received.emit
-                ),
-                daemon=True
-            )
-            self.collection_threads[olt_ip] = thread
-            thread.start()
+                # Cria a fila e a thread do worker ETH antes da thread principal
+                eth_q = queue.Queue()
+                self.eth_task_queues[olt_ip] = eth_q
+                
+                eth_thread = threading.Thread(
+                    target=process_ont_eth_worker,
+                    args=(eth_q, self, self.log_message_received.emit),
+                    daemon=True,
+                    name=f"EthWorker-{olt_ip}" # Adiciona nome para facilitar debug
+                )
+                self.eth_collection_threads[olt_ip] = eth_thread
+                eth_thread.start()
+                
+                # Inicia a thread orquestradora principal
+                thread = threading.Thread(
+                    target=run_data_collection,
+                    args=(
+                        olt_config['ip'], 
+                        olt_config['username'], 
+                        olt_config['password'], 
+                        self, 
+                        self.log_message_received.emit,
+                        eth_q  # Passa a fila para o orquestrador
+                    ),
+                    daemon=True,
+                    name=f"PonWorker-{olt_ip}" # Adiciona nome para facilitar debug
+                )
+                self.collection_threads[olt_ip] = thread
+                thread.start()
 
     def stop_all_collections(self):
         """Sinaliza para todas as threads de coleta pararem."""
@@ -1228,6 +1273,13 @@ class OLTDatabaseGUI(QMainWindow):
             
         self.log_to_gui("--- Sinal de parada enviado para todas as coletas. ---")
         self.collection_running = False
+
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        # Envia sinal de parada para as threads de coleta ETH
+        for q in self.eth_task_queues.values():
+            q.put(None)
+        # --- FIM DA MODIFICAÇÃO ---
+
         self.start_selected_btn.setEnabled(True)
         self.stop_all_btn.setEnabled(False)
 
@@ -3738,3 +3790,93 @@ class OLTDatabaseGUI(QMainWindow):
         """Atualiza a exibição de estatísticas de pacotes de ONT se a aba estiver ativa."""
         if hasattr(self, 'ont_stats_tab') and self.tab_widget.currentWidget() == self.ont_stats_tab:
             self.load_ont_stats_data()
+
+    # Adicione este novo método para configurar a aba ONT Ethernet
+    def setup_ont_eth_tab(self):
+        layout = QVBoxLayout(self.ont_eth_tab)
+        
+        control_panel = QWidget()
+        control_layout = QHBoxLayout(control_panel)
+        self.ont_eth_olt_filter = QComboBox()
+        if self.ont_eth_olt_filter not in self.olt_filters_to_update: # Correção de bug potencial
+            self.olt_filters_to_update.append(self.ont_eth_olt_filter)
+        self.ont_eth_fsp_filter = QComboBox()
+        
+        self.ont_eth_olt_filter.currentTextChanged.connect(self.update_ont_eth_fsp_filter)
+        self.ont_eth_fsp_filter.currentTextChanged.connect(self.load_ont_eth_data)
+
+        control_layout.addWidget(QLabel("OLT:"))
+        control_layout.addWidget(self.ont_eth_olt_filter)
+        control_layout.addWidget(QLabel("F/S/P:"))
+        control_layout.addWidget(self.ont_eth_fsp_filter)
+        control_layout.addStretch()
+        layout.addWidget(control_panel)
+
+        self.ont_eth_table = QTableWidget()
+        self.ont_eth_table.setColumnCount(12)
+        self.ont_eth_table.setHorizontalHeaderLabels([
+            "F/S/P", "ONT ID", "ETH Port", "Hora", "RX Frames", "TX Frames", 
+            "RX Bytes", "TX Bytes", "RX Erros", "TX Erros", "TX Colisões", "Duração (s)"
+        ])
+        self.ont_eth_table.setSortingEnabled(True)
+        layout.addWidget(self.ont_eth_table)
+
+        self.ont_eth_timer = QTimer(self)
+        self.ont_eth_timer.setInterval(60000)
+        self.ont_eth_timer.timeout.connect(self.load_ont_eth_data)
+        
+    # Adicione este novo método para atualizar o filtro de FSP
+    def update_ont_eth_fsp_filter(self):
+        self.ont_eth_fsp_filter.blockSignals(True)
+        self.ont_eth_fsp_filter.clear()
+        self.ont_eth_fsp_filter.addItem("Todas as PONs")
+        selected_olt = self.ont_eth_olt_filter.currentText()
+        if selected_olt != "Todas as OLTs":
+            try:
+                olt_id = selected_olt.split()[-1]
+                query = "SELECT DISTINCT fsp FROM ont_eth_port_statistics WHERE olt_identifier = %s ORDER BY fsp;"
+                self.cursor.execute(query, (olt_id,))
+                self.ont_eth_fsp_filter.addItems([row[0] for row in self.cursor.fetchall()])
+            except Exception as e:
+                logging.error(f"Erro ao carregar FSPs para filtro ETH: {e}")
+        self.ont_eth_fsp_filter.blockSignals(False)
+        self.load_ont_eth_data()
+        
+    # Adicione este novo método para carregar os dados
+    def load_ont_eth_data(self):
+        if not self.isVisible() or self.tab_widget.currentWidget() != self.ont_eth_tab: return
+        self.ont_eth_table.setSortingEnabled(False)
+        self.ont_eth_table.setRowCount(0)
+        
+        conditions, params = [], []
+        if self.ont_eth_olt_filter.currentText() != "Todas as OLTs":
+            conditions.append("olt_identifier = %s")
+            params.append(self.ont_eth_olt_filter.currentText().split()[-1])
+        if self.ont_eth_fsp_filter.currentText() != "Todas as PONs":
+            conditions.append("fsp = %s")
+            params.append(self.ont_eth_fsp_filter.currentText())
+        
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = f"""
+            SELECT fsp, ont_id, eth_port_id, collection_time, rx_frames, tx_frames,
+                   rx_bytes, tx_bytes, rx_error_frames, tx_error_frames,
+                   tx_collision_frames, duration_seconds
+            FROM ont_eth_port_statistics {where_clause} ORDER BY collection_time DESC LIMIT 2000;
+        """
+        try:
+            self.cursor.execute(query, tuple(params))
+            for row_idx, row in enumerate(self.cursor.fetchall()):
+                self.ont_eth_table.insertRow(row_idx)
+                for col_idx, data in enumerate(row):
+                    item = QTableWidgetItem(str(data) if data is not None else "")
+                    self.ont_eth_table.setItem(row_idx, col_idx, item)
+            self.ont_eth_table.resizeColumnsToContents()
+        except Exception as e:
+            logging.error(f"Erro ao carregar dados de ETH ONT: {e}")
+        finally:
+            self.ont_eth_table.setSortingEnabled(True)
+
+    # Adicione este novo método para ser o slot do sinal
+    def update_ont_eth_display(self):
+        if self.tab_widget.currentWidget() == self.ont_eth_tab:
+            self.load_ont_eth_data()

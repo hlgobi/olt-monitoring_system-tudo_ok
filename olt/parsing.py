@@ -394,3 +394,45 @@ def parse_ont_statistics(response):
                     continue
     return stats_data
 # --- FIM DA MODIFICAÇÃO ---
+
+# --- INÍCIO DA MODIFICAÇÃO ---
+def parse_ont_eth_statistics(response):
+    """
+    Analisa a saída do comando 'display statistics ont-eth ...' e extrai os contadores.
+    """
+    stats_data = {}
+    key_map = {
+        # Recebimento (RX)
+        "Received frames": "rx_frames",
+        "Received bytes": "rx_bytes",
+        "Received unicast frames": "rx_unicast_frames",
+        "Received multicast frames": "rx_multicast_frames",
+        "Received broadcast frames": "rx_broadcast_frames",
+        "Received error frames": "rx_error_frames",
+        "Received discarded frames": "rx_discarded_frames",
+        # Envio (TX)
+        "Sent frames": "tx_frames",
+        "Sent bytes": "tx_bytes",
+        "Sent unicast frames": "tx_unicast_frames",
+        "Sent multicast frames": "tx_multicast_frames",
+        "Sent broadcast frames": "tx_broadcast_frames",
+        "Sent error frames": "tx_error_frames",
+        "Sent discarded frames": "tx_discarded_frames",
+        "Sent collision frames": "tx_collision_frames",
+        # Outros
+        "Statistics duration(s)": "duration_seconds",
+    }
+
+    for line in response.splitlines():
+        if ":" in line:
+            try:
+                key, value = line.split(":", 1)
+                key = key.strip()
+                if key in key_map:
+                    db_key = key_map[key]
+                    numeric_value = int(value.strip())
+                    stats_data[db_key] = numeric_value
+            except (ValueError, TypeError):
+                continue
+    return stats_data
+# --- FIM DA MODIFICAÇÃO ---

@@ -10,17 +10,19 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed # Para executar tarefas em paralelo.
 import random # Usado para adicionar um pequeno atraso aleatório e evitar que todas as threads iniciem exatamente ao mesmo tempo.
 import json
-
+import queue
 # --- Importações de Módulos da Aplicação ---
 from olt.communication import send_command, connect_to_olt # Funções para conectar e enviar comandos à OLT.
 # --- INÍCIO DA MODIFICAÇÃO 1: Importações ---
 from olt.parsing import (extract_service_mac, extract_ont_info, parse_ont_info_details, 
                          parse_pon_port_state, parse_port_info, parse_pon_statistics_packets, 
-                         parse_ont_traffic, parse_ont_statistics)
+                         parse_ont_traffic, parse_ont_statistics, parse_ont_eth_statistics) # <--- MODIFICADO
+
+# Substitua a importação de operations para incluir a nova função
 from db.operations import (save_ont_data, save_pon_status, save_temp_data, 
                            save_resource_data, save_pon_traffic_data, save_pon_port_state, 
                            save_pon_statistics_packets, save_ont_traffic_bulk, 
-                           save_ont_statistics_packets_bulk)
+                           save_ont_statistics_packets_bulk, save_ont_eth_statistics_bulk) # <--- MODIFICADO
 
 from gui.signals import db_signals
 
@@ -312,7 +314,7 @@ def collect_ont_statistics(shell, slot, port, ont_ids, log_callback):
     log_callback(f"{log_prefix} Coleta de estatísticas finalizada. {len(all_stats)} ONTs processadas.")
     return all_stats
 
-def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instance, log_callback):
+def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instance, log_callback, eth_task_queue):
     """
     (VERSÃO FINAL E ROBUSTA) Worker que conecta, gerencia a navegação com verificação de prompt
     e chama as funções de coleta de forma segura e na ordem correta.
@@ -362,11 +364,28 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
         ont_info_dict, online_count, total_count = extract_ont_info(summary_response)
         log_callback(f"{log_prefix} Encontradas {total_count} ONTs ({online_count} online).")
         save_pon_status(olt_ip, pon_fsp, online_count, total_count)
-        
+
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        # Adiciona tarefas para as ONTs online na fila de coleta ETH
+        for ont_id_str, info in ont_info_dict.items():
+            if info.get("run_state", "").lower() == "online":
+                task = {
+                    "olt_ip": olt_ip,
+                    "username": username,
+                    "password": password,
+                    "slot": slot,
+                    "port": port,
+                    "ont_id": int(ont_id_str),
+                    "eth_ports": [1, 2, 3, 4] # Coleta das 4 portas padrão
+                }
+                eth_task_queue.put(task)
+                logging.info(f"{log_prefix} Tarefa ETH adicionada à fila para ONT ID {ont_id_str}")
+        # --- FIM DA MODIFICAÇÃO ---
+
         # --- Etapa 3: Navegação para os modos de configuração com VERIFICAÇÃO ---
         log_callback(f"{log_prefix} Entrando nos modos de configuração...")
         
-        # Entra no modo 'config' e verifica se o prompt mudou
+        # Entra no modo 'config' e verifica se o prompt mudouf
         shell.send("config\n")
         config_response = ""
         config_prompt_found = False
@@ -524,8 +543,95 @@ def collect_pon_state(shell, slot, port):
     except Exception as e:
         logging.error(f"{log_prefix} Erro CRÍTICO durante coleta de estado: {e}", exc_info=True)
         return None
+
+# Adicione esta nova função ANTES da função 'run_data_collection'
+def process_ont_eth_worker(eth_task_queue, gui_window_instance, log_callback):
+    """
+    Worker dedicado que consome uma fila para coletar estatísticas das portas Ethernet das ONTs.
+    Mantém uma conexão SSH aberta para eficiência.
+    """
+    client = None
+    shell = None
+    current_olt_ip = None
+    log_prefix = "[Worker ONT-ETH]"
     
-def run_data_collection(olt_ip, username, password, gui_window_instance, log_callback):
+    while gui_window_instance.collection_running:
+        try:
+            # Obtém uma tarefa da fila, com timeout para poder verificar a flag de execução
+            task = eth_task_queue.get(timeout=5)
+            if task is None: # Sinal para terminar a thread
+                break
+
+            olt_ip = task['olt_ip']
+            username = task['username']
+            password = task['password']
+            slot = task['slot']
+            port = task['port']
+            ont_id = task['ont_id']
+            eth_ports = task['eth_ports']
+            
+            # Gerencia a conexão: conecta/reconecta se necessário
+            if not client or not shell or current_olt_ip != olt_ip:
+                if client: client.close()
+                log_callback(f"{log_prefix} Conectando à OLT {olt_ip} para coleta ETH...")
+                client, shell = connect_to_olt(olt_ip, username, password, max_retries=2)
+                shell.send("enable\n")
+                time.sleep(2) # Pausa generosa para enable
+                if "Password" in shell.recv(2048).decode('utf-8', 'ignore'):
+                    shell.send(f"{password}\n")
+                    time.sleep(2)
+                current_olt_ip = olt_ip
+
+            # Navega para a interface correta
+            shell.send("config\n")
+            time.sleep(1)
+            shell.send(f"interface gpon 0/{slot}\n")
+            time.sleep(1)
+            
+            # Limpa o buffer antes de executar os comandos
+            while shell.recv_ready(): shell.recv(4096)
+
+            all_stats_for_ont = []
+            for eth_port_id in eth_ports:
+                command = f"display statistics ont-eth {port} {ont_id} ont-port {eth_port_id}\n"
+                response = send_command_with_pagination(shell, command, timeout=20)
+                
+                parsed_stats = parse_ont_eth_statistics(response)
+                if parsed_stats:
+                    all_stats_for_ont.append({
+                        "eth_port_id": eth_port_id,
+                        "stats": parsed_stats
+                    })
+                time.sleep(0.5) # Pausa entre as portas da mesma ONT
+
+            # Salva os dados coletados em lote para a ONT atual
+            if all_stats_for_ont:
+                save_ont_eth_statistics_bulk(olt_ip, f"0/{slot}/{port}", ont_id, all_stats_for_ont)
+
+            # Sai da interface para a próxima tarefa
+            shell.send("quit\n")
+            time.sleep(0.5)
+            shell.send("quit\n")
+            time.sleep(0.5)
+            
+            eth_task_queue.task_done()
+
+        except queue.Empty:
+            # A fila está vazia, o que é normal. Continua o loop para verificar a flag.
+            continue
+        except Exception as e:
+            log_callback(f"{log_prefix} Erro no worker: {e}")
+            logging.error(f"{log_prefix} Erro no worker: {e}", exc_info=True)
+            # Em caso de erro, fecha a conexão para forçar uma reconexão na próxima tarefa
+            if client: client.close()
+            client, shell, current_olt_ip = None, None, None
+            time.sleep(10) # Pausa antes de tentar a próxima tarefa
+
+    if client:
+        client.close()
+    log_callback(f"{log_prefix} Finalizado.")
+
+def run_data_collection(olt_ip, username, password, gui_window_instance, log_callback, eth_task_queue):
     """
     Executa o processo de coleta de dados principal para UMA OLT.
     Esta função roda em uma thread separada para cada OLT selecionada na GUI.
@@ -534,7 +640,8 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
     main_client = None
     cycle_count = 0
     
-    # Loop infinito que controla os ciclos de coleta. Só para se o usuário clicar em "Parar Coleta".
+    NUM_PON_THREADS = 3 
+
     while gui_window_instance.collection_running:
         cycle_count += 1
         log_callback(f"[{olt_ip}] Iniciando ciclo de coleta #{cycle_count}")
@@ -547,15 +654,13 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
             
             log_callback(f"[{olt_ip}] Conectado. Aguardando estabilização do shell...")
             time.sleep(3)
-            while main_shell.recv_ready(): # Limpa o buffer.
+            while main_shell.recv_ready():
                 main_shell.recv(4096)
             
-            # Entra no modo 'enable'.
             log_callback(f"[{olt_ip}] Enviando 'enable'...")
             main_shell.send("enable\n")
             time.sleep(1)
             
-            # Lógica para lidar com o prompt de senha do 'enable'.
             response_buffer = ""
             for _ in range(5):
                 if main_shell.recv_ready():
@@ -574,37 +679,35 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
             time.sleep(1)
             while main_shell.recv_ready(): main_shell.recv(4096)
             
-            # Obtém a lista de placas ativas.
             active_boards_info = get_active_gpon_slots(main_shell)
-            main_client.close() # Fecha a conexão principal após obter a lista.
+            main_client.close()
             log_callback(f"[{olt_ip}] Placas ativas encontradas: {len(active_boards_info)}")
 
             if not active_boards_info:
                 log_callback(f"[{olt_ip}] Nenhuma placa GPON/XGPON ativa encontrada. Pulando ciclo.")
-                time.sleep(30) # Espera antes de tentar novamente.
+                time.sleep(30)
                 continue
 
             # --- Etapa 2: Processar todas as portas PON em paralelo ---
-            # Cria uma lista de todas as tarefas (uma para cada porta PON).
             pon_tasks = [(b['slot'], p) for b in active_boards_info for p in range(b['ports'])]
-            log_callback(f"[{olt_ip}] Total de {len(pon_tasks)} PONs para processar com {NUM_THREADS} threads.")
+            log_callback(f"[{olt_ip}] Total de {len(pon_tasks)} PONs para processar com {NUM_PON_THREADS} threads.")
             
             total_onts_processed_cycle = 0
-            # Usa ThreadPoolExecutor para gerenciar as threads.
-            with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
-                # Submete cada tarefa (processar uma PON) para o executor.
+            
+            # --- INÍCIO DA ÁREA CORRIGIDA (INDENTAÇÃO) ---
+            with ThreadPoolExecutor(max_workers=NUM_PON_THREADS) as executor:
                 future_to_pon = {
-                    executor.submit(process_pon_worker, olt_ip, username, password, s, p, gui_window_instance, log_callback): f"{s}/{p}" 
+                    executor.submit(process_pon_worker, olt_ip, username, password, s, p, gui_window_instance, log_callback, eth_task_queue): f"{s}/{p}" 
                     for s, p in pon_tasks
                 }
-                # Processa os resultados à medida que as threads terminam.
                 for future in as_completed(future_to_pon):
-                    if not gui_window_instance.collection_running: break # Para se o usuário cancelou.
+                    if not gui_window_instance.collection_running: break
                     try:
-                        result = future.result() # Pega o resultado (número de ONTs processadas).
+                        result = future.result()
                         total_onts_processed_cycle += result
                     except Exception as exc:
                         log_callback(f'[{olt_ip}] PON {future_to_pon[future]} gerou uma exceção: {exc}')
+            # --- FIM DA ÁREA CORRIGIDA ---
 
             if not gui_window_instance.collection_running:
                 log_callback(f"[{olt_ip}] Coleta interrompida durante o ciclo.")
@@ -614,24 +717,16 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
             end_cycle_time = time.time()
             cycle_duration = end_cycle_time - start_cycle_time
             
-            # Emite sinais para a GUI atualizar as informações na tela.
             db_signals.ont_cycle_completed.emit(olt_ip, cycle_count, cycle_duration)
             db_signals.data_updated.emit()
             db_signals.pon_status_updated.emit()
-            
-            # Emitir sinal de atualização de tráfego PON
             db_signals.pon_traffic_updated.emit()
-            
             db_signals.pon_port_state_updated.emit()
-
             db_signals.pon_stats_packets_updated.emit()
-
             db_signals.ont_traffic_data_updated.emit()
 
-            # Define o tempo de espera para o próximo ciclo (5 minutos).
             wait_time_seconds = 60
             log_callback(f"[{olt_ip}] Aguardando {wait_time_seconds / 60:.1f} minuto(s) para o próximo ciclo.")
-            # Loop de espera que pode ser interrompido a qualquer momento pelo usuário.
             for _ in range(wait_time_seconds):
                 if not gui_window_instance.collection_running: break
                 time.sleep(1)
@@ -641,8 +736,9 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
             logging.critical(f"[{olt_ip}] Erro CRÍTICO no ciclo de coleta: {str(e)}", exc_info=True)
             if main_client:
                 main_client.close()
-            break # Interrompe o loop principal em caso de erro crítico.
+            break
             
+    eth_task_queue.put(None)
     log_callback(f"[{olt_ip}] Thread de coleta finalizada.")
 
 def run_temp_monitoring(olt_ip, username, password, gui_window_instance):
