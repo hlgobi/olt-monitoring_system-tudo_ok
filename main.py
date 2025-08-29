@@ -116,3 +116,11 @@ def main():
 if __name__ == '__main__':
     # Se estiver, chama a função main() para iniciar a aplicação
     main()
+
+# Em main.py, após as outras importações
+try:
+    from uplinks_config import UPLINKS
+    logging.info("Configurações de uplinks carregadas com sucesso.")
+except ImportError:
+    logging.warning("Arquivo uplinks_config.py não encontrado. A funcionalidade de DDM não estará disponível.")
+    UPLINKS = {}

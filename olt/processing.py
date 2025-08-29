@@ -16,15 +16,19 @@ from config import DB_CONFIG
 # --- Importações de Módulos da Aplicação ---
 from olt.communication import send_command, connect_to_olt 
 # --- INÍCIO DA MODIFICAÇÃO 1: Importações ---
+# Substitua a importação existente por esta que inclui todas as funções
 from olt.parsing import (extract_service_mac, extract_ont_info, parse_ont_info_details, 
                          parse_pon_port_state, parse_port_info, parse_pon_statistics_packets, 
-                         parse_ont_traffic, parse_ont_statistics, parse_ont_eth_statistics) # <--- MODIFICADO
+                         parse_ont_traffic, parse_ont_statistics, parse_ont_eth_statistics,
+                         parse_uplink_ddm_response)
 
 # Substitua a importação de operations para incluir a nova função
+# Substitua a importação existente por esta que inclui todas as funções
 from db.operations import (save_ont_data, save_pon_status, save_temp_data, 
                            save_resource_data, save_pon_traffic_data, save_pon_port_state, 
                            save_pon_statistics_packets, save_ont_traffic_bulk, 
-                           save_ont_statistics_packets_bulk, save_ont_eth_statistics_bulk) # <--- MODIFICADO
+                           save_ont_statistics_packets_bulk, save_ont_eth_statistics_bulk,
+                           save_uplink_ddm_data)
 
 from gui.signals import db_signals
 
@@ -1064,6 +1068,35 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
             
             total_onts_processed_cycle = 0
             
+            # --- Coleta de dados DDM de uplink ---
+            try:
+                from uplinks_config import UPLINKS
+                
+                # Obter o nome da OLT a partir do IP
+                olt_name = f"OLT {olt_ip.split('.')[-1]}"
+                
+                # Verificar se há configuração de uplink para esta OLT
+                if olt_name in UPLINKS:
+                    uplink_configs = UPLINKS[olt_name]
+                    log_callback(f"[{olt_ip}] Coletando dados DDM de {len(uplink_configs)} uplinks...")
+                    
+                    # Coletar dados DDM
+                    ddm_data_list = collect_uplink_ddm_data(olt_ip, username, password, uplink_configs)
+                    
+                    if ddm_data_list:
+                        # Salvar no banco de dados
+                        save_uplink_ddm_data(olt_ip, ddm_data_list)
+                        log_callback(f"[{olt_ip}] {len(ddm_data_list)} registros DDM salvos.")
+                    else:
+                        log_callback(f"[{olt_ip}] Nenhum dado DDM coletado.")
+                else:
+                    log_callback(f"[{olt_ip}] Nenhuma configuração de uplink encontrada.")
+                    
+            except Exception as e:
+                log_callback(f"[{olt_ip}] Erro na coleta DDM: {e}")
+                logging.error(f"[{olt_ip}] Erro na coleta DDM: {e}", exc_info=True)
+
+
             with ThreadPoolExecutor(max_workers=NUM_PON_THREADS) as executor:
                 future_to_pon = {
                     executor.submit(process_pon_worker, olt_ip, username, password, s, p, gui_window_instance, log_callback, eth_task_queue): f"{s}/{p}" 
@@ -1103,6 +1136,8 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
                 main_client.close()
             break
             
+
+
     eth_task_queue.put(None)
     log_callback(f"[{olt_ip}] Thread de coleta finalizada.")
 
@@ -1376,3 +1411,137 @@ def collect_pon_traffic(shell, slot, port):
         logging.error(f"{log_prefix} Erro durante coleta de tráfego: {e}", exc_info=True)
         return None
     
+def collect_uplink_ddm_data(olt_ip, username, password, uplink_configs):
+    """Coleta dados DDM das portas de uplink de uma OLT"""
+    client = None
+    ddm_data_list = []
+    
+    try:
+        client, shell = connect_to_olt(olt_ip, username, password)
+        if not client or not shell:
+            logging.error(f"[{olt_ip}] Falha ao conectar para coleta DDM.")
+            return []
+        
+        # Entrar no modo enable
+        shell.send("enable\n")
+        time.sleep(1)
+        
+        response = ""
+        while shell.recv_ready():
+            response += shell.recv(4096).decode('utf-8', errors='ignore')
+        
+        if "Password:" in response:
+            shell.send(f"{password}\n")
+            time.sleep(2)
+            while shell.recv_ready():
+                shell.recv(4096)
+        
+        # Entrar no modo config
+        shell.send("config\n")
+        time.sleep(1)
+        
+        response = ""
+        while shell.recv_ready():
+            response += shell.recv(4096).decode('utf-8', errors='ignore')
+        
+        if "(config)" not in response:
+            logging.error(f"[{olt_ip}] Não foi possível entrar no modo config para coleta DDM.")
+            return []
+        
+        # Para cada configuração de uplink
+        for config in uplink_configs:
+            placa = config['placa']
+            slot = config['slot']
+            port = config['port']
+            
+            try:
+                # Determinar o comando de interface baseado no tipo de placa
+                interface_cmd = None
+                expected_prompt = None
+                
+                if placa.startswith("H801") or placa.startswith("H802"):
+                    # Para placas H801 e H802, o formato é interface giu 0/slot
+                    interface_cmd = f"interface giu 0/{slot}"
+                    expected_prompt = f"(config-if-giu-0/{slot})"
+                elif placa.startswith("H901") or placa.startswith("H902"):
+                    # Para placas H901 e H902, o formato é interface xgigabitethernet 0/slot
+                    interface_cmd = f"interface xgigabitethernet 0/{slot}"
+                    expected_prompt = f"(config-if-xge-0/{slot})"
+                else:
+                    logging.warning(f"[{olt_ip}] Tipo de placa desconhecido: {placa}")
+                    continue
+                
+                logging.info(f"[{olt_ip}] Tentando comando de interface: {interface_cmd}")
+                
+                shell.send(f"{interface_cmd}\n")
+                time.sleep(1)
+                
+                response = ""
+                while shell.recv_ready():
+                    response += shell.recv(4096).decode('utf-8', errors='ignore')
+                
+                # Verificar se entrou no modo de interface
+                if expected_prompt in response:
+                    logging.info(f"[{olt_ip}] Entrou no modo de interface com sucesso: {interface_cmd}")
+                else:
+                    logging.error(f"[{olt_ip}] Não foi possível entrar no modo de interface para {placa} slot {slot}")
+                    logging.debug(f"[{olt_ip}] Resposta após tentar entrar no modo de interface:\n{response}")
+                    continue
+                
+                # Enviar o comando DDM - o número da porta é passado como parâmetro
+                ddm_cmd = f"display port ddm-info {port}"
+                logging.info(f"[{olt_ip}] Enviando comando DDM: {ddm_cmd}")
+                shell.send(f"{ddm_cmd}\n")
+                time.sleep(2)
+                
+                # Ler a resposta com tratamento de paginação
+                response = ""
+                timeout = time.time() + 15
+                while time.time() < timeout:
+                    if shell.recv_ready():
+                        chunk = shell.recv(4096).decode('utf-8', errors='ignore')
+                        response += chunk
+                        
+                        # Tratar paginação
+                        if "---- More" in chunk:
+                            shell.send(" ")
+                            time.sleep(0.5)
+                            continue
+                        
+                        # Verificar se o comando terminou
+                        if expected_prompt in response:
+                            break
+                    time.sleep(0.2)
+                
+                # Parsear a resposta
+                ddm_data = parse_uplink_ddm_response(response)
+                if ddm_data:
+                    ddm_data['placa'] = placa
+                    ddm_data['slot'] = slot
+                    ddm_data['port'] = port
+                    ddm_data_list.append(ddm_data)
+                    logging.info(f"[{olt_ip}] DDM coletado para {placa} slot {slot} port {port}")
+                else:
+                    logging.warning(f"[{olt_ip}] Falha ao parsear DDM para {placa} slot {slot} port {port}")
+                    logging.debug(f"[{olt_ip}] Resposta DDM bruta:\n{response}")
+                
+                # Sair do modo de interface
+                shell.send("quit\n")
+                time.sleep(0.5)
+                
+            except Exception as e:
+                logging.error(f"[{olt_ip}] Erro ao coletar DDM para {placa} slot {slot} port {port}: {e}")
+                continue
+        
+        # Sair do modo config
+        shell.send("quit\n")
+        time.sleep(0.5)
+        
+        return ddm_data_list
+        
+    except Exception as e:
+        logging.error(f"[{olt_ip}] Erro geral na coleta DDM: {e}")
+        return []
+    finally:
+        if client:
+            client.close()

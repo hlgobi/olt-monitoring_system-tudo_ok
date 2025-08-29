@@ -298,7 +298,28 @@ def create_tables():
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_eth_stats_fsp_ont_eth_time ON ont_eth_port_statistics(fsp, ont_id, eth_port_id, collection_time DESC);")
             logging.info("Tabela 'ont_eth_port_statistics' verificada/criada.")
-            
+
+            # Em db/connection.py, dentro da função create_tables
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS public.uplink_ddm_data (
+                    id SERIAL PRIMARY KEY,
+                    olt_ip VARCHAR(50) NOT NULL,
+                    olt_identifier VARCHAR(10) NOT NULL,
+                    collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                    placa VARCHAR(50) NOT NULL,
+                    slot INTEGER NOT NULL,
+                    port INTEGER NOT NULL,
+                    temperature_c FLOAT,
+                    supply_voltage_v FLOAT,
+                    tx_bias_current_ma FLOAT,
+                    tx_power_dbm FLOAT,
+                    rx_power_dbm FLOAT,
+                    status VARCHAR(20) DEFAULT 'normal'
+                );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_uplink_ddm_olt_slot_port_time ON public.uplink_ddm_data(olt_identifier, slot, port, collection_time DESC);")
+            logging.info("Tabela 'public.uplink_ddm_data' verificada/criada.")
+
         conn.commit()
         logging.info("Todas as tabelas e colunas foram verificadas/criadas com sucesso no esquema 'public'.")
         return True

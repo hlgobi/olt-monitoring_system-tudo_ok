@@ -887,3 +887,59 @@ def save_ont_eth_statistics_bulk(olt_ip, fsp, ont_id, stats_list_per_port):
     finally:
         if conn: 
             conn.close()
+
+def save_uplink_ddm_data(olt_ip, ddm_data_list):
+    """Salva dados DDM de uplink no banco de dados"""
+    conn = None
+    try:
+        olt_identifier = olt_ip.split('.')[-1]
+        conn = psycopg2.connect(**DB_CONFIG)
+        
+        with conn.cursor() as cursor:
+            args_list = []
+            for data in ddm_data_list:
+                # Determina status com base nos valores
+                status = 'normal'
+                if data.get('temperature_c', 0) > 80:
+                    status = 'warning'
+                if data.get('temperature_c', 0) > 85:
+                    status = 'critical'
+                
+                args_list.append((
+                    olt_ip, olt_identifier, data['placa'], data['slot'], data['port'],
+                    data.get('temperature_c'), data.get('supply_voltage_v'),
+                    data.get('tx_bias_current_ma'), data.get('tx_power_dbm'),
+                    data.get('rx_power_dbm'), status
+                ))
+            
+            query = """
+                INSERT INTO uplink_ddm_data (
+                    olt_ip, olt_identifier, placa, slot, port,
+                    temperature_c, supply_voltage_v, tx_bias_current_ma,
+                    tx_power_dbm, rx_power_dbm, status
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            
+            from psycopg2.extras import execute_batch
+            execute_batch(cursor, query, args_list)
+            conn.commit()
+            
+            logging.info(f"[{olt_ip}] {len(args_list)} registros DDM inseridos com sucesso.")
+            
+            # Emitir o sinal para atualizar a GUI
+            try:
+                db_signals.data_updated.emit()
+                logging.info(f"[{olt_ip}] Sinal data_updated emitido com sucesso para atualizar a GUI.")
+            except Exception as e:
+                logging.error(f"[{olt_ip}] Erro ao emitir sinal data_updated: {e}")
+            
+            return len(args_list)
+            
+    except Exception as e:
+        logging.error(f"Erro ao salvar dados DDM para OLT {olt_ip}: {e}")
+        if conn:
+            conn.rollback()
+        return 0
+    finally:
+        if conn:
+            conn.close()

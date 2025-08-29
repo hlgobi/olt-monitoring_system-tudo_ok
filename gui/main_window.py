@@ -30,6 +30,7 @@ from olt.processing import (run_data_collection, process_ont_eth_worker,
                             get_active_gpon_slots, parse_board_info as olt_parse_board_info,
                             get_slot_cpu_usage, get_slot_memory_usage, get_resource_status)
 # --- FIM DA CORREÇÃO ---
+# Em gui/main_window.py, verifique a importação
 from gui.signals import db_signals
 from db.connection import create_tables, check_db_connection
 from db.operations import (save_ont_data, save_pon_status, save_temp_data,
@@ -134,6 +135,13 @@ class OLTDatabaseGUI(QMainWindow):
         db_signals.ont_traffic_data_updated.connect(self.update_ont_traffic_display)
         db_signals.pon_port_state_updated.connect(self.update_pon_port_state_display)
         db_signals.ont_eth_stats_updated.connect(self.update_ont_eth_display) # Conecta o novo sinal
+        db_signals.uplink_ddm_updated.connect(self.load_uplink_ddm_data)
+        # Conectar o sinal para atualizar a aba DDM
+        try:
+            db_signals.data_updated.connect(self.load_uplink_ddm_data)
+            logging.info("Sinal data_updated conectado ao método load_uplink_ddm_data com sucesso.")
+        except Exception as e:
+            logging.error(f"Erro ao conectar sinal data_updated: {e}")
         self.log_message_received.connect(self.log_to_gui)
 
 # Em gui/main_window.py, modifique o método init_eth_workers:
@@ -253,6 +261,11 @@ class OLTDatabaseGUI(QMainWindow):
         self.setup_ont_eth_tab()
         # --- FIM DA MODIFICAÇÃO ---
 
+        # No método init_ui, após a criação das outras abas
+        self.uplink_ddm_tab = QWidget()
+        self.tab_widget.addTab(self.uplink_ddm_tab, "Uplink DDM")
+        self.setup_uplink_ddm_tab()
+
         self.caixa_stats_update_timer = QTimer(self)
         self.caixa_stats_update_timer.setInterval(30000)
         self.caixa_stats_update_timer.timeout.connect(self.load_caixa_stats_data)
@@ -364,6 +377,18 @@ class OLTDatabaseGUI(QMainWindow):
                 logging.info("Saindo da aba de estatísticas ETH de ONT. Parando timer.")
                 self.ont_eth_timer.stop()
         # --- FIM DA MODIFICAÇÃO ---
+
+        # Lógica para a aba de Uplink DDM
+        if current_tab == self.uplink_ddm_tab:
+            logging.info("Aba 'Uplink DDM' ativada. Iniciando timer.")
+            QTimer.singleShot(100, self.load_uplink_ddm_data)
+            self.load_uplink_ddm_data()
+            self.uplink_ddm_timer.start()
+        else:
+            if hasattr(self, 'uplink_ddm_timer') and self.uplink_ddm_timer.isActive():
+                logging.info("Saindo da aba de DDM. Parando timer.")
+                self.uplink_ddm_timer.stop()
+
 
     def setup_long_offline_tab(self):
         """Configura a interface da aba 'Longo Tempo Offline'."""
@@ -4000,3 +4025,134 @@ class OLTDatabaseGUI(QMainWindow):
     def update_ont_eth_display(self):
         if self.tab_widget.currentWidget() == self.ont_eth_tab:
             self.load_ont_eth_data()
+
+    # Adicione o método setup_uplink_ddm_tab
+    def setup_uplink_ddm_tab(self):
+        """Configura a interface da aba 'Uplink DDM'"""
+        layout = QVBoxLayout(self.uplink_ddm_tab)
+
+        # Painel de controle
+        control_panel = QWidget()
+        control_layout = QHBoxLayout(control_panel)
+
+        self.uplink_ddm_olt_filter_label = QLabel("Filtrar por OLT:")
+        self.uplink_ddm_olt_filter = QComboBox()
+        if self.uplink_ddm_olt_filter not in self.olt_filters_to_update:
+            self.olt_filters_to_update.append(self.uplink_ddm_olt_filter)
+        
+        self.uplink_ddm_olt_filter.currentTextChanged.connect(self.load_uplink_ddm_data)
+
+        export_btn = QPushButton("Exportar CSV")
+        export_btn.clicked.connect(self.export_uplink_ddm_to_csv)
+
+        control_layout.addWidget(self.uplink_ddm_olt_filter_label)
+        control_layout.addWidget(self.uplink_ddm_olt_filter)
+        control_layout.addStretch()
+        control_layout.addWidget(export_btn)
+        layout.addWidget(control_panel)
+
+        # Tabela de dados DDM
+        self.uplink_ddm_table = QTableWidget()
+        self.uplink_ddm_table.setColumnCount(10)
+        self.uplink_ddm_table.setHorizontalHeaderLabels([
+            "OLT", "Placa", "Slot", "Porta", 
+            "Temperatura (°C)", "Tensão (V)", 
+            "Corrente Bias (mA)", "Potência TX (dBm)", 
+            "Potência RX (dBm)", "Status", "Data/Hora"
+        ])
+        self.uplink_ddm_table.setSortingEnabled(True)
+        self.uplink_ddm_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        layout.addWidget(self.uplink_ddm_table)
+
+        # Timer para atualização periódica
+        self.uplink_ddm_timer = QTimer(self)
+        self.uplink_ddm_timer.setInterval(300000)  # 5 minutos
+        self.uplink_ddm_timer.timeout.connect(self.load_uplink_ddm_data)
+
+    def load_uplink_ddm_data(self):
+        """Carrega os dados DDM do banco de dados e exibe na tabela"""
+        logging.info("Método load_uplink_ddm_data chamado para atualizar a tabela DDM.")
+        
+        selected_olt = self.uplink_ddm_olt_filter.currentText()
+        logging.info(f"OLT selecionada para filtro: {selected_olt}")
+        
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT olt_ip, placa, slot, port, 
+                    temperature_c, supply_voltage_v, tx_bias_current_ma,
+                    tx_power_dbm, rx_power_dbm, status, collection_time
+                FROM uplink_ddm_data
+            """
+            
+            params = []
+            if selected_olt and selected_olt != "Todas":
+                query += " WHERE olt_ip = %s"
+                params.append(selected_olt)
+            
+            query += " ORDER BY collection_time DESC LIMIT 1000"
+            
+            cursor.execute(query, params)
+            records = cursor.fetchall()
+            
+            logging.info(f"Encontrados {len(records)} registros DDM no banco de dados.")
+            
+            self.uplink_ddm_table.setRowCount(len(records))
+            
+            for row_idx, record in enumerate(records):
+                for col_idx, value in enumerate(record):
+                    if col_idx == 10:  # Data/hora
+                        item = QTableWidgetItem(value.strftime('%d/%m/%Y %H:%M:%S') if value else "N/A")
+                    elif col_idx >= 4 and col_idx <= 8:  # Valores numéricos
+                        item = QTableWidgetItem(f"{value:.2f}" if value is not None else "N/A")
+                    else:
+                        item = QTableWidgetItem(str(value) if value is not None else "N/A")
+                    
+                    # Destacar linhas com status diferente de normal
+                    if col_idx == 9 and value and value != 'normal':
+                        item.setBackground(QColor('#ffdddd'))
+                    
+                    self.uplink_ddm_table.setItem(row_idx, col_idx, item)
+            
+            self.uplink_ddm_table.resizeColumnsToContents()
+            logging.info("Tabela DDM atualizada com sucesso.")
+            
+        except Exception as e:
+            logging.error(f"Erro ao carregar dados DDM: {e}")
+            QMessageBox.critical(self, "Erro", f"Erro ao carregar dados DDM: {str(e)}")
+        finally:
+            if conn:
+                conn.close()
+
+    def export_uplink_ddm_to_csv(self):
+        """Exporta os dados da tabela DDM para um arquivo CSV"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Exportar DDM", "", "Arquivos CSV (*.csv)"
+        )
+        
+        if filename:
+            try:
+                with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.writer(csvfile)
+                    
+                    # Escrever cabeçalho
+                    headers = []
+                    for col in range(self.uplink_ddm_table.columnCount()):
+                        headers.append(self.uplink_ddm_table.horizontalHeaderItem(col).text())
+                    writer.writerow(headers)
+                    
+                    # Escrever dados
+                    for row in range(self.uplink_ddm_table.rowCount()):
+                        row_data = []
+                        for col in range(self.uplink_ddm_table.columnCount()):
+                            item = self.uplink_ddm_table.item(row, col)
+                            row_data.append(item.text() if item else "")
+                        writer.writerow(row_data)
+                
+                QMessageBox.information(self, "Sucesso", "Dados exportados com sucesso!")
+                
+            except Exception as e:
+                logging.error(f"Erro ao exportar dados DDM: {e}")
+                QMessageBox.critical(self, "Erro", f"Erro ao exportar dados: {str(e)}")

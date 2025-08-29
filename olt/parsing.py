@@ -530,3 +530,50 @@ def parse_ont_eth_statistics(response):
     
     logging.debug(f"parse_ont_eth_statistics: Dados extraídos: {stats_data}")
     return stats_data
+
+def parse_uplink_ddm_response(response):
+    """Parseia a saída do comando 'display port ddm-info'"""
+    ddm_data = {}
+    
+    try:
+        lines = response.splitlines()
+        
+        for line in lines:
+            line = line.strip()
+            
+            if ":" in line:
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    value = parts[1].strip()
+                    
+                    if "Temperature(C)" in key:
+                        temp_match = re.search(r'([-+]?\d*\.?\d+)', value)
+                        if temp_match:
+                            ddm_data['temperature_c'] = float(temp_match.group(1))
+                    
+                    elif "Supply voltage(V)" in key:
+                        volt_match = re.search(r'([-+]?\d*\.?\d+)', value)
+                        if volt_match:
+                            ddm_data['supply_voltage_v'] = float(volt_match.group(1))
+                    
+                    elif "TX bias current(mA)" in key:
+                        current_match = re.search(r'([-+]?\d*\.?\d+)', value)
+                        if current_match:
+                            ddm_data['tx_bias_current_ma'] = float(current_match.group(1))
+                    
+                    elif "TX power(dBm)" in key:
+                        tx_power_match = re.search(r'([-+]?\d*\.?\d+)', value)
+                        if tx_power_match:
+                            ddm_data['tx_power_dbm'] = float(tx_power_match.group(1))
+                    
+                    elif "RX power(dBm)" in key:
+                        rx_power_match = re.search(r'([-+]?\d*\.?\d+)', value)
+                        if rx_power_match:
+                            ddm_data['rx_power_dbm'] = float(rx_power_match.group(1))
+        
+        return ddm_data if ddm_data else None
+            
+    except Exception as e:
+        logging.error(f"Erro ao parsear resposta DDM: {e}")
+        return None
