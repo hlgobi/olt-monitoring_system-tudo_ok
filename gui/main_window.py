@@ -341,16 +341,16 @@ class OLTDatabaseGUI(QMainWindow):
                 self.ont_stats_timer.stop()
         # --- FIM DA MODIFICAÇÃO ---
 
-        # --- INÍCIO DA MODIFICAÇÃO ---
+        # Em handle_tab_change, na parte do tráfego ONT
         if current_tab == self.ont_traffic_tab:
             logging.info("Aba 'Dados ONT por PON' ativada. Iniciando timer.")
+            QTimer.singleShot(100, self.load_ont_traffic_data)
             self.load_ont_traffic_data()
             self.ont_traffic_timer.start()
         else:
             if hasattr(self, 'ont_traffic_timer') and self.ont_traffic_timer.isActive():
                 logging.info("Saindo da aba de tráfego ONT. Parando timer.")
                 self.ont_traffic_timer.stop()
-        # --- FIM DA MODIFICAÇÃO ---
 
         # --- INÍCIO DA MODIFICAÇÃO ---
         # Adicione a lógica para a nova aba
@@ -3633,51 +3633,62 @@ class OLTDatabaseGUI(QMainWindow):
         self.load_ont_traffic_data()
 
     def load_ont_traffic_data(self):
-        """Carrega os dados de tráfego por ONT e os exibe na tabela."""
-        if not self.isVisible() or self.tab_widget.currentWidget() != self.ont_traffic_tab:
-            return
-
+        """Carrega os dados de tráfego por ONT para exibição na tabela."""
         logging.info("Carregando dados de tráfego por ONT.")
-        self.ont_traffic_table.setSortingEnabled(False)
-        self.ont_traffic_table.setRowCount(0)
-
-        selected_olt = self.ont_traffic_olt_filter.currentText()
-        selected_fsp = self.ont_traffic_fsp_filter.currentText()
-
-        conditions = []
-        params = []
-
-        if selected_olt != "Todas as OLTs":
-            olt_identifier = selected_olt.split()[-1]
-            conditions.append("olt_identifier = %s")
-            params.append(olt_identifier)
-
-        if selected_fsp != "Todas as PONs":
-            conditions.append("fsp = %s")
-            params.append(selected_fsp)
-
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-        query = f"SELECT fsp, ont_id, collection_time, up_traffic_kbps, down_traffic_kbps FROM ont_traffic_data {where_clause} ORDER BY collection_time DESC LIMIT 2000;"
-
+        
         try:
-            self.cursor.execute(query, tuple(params))
-            results = self.cursor.fetchall()
-
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            
+            # Obter a OLT selecionada no filtro
+            selected_olt = self.ont_traffic_olt_filter.currentText()
+            
+            # Construir a consulta SQL
+            query = """
+                SELECT olt_ip, fsp, ont_id, up_traffic_kbps, down_traffic_kbps, collection_time
+                FROM ont_traffic_data
+                WHERE collection_time >= NOW() - INTERVAL '24 hours'
+            """
+            
+            params = []
+            if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+                query += " AND olt_ip = %s"
+                params.append(selected_olt.split()[-1])  # Extrai o IP da OLT
+            
+            query += " ORDER BY collection_time DESC"
+            
+            cursor.execute(query, params)
+            results = cursor.fetchall()
+            
+            logging.info(f"Consulta executada: {query}")
+            logging.info(f"Parâmetros: {params}")
+            logging.info(f"Resultados encontrados: {len(results)}")
+            
+            # Atualizar a tabela com os resultados
             self.ont_traffic_table.setRowCount(len(results))
-            for row_idx, record in enumerate(results):
-                fsp, ont_id, timestamp, up, down = record
-                self.ont_traffic_table.setItem(row_idx, 0, QTableWidgetItem(fsp))
-                self.ont_traffic_table.setItem(row_idx, 1, QTableWidgetItem(str(ont_id)))
-                self.ont_traffic_table.setItem(row_idx, 2, QTableWidgetItem(timestamp.strftime('%d/%m %H:%M:%S')))
-                self.ont_traffic_table.setItem(row_idx, 3, QTableWidgetItem(str(up)))
-                self.ont_traffic_table.setItem(row_idx, 4, QTableWidgetItem(str(down)))
-
-            self.ont_traffic_table.resizeColumnsToContents()
-        except Exception as e:
-            logging.error(f"Erro ao carregar dados de tráfego de ONT: {e}", exc_info=True)
-        finally:
+            self.ont_traffic_table.setSortingEnabled(False)
+            
+            for row_idx, row_data in enumerate(results):
+                olt_ip, fsp, ont_id, up_traffic, down_traffic, collection_time = row_data
+                
+                self.ont_traffic_table.setItem(row_idx, 0, QTableWidgetItem(olt_ip))
+                self.ont_traffic_table.setItem(row_idx, 1, QTableWidgetItem(fsp))
+                self.ont_traffic_table.setItem(row_idx, 2, QTableWidgetItem(str(ont_id)))
+                self.ont_traffic_table.setItem(row_idx, 3, QTableWidgetItem(f"{up_traffic:.2f}" if up_traffic else "N/A"))
+                self.ont_traffic_table.setItem(row_idx, 4, QTableWidgetItem(f"{down_traffic:.2f}" if down_traffic else "N/A"))
+                self.ont_traffic_table.setItem(row_idx, 5, QTableWidgetItem(collection_time.strftime('%Y-%m-%d %H:%M:%S')))
+            
             self.ont_traffic_table.setSortingEnabled(True)
+            self.ont_traffic_table.resizeColumnsToContents()
+            
+            logging.info(f"Tabela de tráfego ONT atualizada com {len(results)} registros.")
+            
+        except Exception as e:
+            logging.error(f"Erro ao carregar dados de tráfego por ONT: {str(e)}", exc_info=True)
+            QMessageBox.critical(self, "Erro", f"Erro ao carregar dados de tráfego por ONT: {str(e)}")
+        finally:
+            if conn:
+                conn.close()
 
     def update_ont_traffic_display(self):
         """Atualiza a exibição de tráfego de ONT se a aba estiver ativa."""

@@ -229,29 +229,127 @@ def collect_pon_statistics_packets(shell, slot, port):
         logging.error(f"{log_prefix} Erro durante coleta de estatísticas: {e}", exc_info=True)
         return None
 
-# Em olt/processing.py, adicione esta função antes de process_pon_worker
+# Em olt/processing.py, substitua a função collect_ont_traffic por esta versão corrigida:
 
 def collect_ont_traffic(shell, slot, port):
     """Coleta dados de tráfego de todas as ONTs em uma porta PON."""
     fsp = f"0/{slot}/{port}"
     log_prefix = f"[ONT Traffic {fsp}]"
+    
     try:
-        # O comando `display ont traffic PORT all` é o correto
+        # 1. Verificar e garantir que estamos no modo de interface correto
+        logging.info(f"{log_prefix} Verificando modo de operação...")
+        
+        # Enviar um enter para garantir que temos o prompt atual
+        shell.send("\n")
+        time.sleep(0.5)
+        
+        # Ler o prompt atual
+        prompt_response = ""
+        while shell.recv_ready():
+            prompt_response += shell.recv(4096).decode('utf-8', errors='ignore')
+        
+        expected_prompt = f"(config-if-gpon-0/{slot})"
+        logging.debug(f"{log_prefix} Prompt atual: {prompt_response.strip()}")
+        logging.debug(f"{log_prefix} Prompt esperado: {expected_prompt}")
+        
+        # Se não estiver no modo correto, tentar entrar
+        if expected_prompt not in prompt_response:
+            logging.warning(f"{log_prefix} Não estamos no modo de interface correto. Tentando entrar...")
+            
+            # Sair de qualquer modo de configuração atual
+            shell.send("quit\n")
+            time.sleep(1)
+            
+            # Entrar no modo config
+            shell.send("config\n")
+            time.sleep(1)
+            
+            # Entrar no modo de interface GPON
+            shell.send(f"interface gpon 0/{slot}\n")
+            time.sleep(2)
+            
+            # Verificar novamente o prompt
+            shell.send("\n")
+            time.sleep(0.5)
+            
+            prompt_response = ""
+            while shell.recv_ready():
+                prompt_response += shell.recv(4096).decode('utf-8', errors='ignore')
+            
+            if expected_prompt not in prompt_response:
+                logging.error(f"{log_prefix} Falha ao entrar no modo de interface GPON. Prompt atual: {prompt_response.strip()}")
+                return None
+            else:
+                logging.info(f"{log_prefix} Entrou com sucesso no modo de interface GPON")
+        
+        # 2. Executar o comando de tráfego
         command = f"display ont traffic {port} all"
         logging.info(f"{log_prefix} Executando comando: {command}")
         
-        # Usar a função de paginação em vez de implementação manual
-        response = send_command_with_pagination(shell, command, f"(config-if-gpon-0/{slot})", timeout=90)
+        # Limpar o buffer antes de enviar o comando
+        while shell.recv_ready():
+            shell.recv(4096)
+        
+        # Enviar o comando
+        shell.send(command + "\n")
+        
+        # Esperar um pouco para o comando começar a executar
+        time.sleep(3)
+        
+        # 3. Ler a resposta completa com tratamento de paginação
+        response = ""
+        timeout = time.time() + 90  # Timeout aumentado para 90 segundos
+        
+        while time.time() < timeout:
+            if shell.recv_ready():
+                chunk = shell.recv(8192).decode('utf-8', errors='ignore')
+                response += chunk
+                
+                # Verificar se há paginação
+                if "---- More" in chunk:
+                    logging.info(f"{log_prefix} Paginação detectada. Enviando espaço.")
+                    shell.send(" ")
+                    time.sleep(1)  # Aumentar o tempo de espera após paginação
+                    continue
+                
+                # Verificar se a resposta está completa
+                # A resposta está completa quando encontramos o prompt novamente
+                if expected_prompt in response:
+                    logging.info(f"{log_prefix} Prompt detectado. Resposta completa.")
+                    break
+            else:
+                time.sleep(0.2)
         
         logging.info(f"{log_prefix} Resposta recebida ({len(response)} bytes)")
-        # Logar os primeiros 500 caracteres para depuração
-        logging.debug(f"{log_prefix} Resposta bruta (início): {response[:500]}")
         
-        return parse_ont_traffic(response)
+        # 4. Verificar se houve erro no comando
+        if "Unknown command" in response or "Error" in response:
+            logging.error(f"{log_prefix} Comando não reconhecido ou erro na execução.")
+            logging.error(f"{log_prefix} Resposta: {response[:500]}...")
+            return None
+        
+        # 5. Parsear a resposta
+        traffic_data = parse_ont_traffic(response)
+        
+        if traffic_data:
+            logging.info(f"{log_prefix} Parse bem-sucedido. Encontrados {len(traffic_data)} ONTs com dados de tráfego.")
+            for item in traffic_data[:3]:  # Logar apenas os primeiros 3 para não poluir
+                logging.info(f"{log_prefix} ONT {item['ont_id']}: Up={item['up_traffic']} kbps, Down={item['down_traffic']} kbps")
+        else:
+            logging.warning(f"{log_prefix} Parse falhou. Nenhum dado de tráfego encontrado.")
+            # Logar as primeiras linhas para depuração
+            lines = response.splitlines()
+            logging.info(f"{log_prefix} Primeiras 10 linhas da resposta:")
+            for i, line in enumerate(lines[:10]):
+                logging.info(f"{log_prefix} Linha {i}: {line}")
+        
+        return traffic_data
+        
     except Exception as e:
         logging.error(f"{log_prefix} Erro durante coleta de tráfego de ONT: {e}", exc_info=True)
         return None
-
+    
 def collect_ont_statistics(shell, slot, port, ont_ids, log_callback):
     """Coleta estatísticas de pacotes para uma lista de ONTs em uma PON, uma por uma."""
     fsp = f"0/{slot}/{port}"
@@ -668,6 +766,59 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
             
         # --- Etapa 4: Coleta de dados que exigem modo de interface ---
         
+        # Coletar dados de tráfego das ONTs
+        logging.info(f"{log_prefix} Coletando dados de tráfego das ONTs...")
+        
+        # Garantir que estamos no modo correto antes de coletar tráfego
+        shell.send("\n")
+        time.sleep(0.5)
+        
+        prompt_response = ""
+        while shell.recv_ready():
+            prompt_response += shell.recv(4096).decode('utf-8', errors='ignore')
+        
+        if expected_prompt not in prompt_response:
+            logging.warning(f"{log_prefix} Tentando entrar no modo de interface para coleta de tráfego...")
+            
+            # Sair de qualquer modo de configuração atual
+            shell.send("quit\n")
+            time.sleep(1)
+            
+            # Entrar no modo config
+            shell.send("config\n")
+            time.sleep(1)
+            
+            # Entrar no modo de interface GPON
+            shell.send(f"interface gpon 0/{slot}\n")
+            time.sleep(2)
+            
+            # Verificar se entrou no modo correto
+            shell.send("\n")
+            time.sleep(0.5)
+            
+            prompt_response = ""
+            while shell.recv_ready():
+                prompt_response += shell.recv(4096).decode('utf-8', errors='ignore')
+            
+            if expected_prompt not in prompt_response:
+                logging.error(f"{log_prefix} Falha ao entrar no modo de interface para coleta de tráfego")
+                # Se falhar, vamos tentar coletar os outros dados mesmo assim
+                log_callback(f"{log_prefix} Continuando com outras coletas mesmo sem tráfego...")
+            else:
+                log_callback(f"{log_prefix} Entrou no modo de interface corretamente")
+        
+        # Agora coletar o tráfego
+        ont_traffic_list = collect_ont_traffic(shell, slot, port)
+        if ont_traffic_list:
+            logging.info(f"{log_prefix} Dados de tráfego coletados: {len(ont_traffic_list)} ONTs")
+            # Logar os primeiros 3 registros para depuração
+            for i, item in enumerate(ont_traffic_list[:3]):
+                logging.info(f"{log_prefix} ONT {item['ont_id']}: Up={item['up_traffic']} kbps, Down={item['down_traffic']} kbps")
+            save_ont_traffic_bulk(olt_ip, pon_fsp, ont_traffic_list)
+        else:
+            logging.warning(f"{log_prefix} Nenhum dado de tráfego coletado")
+        
+        # Coletar outros dados (estado, info, estatísticas)
         traffic_data = collect_pon_traffic(shell, slot, port)
         if traffic_data: 
             save_pon_traffic_data(olt_ip, pon_fsp, traffic_data)
@@ -683,14 +834,6 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
         if stats_data: 
             save_pon_statistics_packets(olt_ip, pon_fsp, stats_data)
             
-        # Em process_pon_worker, após coletar os dados de tráfego
-        ont_traffic_list = collect_ont_traffic(shell, slot, port)
-        if ont_traffic_list: 
-            logging.info(f"[{olt_ip}][{slot}/{port}] Dados de tráfego coletados: {len(ont_traffic_list)} ONTs")
-            save_ont_traffic_bulk(olt_ip, pon_fsp, ont_traffic_list)
-        else:
-            logging.warning(f"[{olt_ip}][{slot}/{port}] Nenhum dado de tráfego coletado")
-        
         # Coleta as estatísticas de pacotes para cada ONT individualmente
         ont_ids_list = [int(ont_id) for ont_id in ont_info_dict.keys()]
         ont_statistics_list = collect_ont_statistics(shell, slot, port, ont_ids_list, log_callback)
