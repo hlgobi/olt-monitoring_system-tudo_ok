@@ -371,36 +371,71 @@ def parse_ont_traffic(response):
 
 # Em olt/parsing.py, adicione esta nova função
 
-# --- INÍCIO DA MODIFICAÇÃO ---
 def parse_ont_statistics(response):
     """Analisa a saída do 'display statistics ont' e extrai os contadores."""
     stats_data = {}
+    
+    # Mapeamento mais completo de possíveis chaves
     key_map = {
-        'Upstream frames': 'upstream_frames',
-        'Upstream bytes': 'upstream_bytes',
-        'Upstream discarded frames': 'upstream_discarded_frames',
-        'Downstream frames': 'downstream_frames',
-        'Downstream bytes': 'downstream_bytes',
-        'Downstream discarded frames': 'downstream_discarded_frames',
+        # Recebimento (RX)
+        "Upstream frames": "upstream_frames",
+        "Upstream bytes": "upstream_bytes",
+        "Upstream discarded frames": "upstream_discarded_frames",
+        "Downstream frames": "downstream_frames",
+        "Downstream bytes": "downstream_bytes",
+        "Downstream discarded frames": "downstream_discarded_frames",
+        # Variações possíveis
+        "Rx frames": "upstream_frames",
+        "Rx bytes": "upstream_bytes",
+        "Rx discarded frames": "upstream_discarded_frames",
+        "Tx frames": "downstream_frames",
+        "Tx bytes": "downstream_bytes",
+        "Tx discarded frames": "downstream_discarded_frames",
     }
+    
+    if not response:
+        logging.warning("parse_ont_statistics: Resposta vazia recebida")
+        return {}
+    
+    logging.debug(f"parse_ont_statistics: Analisando resposta com {len(response)} caracteres")
+    
     for line in response.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Tenta diferentes formatos de separador
         if ":" in line:
-            key, value = line.split(":", 1)
-            key = key.strip()
-            if key in key_map:
-                try:
-                    stats_data[key_map[key]] = int(value.strip())
-                except (ValueError, TypeError):
-                    continue
+            parts = line.split(":", 1)
+            if len(parts) == 2:
+                key = parts[0].strip()
+                value_str = parts[1].strip()
+                
+                # Procura por correspondências no key_map
+                for map_key, db_key in key_map.items():
+                    if map_key.lower() in key.lower():
+                        try:
+                            # Extrai apenas o valor numérico
+                            numeric_match = re.search(r'(\d+)', value_str)
+                            if numeric_match:
+                                stats_data[db_key] = int(numeric_match.group(1))
+                                logging.debug(f"parse_ont_statistics: {db_key} = {stats_data[db_key]}")
+                            break
+                        except (ValueError, TypeError) as e:
+                            logging.warning(f"parse_ont_statistics: Erro ao converter valor '{value_str}' para {db_key}: {e}")
+                            break
+    
+    logging.debug(f"parse_ont_statistics: Dados extraídos: {stats_data}")
     return stats_data
-# --- FIM DA MODIFICAÇÃO ---
-
-# --- INÍCIO DA MODIFICAÇÃO ---
+    
 def parse_ont_eth_statistics(response):
     """
     Analisa a saída do comando 'display statistics ont-eth ...' e extrai os contadores.
+    Versão melhorada com mais robustez.
     """
     stats_data = {}
+    
+    # Mapeamento mais completo de possíveis chaves
     key_map = {
         # Recebimento (RX)
         "Received frames": "rx_frames",
@@ -422,17 +457,38 @@ def parse_ont_eth_statistics(response):
         # Outros
         "Statistics duration(s)": "duration_seconds",
     }
-
+    
+    if not response:
+        logging.warning("parse_ont_eth_statistics: Resposta vazia recebida")
+        return {}
+    
+    logging.debug(f"parse_ont_eth_statistics: Analisando resposta com {len(response)} caracteres")
+    
     for line in response.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Tenta diferentes formatos de separador
         if ":" in line:
-            try:
-                key, value = line.split(":", 1)
-                key = key.strip()
-                if key in key_map:
-                    db_key = key_map[key]
-                    numeric_value = int(value.strip())
-                    stats_data[db_key] = numeric_value
-            except (ValueError, TypeError):
-                continue
+            parts = line.split(":", 1)
+            if len(parts) == 2:
+                key = parts[0].strip()
+                value_str = parts[1].strip()
+                
+                # Procura por correspondências no key_map
+                for map_key, db_key in key_map.items():
+                    if map_key.lower() in key.lower():
+                        try:
+                            # Extrai apenas o valor numérico
+                            numeric_match = re.search(r'(\d+)', value_str)
+                            if numeric_match:
+                                stats_data[db_key] = int(numeric_match.group(1))
+                                logging.debug(f"parse_ont_eth_statistics: {db_key} = {stats_data[db_key]}")
+                            break
+                        except (ValueError, TypeError) as e:
+                            logging.warning(f"parse_ont_eth_statistics: Erro ao converter valor '{value_str}' para {db_key}: {e}")
+                            break
+    
+    logging.debug(f"parse_ont_eth_statistics: Dados extraídos: {stats_data}")
     return stats_data
-# --- FIM DA MODIFICAÇÃO ---

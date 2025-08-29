@@ -11,8 +11,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed # Para executar 
 import random # Usado para adicionar um pequeno atraso aleatório e evitar que todas as threads iniciem exatamente ao mesmo tempo.
 import json
 import queue
+import psycopg2
+from config import DB_CONFIG
 # --- Importações de Módulos da Aplicação ---
-from olt.communication import send_command, connect_to_olt # Funções para conectar e enviar comandos à OLT.
+from olt.communication import send_command, connect_to_olt 
 # --- INÍCIO DA MODIFICAÇÃO 1: Importações ---
 from olt.parsing import (extract_service_mac, extract_ont_info, parse_ont_info_details, 
                          parse_pon_port_state, parse_port_info, parse_pon_statistics_packets, 
@@ -47,60 +49,47 @@ BOARD_PORT_MAP = {
     "H907CGHF": 16,
 }
 
-def send_command_with_pagination(shell, command, timeout=120):
+def send_command_with_pagination(shell, command, expected_prompt, timeout=30):
     """
     Envia um comando e lida com múltiplos prompts e paginação de forma robusta.
-    Esta é uma função crucial, pois a saída de comandos longos na OLT é paginada
-    com "---- More ----" e alguns comandos pedem confirmação com "{ <cr>... }".
     """
-    # Expressões regulares para detectar os diferentes tipos de prompts.
-    prompt_re = re.compile(r"([\w.-]+[>#])\s*$") # Prompt final (ex: OLT-NOME#)
-    more_re = re.compile(r'---\- More\s*\( Press \'Q\' to break \)\s*---\-') # Prompt de paginação
-    cr_prompt_re = re.compile(r"\{\s*<cr>.*\}\s*:") # Prompt de confirmação
-
     # Limpa qualquer dado residual no buffer do shell antes de enviar um novo comando.
     while shell.recv_ready():
         shell.recv(4096)
-
+    
     logging.debug(f"Executando comando: {command}")
-    shell.send(command + "\n") # Envia o comando seguido de um Enter.
-
+    shell.send(command + "\n")
     full_response = ""
-    end_time = time.time() + timeout # Define um tempo máximo para a execução do comando.
+    end_time = time.time() + timeout
     
     # Loop principal para ler a resposta completa.
     while time.time() < end_time:
         # Se não houver dados prontos para ler, aguarda um pouco.
         if not shell.recv_ready():
             time.sleep(0.5)
-            # Verifica se o prompt final já está na resposta, indicando que o comando terminou.
-            if prompt_re.search(full_response.rstrip().splitlines()[-1] if full_response.strip() else ""):
+            # Verifica se o prompt final já está na resposta
+            if expected_prompt in full_response.rstrip().splitlines()[-1] if full_response.strip() else "":
                 break
             continue
-
+        
         try:
             # Lê um pedaço (chunk) da resposta do shell.
             chunk = shell.recv(8192).decode('utf-8', errors='ignore')
             logging.debug(f"RAW CHUNK RECEBIDO: ----\n{chunk}\n----")
             full_response += chunk
-
-            # 1. Lida com o prompt de confirmação { <cr>... }
-            if cr_prompt_re.search(full_response):
-                logging.debug(f"Prompt {{ <cr> }} detectado para '{command}'. Enviando Enter.")
-                shell.send("\n") # Envia um Enter para confirmar.
-                full_response = "" # Limpa a resposta para não incluir o prompt de confirmação.
-                time.sleep(2) # Espera a OLT processar a confirmação.
+            
+            # 1. Lida com o prompt de paginação "More"
+            if "---- More" in chunk:
+                logging.debug(f"Paginação detectada. Enviando espaço.")
+                shell.send(" ")
+                time.sleep(0.8)
                 continue
-
-            # 2. Lida com a paginação "More"
-            while more_re.search(full_response):
-                logging.debug(f"Paginação detectada para '{command}'. Enviando espaço.")
-                full_response = more_re.sub('', full_response) # Remove a linha "More" da resposta.
-                shell.send(" ") # Envia um espaço para carregar a próxima página.
-                time.sleep(0.8) # Espera a próxima página carregar.
-                if shell.recv_ready():
-                    full_response += shell.recv(8192).decode('utf-8', errors='ignore')
-
+                
+            # 2. Verifica se o prompt esperado está no final da resposta
+            if expected_prompt in full_response.rstrip().splitlines()[-1] if full_response.strip() else "":
+                logging.debug(f"Prompt esperado '{expected_prompt}' detectado no final da resposta.")
+                break
+                
         except Exception as e:
             logging.error(f"Erro durante a leitura do shell: {e}", exc_info=True)
             break
@@ -115,12 +104,12 @@ def send_command_with_pagination(shell, command, timeout=120):
         cleaned_lines.append(line)
     
     # Remove a última linha se ela for o prompt final.
-    if cleaned_lines and prompt_re.search(cleaned_lines[-1].strip()):
+    if cleaned_lines and expected_prompt in cleaned_lines[-1]:
         cleaned_lines.pop()
         
     return "\n".join(cleaned_lines).strip()
 
-# Em olt/processing.py, substitua a função process_ont_details por esta:
+# Em olt/processing.py, substitua a função process_ont_details por esta versão corrigida:
 
 def process_ont_details(shell, olt_ip, slot, port, ont_id, info):
     """
@@ -129,59 +118,60 @@ def process_ont_details(shell, olt_ip, slot, port, ont_id, info):
     """
     # Importações necessárias dentro da função para evitar dependências circulares
     from olt.parsing import extract_service_mac, parse_ont_info_details
-    from db.operations import save_ont_data, get_existing_ont_data  # Adicione esta importação
+    from db.operations import save_ont_data, get_existing_ont_data
     import json
     
     mac = "N/A"
-    # 1. Coleta de MAC (apenas para ONTs online)
-    if info.get("run_state", "").lower() == "online":
-        try:
-            command_mac = f"display ont wan-info 0/{slot} {port} {ont_id}"
-            response_mac = send_command_with_pagination(shell, command_mac, timeout=30)
-            mac = extract_service_mac(response_mac)
-        except Exception as e:
-            logging.warning(f"Falha ao obter MAC para ONT {ont_id}: {str(e)}")
-
-    # 2. Coleta de Detalhes Adicionais (para TODAS as ONTs)
     ont_details = {}
+    
     try:
+        # 1. Coleta de MAC (apenas para ONTs online)
+        if info.get("run_state", "").lower() == "online":
+            try:
+                command_mac = f"display ont wan-info 0/{slot} {port} {ont_id}"
+                # Adicionando o prompt esperado como argumento
+                response_mac = send_command_with_pagination(shell, command_mac, "#", timeout=30)
+                mac = extract_service_mac(response_mac)
+            except Exception as e:
+                logging.warning(f"Falha ao obter MAC para ONT {ont_id}: {str(e)}")
+
+        # 2. Coleta de Detalhes Adicionais (para TODAS as ONTs)
         command_details = f"display ont info 0 {slot} {port} {ont_id}"
-        response_details = send_command_with_pagination(shell, command_details, timeout=45)
+        # Adicionando o prompt esperado como argumento
+        response_details = send_command_with_pagination(shell, command_details, "#", timeout=45)
         logging.debug(f"Resposta bruta para '{command_details}':\n---\n{response_details}\n---")
         ont_details = parse_ont_info_details(response_details)
+        
+        # 3. Busca dados existentes no banco para preservar connection_code e client_name
+        existing_data = get_existing_ont_data(olt_ip, info.get("sn", "N/A"))
+        
+        # 4. Monta o dicionário com os dados básicos.
+        collected_data = {
+            "fsp": f"0/{slot}/{port}",
+            "ont_id": ont_id,
+            "mac": mac,
+            "sn": info.get("sn", "N/A"),
+            "rx": info.get("rx_power", "N/A"),
+            "tx": info.get("tx_power", "N/A"),
+            "description": info.get("description", "N/A"),
+            "status": info.get("run_state", "offline"),
+            # Preserva valores existentes ou usa "N/A" como padrão
+            "connection_code": existing_data.get('connection_code', "N/A") if existing_data else "N/A",
+            "client_name": existing_data.get('client_name', "N/A") if existing_data else "N/A"
+        }
+        
+        # 5. Combina os detalhes extraídos no dicionário final
+        if ont_details:
+            collected_data.update(ont_details)
+            collected_data['services'] = json.dumps(ont_details.get('services', []))
+        
+        # 6. Salva o dicionário completo no banco de dados.
+        save_ont_data(olt_ip, collected_data)
+        return 1
+        
     except Exception as e:
-        logging.error(f"Falha ao obter detalhes para ONT {ont_id}: {str(e)}")
-
-    # 3. Busca dados existentes no banco para preservar connection_code e client_name
-    existing_data = get_existing_ont_data(olt_ip, info.get("sn", "N/A"))
-    
-    # 4. Monta o dicionário com os dados básicos.
-    collected_data = {
-        "fsp": f"0/{slot}/{port}",
-        "ont_id": ont_id,
-        "mac": mac,
-        "sn": info.get("sn", "N/A"),
-        "rx": info.get("rx_power", "N/A"),
-        "tx": info.get("tx_power", "N/A"),
-        "description": info.get("description", "N/A"),
-        "status": info.get("run_state", "offline"),
-        # Preserva valores existentes ou usa "N/A" como padrão
-        "connection_code": existing_data.get('connection_code', "N/A") if existing_data else "N/A",
-        "client_name": existing_data.get('client_name', "N/A") if existing_data else "N/A"
-    }
-    
-    # 5. Combina os detalhes extraídos no dicionário final
-    if ont_details:
-        collected_data.update(ont_details)
-        collected_data['services'] = json.dumps(ont_details.get('services', []))
-
-    # 6. Salva o dicionário completo no banco de dados.
-    save_ont_data(olt_ip, collected_data)
-    return 1
-
-# Em olt/processing.py, substitua a sua função process_pon_worker por esta:
-
-# Em olt/processing.py, adicione esta função antes de process_pon_worker
+        logging.error(f"Erro ao processar detalhes da ONT {ont_id}: {str(e)}")
+        return 0
 
 def collect_port_info(shell, slot, port):
     """(VERSÃO SIMPLIFICADA) Apenas executa o comando de info e faz o parse da saída."""
@@ -245,35 +235,22 @@ def collect_ont_traffic(shell, slot, port):
     """Coleta dados de tráfego de todas as ONTs em uma porta PON."""
     fsp = f"0/{slot}/{port}"
     log_prefix = f"[ONT Traffic {fsp}]"
-
     try:
         # O comando `display ont traffic PORT all` é o correto
-        command = f"display ont traffic {port} all\n"
-        logging.info(f"{log_prefix} Executando comando: {command.strip()}")
-        shell.send(command)
-        time.sleep(2) # Este comando pode ser demorado
-
-        response = ""
-        timeout = time.time() + 90 # Timeout estendido para este comando
-        while time.time() < timeout:
-            if shell.recv_ready():
-                chunk = shell.recv(8192).decode('utf-8', errors='ignore')
-                response += chunk
-                if "---- More" in chunk:
-                    shell.send(" ")
-                    time.sleep(0.8)
-
-            elif f"(config-if-gpon-0/{slot})" in response and not shell.recv_ready():
-                break
-            time.sleep(0.2)
-
+        command = f"display ont traffic {port} all"
+        logging.info(f"{log_prefix} Executando comando: {command}")
+        
+        # Usar a função de paginação em vez de implementação manual
+        response = send_command_with_pagination(shell, command, f"(config-if-gpon-0/{slot})", timeout=90)
+        
         logging.info(f"{log_prefix} Resposta recebida ({len(response)} bytes)")
+        # Logar os primeiros 500 caracteres para depuração
+        logging.debug(f"{log_prefix} Resposta bruta (início): {response[:500]}")
+        
         return parse_ont_traffic(response)
-
     except Exception as e:
         logging.error(f"{log_prefix} Erro durante coleta de tráfego de ONT: {e}", exc_info=True)
         return None
-
 
 def collect_ont_statistics(shell, slot, port, ont_ids, log_callback):
     """Coleta estatísticas de pacotes para uma lista de ONTs em uma PON, uma por uma."""
@@ -283,14 +260,14 @@ def collect_ont_statistics(shell, slot, port, ont_ids, log_callback):
     
     if not ont_ids:
         return all_stats
-
     log_callback(f"{log_prefix} Iniciando coleta de estatísticas para {len(ont_ids)} ONTs...")
     for ont_id in ont_ids:
         try:
             command = f"display statistics ont {port} {ont_id}\n"
+            log_callback(f"{log_prefix} Executando comando para ONT ID {ont_id}: {command.strip()}")
             shell.send(command)
             # Pausa curta para não sobrecarregar a OLT com comandos rápidos
-            time.sleep(0.5) 
+            time.sleep(1) 
             
             response = ""
             timeout = time.time() + 15
@@ -301,179 +278,220 @@ def collect_ont_statistics(shell, slot, port, ont_ids, log_callback):
                 elif f"(config-if-gpon-0/{slot})" in response and not shell.recv_ready():
                     break
                 time.sleep(0.1)
-
+            
+            log_callback(f"{log_prefix} Resposta recebida para ONT ID {ont_id}: {len(response)} bytes")
+            
             parsed_data = parse_ont_statistics(response)
             if parsed_data:
                 parsed_data['ont_id'] = ont_id
                 all_stats.append(parsed_data)
-
+                log_callback(f"{log_prefix} Estatísticas coletadas com sucesso para ONT ID {ont_id}")
+            else:
+                log_callback(f"{log_prefix} Falha ao parsear estatísticas para ONT ID {ont_id}")
         except Exception as e:
             logging.error(f"{log_prefix} Erro ao coletar estatísticas para ONT ID {ont_id}: {e}")
+            log_callback(f"{log_prefix} Erro ao coletar estatísticas para ONT ID {ont_id}: {str(e)}")
             continue # Continua para a próxima ONT em caso de erro
     
     log_callback(f"{log_prefix} Coleta de estatísticas finalizada. {len(all_stats)} ONTs processadas.")
     return all_stats
 
-def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instance, log_callback, eth_task_queue):
-    """
-    (VERSÃO FINAL E ROBUSTA) Worker que conecta, gerencia a navegação com verificação de prompt
-    e chama as funções de coleta de forma segura e na ordem correta.
-    """
-    client = None
-    processed_count = 0
-    pon_fsp = f"0/{slot}/{port}"
-    log_prefix = f"[{olt_ip}][Worker {slot}/{port}]"
+def process_ont_eth_worker(task_queue, main_window, log_callback):
+    """Worker global que processa tarefas de coleta de estatísticas Ethernet das ONTs."""
+    log_callback(f"[Worker ONT-ETH] Inicializando worker global...")
     
-    log_callback(f"{log_prefix} Iniciando...")
-    time.sleep(random.uniform(0.5, 2.5))
-    
-    try:
-        client, shell = connect_to_olt(olt_ip, username, password, max_retries=2)
-        log_callback(f"{log_prefix} Conectado. Preparando para coleta...")
-        time.sleep(2)
-        while shell.recv_ready(): shell.recv(4096)
-        
-        # --- Etapa 1: Entrar no modo 'enable' ---
-        shell.send("enable\n")
-        time.sleep(1)
-        
-        response_buffer = ""
-        for _ in range(5):
-            if shell.recv_ready():
-                response_buffer += shell.recv(4096).decode('utf-8', errors='ignore')
-            if "Password" in response_buffer or "#" in response_buffer:
+    while True:
+        try:
+            task = task_queue.get(timeout=60)  # Aumentado o timeout para 60 segundos
+            if task is None:  # Sinal de parada
+                log_callback(f"[Worker ONT-ETH] Sinal de parada recebido. Finalizando worker.")
                 break
-            time.sleep(0.5)
-
-        if "Password" in response_buffer:
-            shell.send(f"{password}\n")
-            time.sleep(2)
-            while shell.recv_ready(): shell.recv(4096)
-        
-        # --- LÓGICA REORGANIZADA E ROBUSTA ---
-
-        # --- Etapa 2: Coleta de dados no prompt global (antes de entrar em 'config') ---
-        summary_cmd = f"display ont info summary 0/{slot}/{port}"
-        summary_response = send_command_with_pagination(shell, summary_cmd, timeout=120)
-        
-        if "Failure: This board does not exist" in summary_response or not summary_response.strip() or "Parameter error" in summary_response:
-            log_callback(f"{log_prefix} Placa não existe ou PON vazia. Pulando.")
-            save_pon_status(olt_ip, pon_fsp, 0, 0)
-            return 0
-
-        ont_info_dict, online_count, total_count = extract_ont_info(summary_response)
-        log_callback(f"{log_prefix} Encontradas {total_count} ONTs ({online_count} online).")
-        save_pon_status(olt_ip, pon_fsp, online_count, total_count)
-
-        # --- INÍCIO DA MODIFICAÇÃO ---
-        # Adiciona tarefas para as ONTs online na fila de coleta ETH
-        for ont_id_str, info in ont_info_dict.items():
-            if info.get("run_state", "").lower() == "online":
-                task = {
-                    "olt_ip": olt_ip,
-                    "username": username,
-                    "password": password,
-                    "slot": slot,
-                    "port": port,
-                    "ont_id": int(ont_id_str),
-                    "eth_ports": [1, 2, 3, 4] # Coleta das 4 portas padrão
-                }
-                eth_task_queue.put(task)
-                logging.info(f"{log_prefix} Tarefa ETH adicionada à fila para ONT ID {ont_id_str}")
-        # --- FIM DA MODIFICAÇÃO ---
-
-        # --- Etapa 3: Navegação para os modos de configuração com VERIFICAÇÃO ---
-        log_callback(f"{log_prefix} Entrando nos modos de configuração...")
-        
-        # Entra no modo 'config' e verifica se o prompt mudouf
-        shell.send("config\n")
-        config_response = ""
-        config_prompt_found = False
-        timeout = time.time() + 10
-        while time.time() < timeout:
-            if shell.recv_ready():
-                config_response += shell.recv(4096).decode('utf-8', errors='ignore')
-                if "(config)" in config_response:
-                    config_prompt_found = True
-                    break
-            time.sleep(0.2)
-        
-        if not config_prompt_found:
-            log_callback(f"{log_prefix} ERRO: Falha ao entrar no modo 'config'. Abortando PON.")
-            return 0
-
-        # Entra no modo 'interface' e verifica se o prompt mudou
-        shell.send(f"interface gpon 0/{slot}\n")
-        interface_response = ""
-        interface_prompt_found = False
-        expected_prompt = f"(config-if-gpon-0/{slot})"
-        timeout = time.time() + 10
-        while time.time() < timeout:
-            if shell.recv_ready():
-                interface_response += shell.recv(4096).decode('utf-8', errors='ignore')
-                if expected_prompt in interface_response:
-                    interface_prompt_found = True
-                    break
-            time.sleep(0.2)
-
-        if not interface_prompt_found:
-            log_callback(f"{log_prefix} ERRO: Falha ao entrar no modo 'interface {slot}'. Abortando PON.")
-            shell.send("quit\n") # Tenta sair do modo config
-            return 0
+                
+            olt_ip = task['olt_ip']
+            username = task['username']
+            password = task['password']
+            slot = task['slot']
+            port = task['port']
+            ont_id = task['ont_id']
+            eth_ports = task['eth_ports']
             
-        # --- Etapa 4: Coleta de dados que exigem modo de interface ---
-        
-        traffic_data = collect_pon_traffic(shell, slot, port)
-        if traffic_data: save_pon_traffic_data(olt_ip, pon_fsp, traffic_data)
-        
-        state_data = collect_pon_state(shell, slot, port)
-        info_data = collect_port_info(shell, slot, port)
-        if state_data and info_data: state_data.update(info_data)
-        if state_data: save_pon_port_state(olt_ip, pon_fsp, state_data)
-        
-        stats_data = collect_pon_statistics_packets(shell, slot, port)
-        if stats_data: save_pon_statistics_packets(olt_ip, pon_fsp, stats_data)
+            log_callback(f"[Worker ONT-ETH] Processando tarefa para OLT {olt_ip}, PON {slot}/{port}, ONT ID {ont_id}")
             
-        ont_traffic_list = collect_ont_traffic(shell, slot, port)
-        if ont_traffic_list: save_ont_traffic_bulk(olt_ip, pon_fsp, ont_traffic_list)
-        
-        # --- INÍCIO DA CORREÇÃO E REIMPLEMENTAÇÃO ---
-        # Coleta as estatísticas de pacotes para cada ONT individualmente
-        # Primeiro, criamos a lista de IDs a partir do dicionário já coletado
-        ont_ids_list = [int(ont_id) for ont_id in ont_info_dict.keys()]
-        
-        # Agora, chamamos a função e atribuímos o resultado à variável correta
-        ont_statistics_list = collect_ont_statistics(shell, slot, port, ont_ids_list, log_callback)
-        
-        # O 'if' agora funciona porque a variável existe
-        if ont_statistics_list:
-            save_ont_statistics_packets_bulk(olt_ip, pon_fsp, ont_statistics_list)
-        else:
-            log_callback(f"{log_prefix} Falha ao coletar estatísticas de pacotes das ONTs.")
-        # --- FIM DA CORREÇÃO E REIMPLEMENTAÇÃO ---
-
-        # --- Etapa 5: Saída dos modos de configuração ---
-        log_callback(f"{log_prefix} Saindo dos modos de configuração...")
-        shell.send("quit\n")
-        time.sleep(0.5)
-        shell.send("quit\n")
-        time.sleep(0.5)
-        
-        # --- Etapa 6: Processamento detalhado das ONTs ---
-        for ont_id_str, info_dict in ont_info_dict.items():
-            if not gui_window_instance.collection_running: break
-            processed_count += process_ont_details(shell, olt_ip, slot, port, ont_id_str, info_dict)
-            time.sleep(0.1)
-
-        return processed_count
-
-    except Exception as e:
-        log_callback(f"{log_prefix} Erro no worker: {e}")
-        logging.error(f"{log_prefix} Erro no worker: {e}", exc_info=True)
-        return 0
-    finally:
-        if client:
-            client.close()
+            client = None
+            try:
+                # Conectar à OLT
+                client, shell = connect_to_olt(olt_ip, username, password)
+                if not client or not shell:
+                    log_callback(f"[Worker ONT-ETH] Falha ao conectar à OLT {olt_ip}")
+                    continue
+                    
+                log_callback(f"[Worker ONT-ETH] Conectado com sucesso à OLT {olt_ip}")
+                
+                # 1. Entrar no modo enable
+                log_callback(f"[Worker ONT-ETH] Entrando no modo enable...")
+                shell.send("enable\n")
+                time.sleep(1)
+                
+                response_buffer = ""
+                for _ in range(5):
+                    if shell.recv_ready():
+                        response_buffer += shell.recv(4096).decode('utf-8', errors='ignore')
+                    if "Password" in response_buffer or "#" in response_buffer:
+                        break
+                    time.sleep(0.5)
+                    
+                if "Password" in response_buffer:
+                    shell.send(f"{password}\n")
+                    time.sleep(2)
+                    while shell.recv_ready(): 
+                        shell.recv(4096)
+                
+                # Verificar se estamos no modo enable
+                shell.send("\n")
+                time.sleep(0.5)
+                response_buffer = ""
+                while shell.recv_ready():
+                    response_buffer += shell.recv(4096).decode('utf-8', errors='ignore')
+                
+                if "#" not in response_buffer:
+                    log_callback(f"[Worker ONT-ETH] ERRO: Não foi possível entrar no modo enable")
+                    continue
+                
+                log_callback(f"[Worker ONT-ETH] Modo enable confirmado")
+                
+                # 2. Entrar no modo config
+                log_callback(f"[Worker ONT-ETH] Entrando no modo config...")
+                shell.send("config\n")
+                time.sleep(1)
+                
+                response_buffer = ""
+                for _ in range(5):
+                    if shell.recv_ready():
+                        response_buffer += shell.recv(4096).decode('utf-8', errors='ignore')
+                    if "(config)" in response_buffer:
+                        break
+                    time.sleep(0.5)
+                
+                if "(config)" not in response_buffer:
+                    log_callback(f"[Worker ONT-ETH] ERRO: Não foi possível entrar no modo config")
+                    continue
+                
+                log_callback(f"[Worker ONT-ETH] Modo config confirmado")
+                
+                # 3. Entrar no modo de interface GPON
+                log_callback(f"[Worker ONT-ETH] Entrando no modo de interface GPON...")
+                # Tentar diferentes formatos de interface
+                interface_formats = [
+                    f"interface gpon 0/{slot}"
+                ]
+                interface_success = False
+                expected_prompt = None
+                for interface_cmd in interface_formats:
+                    log_callback(f"[Worker ONT-ETH] Tentando comando: {interface_cmd}")
+                    shell.send(f"{interface_cmd}\n")
+                    time.sleep(2)
+                    
+                    # Enviar um enter para garantir que temos o prompt atual
+                    shell.send("\n")
+                    time.sleep(1)
+                    
+                    response_buffer = ""
+                    timeout = time.time() + 10
+                    while time.time() < timeout:
+                        if shell.recv_ready():
+                            response_buffer += shell.recv(4096).decode('utf-8', errors='ignore')
+                        time.sleep(0.2)
+                    
+                    # Verificar se estamos no modo de interface correto
+                    # O prompt correto é (config-if-gpon-0/{slot})# onde slot é o número do frame
+                    if f"(config-if-gpon-0/{slot})#" in response_buffer:
+                        expected_prompt = f"(config-if-gpon-0/{slot})#"
+                        interface_success = True
+                        log_callback(f"[Worker ONT-ETH] Entrou no modo de interface com prompt: {expected_prompt}")
+                        break
+                if not interface_success:
+                    log_callback(f"[Worker ONT-ETH] ERRO: Não foi possível entrar no modo de interface GPON")
+                    log_callback(f"[Worker ONT-ETH] Resposta recebida: {response_buffer}")
+                    continue
+                log_callback(f"[Worker ONT-ETH] Modo de interface GPON confirmado com prompt: {expected_prompt}")
+                
+                # Lista para armazenar todos os dados coletados
+                all_eth_data = []
+                
+                # Loop sobre as portas Ethernet - CORREÇÃO AQUI
+                for eth_port in eth_ports:
+                    log_callback(f"[Worker ONT-ETH] Coletando dados da porta Ethernet {eth_port} da ONT {ont_id}")
+                    
+                    # Tentar diferentes formatos de comando
+                    command_formats = [
+                        f"display statistics ont-eth {port} {ont_id} ont-port {eth_port}",
+                        f"display ont ethernet-port statistics {ont_id} {eth_port}",
+                        f"display ont ethernet statistics {ont_id} {eth_port}",
+                        f"display ont ethernet-port state {ont_id} {eth_port}"
+                    ]
+                    
+                    eth_data = None
+                    for cmd in command_formats:
+                        try:
+                            log_callback(f"[Worker ONT-ETH] Tentando comando: {cmd}")
+                            
+                            # Usar a função com paginação
+                            output = send_command_with_pagination(shell, cmd, expected_prompt, timeout=20)
+                            
+                            log_callback(f"[Worker ONT-ETH] Resposta recebida ({len(output)} bytes)")
+                            
+                            # Se a saída contém dados, tentar parsear
+                            if output and "No information" not in output and "Error" not in output and "Unknown command" not in output:
+                                # Adicionar log da saída bruta para depuração
+                                log_callback(f"[Worker ONT-ETH] Saída bruta:\n{output[:500]}...")
+                                
+                                # Tentar parsear a saída
+                                eth_data = parse_ont_ethernet_stats(output, eth_port)
+                                if eth_data:
+                                    log_callback(f"[Worker ONT-ETH] Dados parseados com sucesso para porta {eth_port}")
+                                    break
+                                else:
+                                    log_callback(f"[Worker ONT-ETH] Falha ao parsear dados para porta {eth_port}")
+                            else:
+                                log_callback(f"[Worker ONT-ETH] Comando não retornou dados válidos")
+                        except Exception as e:
+                            log_callback(f"[Worker ONT-ETH] Erro ao executar comando {cmd}: {str(e)}")
+                    
+                    if eth_data:
+                        all_eth_data.append(eth_data)
+                    else:
+                        log_callback(f"[Worker ONT-ETH] Nenhum dado coletado para porta {eth_port}")
+                
+                # Se temos dados, salvar no banco
+                if all_eth_data:
+                    log_callback(f"[Worker ONT-ETH] Salvando {len(all_eth_data)} registros no banco")
+                    save_ont_ethernet_stats(all_eth_data, olt_ip, f"{slot}/{port}", ont_id)
+                    log_callback(f"[Worker ONT-ETH] Dados salvos com sucesso no banco")
+                else:
+                    log_callback(f"[Worker ONT-ETH] Nenhum dado para salvar no banco")
+                    
+                # Sair dos modos de configuração
+                shell.send("quit\n")
+                time.sleep(0.5)
+                shell.send("quit\n")
+                time.sleep(0.5)
+                
+                # Fechar a conexão
+                client.close()
+                log_callback(f"[Worker ONT-ETH] Tarefa concluída para ONT {ont_id}")
+                
+            except Exception as e:
+                log_callback(f"[Worker ONT-ETH] Erro ao processar tarefa: {str(e)}")
+                if client:
+                    client.close()
+                    
+        except queue.Empty:
+            # Timeout ao obter tarefa da fila, continuar o loop
+            continue
+        except Exception as e:
+            # Se ocorrer um erro ao obter a tarefa, continue o loop
+            log_callback(f"[Worker ONT-ETH] Erro ao obter tarefa da fila: {str(e)}")
+            continue
             
 def get_active_gpon_slots(shell):
     """
@@ -483,7 +501,8 @@ def get_active_gpon_slots(shell):
     active_boards_info = []
     try:
         # Executa o comando para listar todas as placas no chassi 0.
-        board_output = send_command_with_pagination(shell, "display board 0", timeout=30)
+        # Adicionando o prompt esperado como argumento (geralmente "#")
+        board_output = send_command_with_pagination(shell, "display board 0", "#", timeout=30)
         
         # Regex para encontrar linhas que representam uma placa em estado normal/ativo.
         pattern = re.compile(r'^\s*(\d+)\s+([A-Z0-9]+)\s+(Normal|Active_normal|Standby_normal)', re.IGNORECASE)
@@ -504,8 +523,6 @@ def get_active_gpon_slots(shell):
     except Exception as e:
         logging.error(f"Falha crítica ao obter informações das placas: {e}. Nenhum slot será processado.")
         return [] # Retorna uma lista vazia em caso de erro.
-
-# Em olt/processing.py
 
 def collect_pon_state(shell, slot, port):
     """(VERSÃO SIMPLIFICADA) Apenas executa o comando de estado e faz o parse da saída."""
@@ -544,92 +561,306 @@ def collect_pon_state(shell, slot, port):
         logging.error(f"{log_prefix} Erro CRÍTICO durante coleta de estado: {e}", exc_info=True)
         return None
 
-# Adicione esta nova função ANTES da função 'run_data_collection'
-def process_ont_eth_worker(eth_task_queue, gui_window_instance, log_callback):
+def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instance, log_callback, eth_task_queue):
     """
-    Worker dedicado que consome uma fila para coletar estatísticas das portas Ethernet das ONTs.
-    Mantém uma conexão SSH aberta para eficiência.
+    (VERSÃO FINAL E ROBUSTA) Worker que conecta, gerencia a navegação com verificação de prompt
+    e chama as funções de coleta de forma segura e na ordem correta.
     """
     client = None
-    shell = None
-    current_olt_ip = None
-    log_prefix = "[Worker ONT-ETH]"
+    processed_count = 0
+    pon_fsp = f"0/{slot}/{port}"
+    log_prefix = f"[{olt_ip}][Worker {slot}/{port}]"
     
-    while gui_window_instance.collection_running:
-        try:
-            # Obtém uma tarefa da fila, com timeout para poder verificar a flag de execução
-            task = eth_task_queue.get(timeout=5)
-            if task is None: # Sinal para terminar a thread
+    log_callback(f"{log_prefix} Iniciando...")
+    time.sleep(random.uniform(0.5, 2.5))
+    
+    try:
+        client, shell = connect_to_olt(olt_ip, username, password, max_retries=2)
+        log_callback(f"{log_prefix} Conectado. Preparando para coleta...")
+        time.sleep(2)
+        while shell.recv_ready(): 
+            shell.recv(4096)
+        
+        # --- Etapa 1: Entrar no modo 'enable' ---
+        shell.send("enable\n")
+        time.sleep(1)
+        
+        response_buffer = ""
+        for _ in range(5):
+            if shell.recv_ready():
+                response_buffer += shell.recv(4096).decode('utf-8', errors='ignore')
+            if "Password" in response_buffer or "#" in response_buffer:
                 break
-
-            olt_ip = task['olt_ip']
-            username = task['username']
-            password = task['password']
-            slot = task['slot']
-            port = task['port']
-            ont_id = task['ont_id']
-            eth_ports = task['eth_ports']
-            
-            # Gerencia a conexão: conecta/reconecta se necessário
-            if not client or not shell or current_olt_ip != olt_ip:
-                if client: client.close()
-                log_callback(f"{log_prefix} Conectando à OLT {olt_ip} para coleta ETH...")
-                client, shell = connect_to_olt(olt_ip, username, password, max_retries=2)
-                shell.send("enable\n")
-                time.sleep(2) # Pausa generosa para enable
-                if "Password" in shell.recv(2048).decode('utf-8', 'ignore'):
-                    shell.send(f"{password}\n")
-                    time.sleep(2)
-                current_olt_ip = olt_ip
-
-            # Navega para a interface correta
-            shell.send("config\n")
-            time.sleep(1)
-            shell.send(f"interface gpon 0/{slot}\n")
-            time.sleep(1)
-            
-            # Limpa o buffer antes de executar os comandos
-            while shell.recv_ready(): shell.recv(4096)
-
-            all_stats_for_ont = []
-            for eth_port_id in eth_ports:
-                command = f"display statistics ont-eth {port} {ont_id} ont-port {eth_port_id}\n"
-                response = send_command_with_pagination(shell, command, timeout=20)
-                
-                parsed_stats = parse_ont_eth_statistics(response)
-                if parsed_stats:
-                    all_stats_for_ont.append({
-                        "eth_port_id": eth_port_id,
-                        "stats": parsed_stats
-                    })
-                time.sleep(0.5) # Pausa entre as portas da mesma ONT
-
-            # Salva os dados coletados em lote para a ONT atual
-            if all_stats_for_ont:
-                save_ont_eth_statistics_bulk(olt_ip, f"0/{slot}/{port}", ont_id, all_stats_for_ont)
-
-            # Sai da interface para a próxima tarefa
-            shell.send("quit\n")
             time.sleep(0.5)
-            shell.send("quit\n")
-            time.sleep(0.5)
+        if "Password" in response_buffer:
+            shell.send(f"{password}\n")
+            time.sleep(2)
+            while shell.recv_ready(): 
+                shell.recv(4096)
+        
+        # --- Etapa 2: Coleta de dados no prompt global (antes de entrar em 'config') ---
+        summary_cmd = f"display ont info summary 0/{slot}/{port}"
+        # Adicionando o prompt esperado como argumento
+        summary_response = send_command_with_pagination(shell, summary_cmd, "#", timeout=120)
+        
+        if "Failure: This board does not exist" in summary_response or not summary_response.strip() or "Parameter error" in summary_response:
+            log_callback(f"{log_prefix} Placa não existe ou PON vazia. Pulando.")
+            save_pon_status(olt_ip, pon_fsp, 0, 0)
+            return 0
             
-            eth_task_queue.task_done()
+        ont_info_dict, online_count, total_count = extract_ont_info(summary_response)
+        log_callback(f"{log_prefix} Encontradas {total_count} ONTs ({online_count} online).")
+        save_pon_status(olt_ip, pon_fsp, online_count, total_count)
+        
+        # Adiciona tarefas para as ONTs online na fila de coleta ETH
+        for ont_id_str, info in ont_info_dict.items():
+            if info.get("run_state", "").lower() == "online":
+                task = {
+                    "olt_ip": olt_ip,
+                    "username": username,
+                    "password": password,
+                    "slot": slot,
+                    "port": port,
+                    "ont_id": int(ont_id_str),
+                    "eth_ports": [1, 2, 3, 4] # Coleta das 4 portas padrão
+                }
+                eth_task_queue.put(task)
+                logging.info(f"{log_prefix} Tarefa ETH adicionada à fila para ONT ID {ont_id_str}")
+        
+        # --- Etapa 3: Navegação para os modos de configuração com verificação ---
+        log_callback(f"{log_prefix} Entrando nos modos de configuração...")
+        
+        # Entra no modo 'config' e verifica se o prompt mudou
+        shell.send("config\n")
+        config_response = ""
+        config_prompt_found = False
+        timeout = time.time() + 10
+        while time.time() < timeout:
+            if shell.recv_ready():
+                config_response += shell.recv(4096).decode('utf-8', errors='ignore')
+                if "(config)" in config_response:
+                    config_prompt_found = True
+                    break
+            time.sleep(0.2)
+        
+        if not config_prompt_found:
+            log_callback(f"{log_prefix} ERRO: Falha ao entrar no modo 'config'. Abortando PON.")
+            return 0
+            
+        # Entra no modo 'interface' e verifica se o prompt mudou
+        shell.send(f"interface gpon 0/{slot}\n")
+        interface_response = ""
+        interface_prompt_found = False
+        expected_prompt = f"(config-if-gpon-0/{slot})"
+        timeout = time.time() + 10
+        while time.time() < timeout:
+            if shell.recv_ready():
+                interface_response += shell.recv(4096).decode('utf-8', errors='ignore')
+                if expected_prompt in interface_response:
+                    interface_prompt_found = True
+                    break
+            time.sleep(0.2)
+            
+        if not interface_prompt_found:
+            log_callback(f"{log_prefix} ERRO: Falha ao entrar no modo 'interface {slot}'. Abortando PON.")
+            shell.send("quit\n") # Tenta sair do modo config
+            return 0
+            
+        # --- Etapa 4: Coleta de dados que exigem modo de interface ---
+        
+        traffic_data = collect_pon_traffic(shell, slot, port)
+        if traffic_data: 
+            save_pon_traffic_data(olt_ip, pon_fsp, traffic_data)
+        
+        state_data = collect_pon_state(shell, slot, port)
+        info_data = collect_port_info(shell, slot, port)
+        if state_data and info_data: 
+            state_data.update(info_data)
+        if state_data: 
+            save_pon_port_state(olt_ip, pon_fsp, state_data)
+        
+        stats_data = collect_pon_statistics_packets(shell, slot, port)
+        if stats_data: 
+            save_pon_statistics_packets(olt_ip, pon_fsp, stats_data)
+            
+        # Em process_pon_worker, após coletar os dados de tráfego
+        ont_traffic_list = collect_ont_traffic(shell, slot, port)
+        if ont_traffic_list: 
+            logging.info(f"[{olt_ip}][{slot}/{port}] Dados de tráfego coletados: {len(ont_traffic_list)} ONTs")
+            save_ont_traffic_bulk(olt_ip, pon_fsp, ont_traffic_list)
+        else:
+            logging.warning(f"[{olt_ip}][{slot}/{port}] Nenhum dado de tráfego coletado")
+        
+        # Coleta as estatísticas de pacotes para cada ONT individualmente
+        ont_ids_list = [int(ont_id) for ont_id in ont_info_dict.keys()]
+        ont_statistics_list = collect_ont_statistics(shell, slot, port, ont_ids_list, log_callback)
+        
+        if ont_statistics_list:
+            save_ont_statistics_packets_bulk(olt_ip, pon_fsp, ont_statistics_list)
+        else:
+            log_callback(f"{log_prefix} Falha ao coletar estatísticas de pacotes das ONTs.")
+        
+        # --- Etapa 5: Saída dos modos de configuração ---
+        log_callback(f"{log_prefix} Saindo dos modos de configuração...")
+        shell.send("quit\n")
+        time.sleep(0.5)
+        shell.send("quit\n")
+        time.sleep(0.5)
+        
+        # --- Etapa 6: Processamento detalhado das ONTs ---
+        for ont_id_str, info_dict in ont_info_dict.items():
+            if not gui_window_instance.collection_running: 
+                break
+            processed_count += process_ont_details(shell, olt_ip, slot, port, ont_id_str, info_dict)
+            time.sleep(0.1)
+        return processed_count
+    except Exception as e:
+        log_callback(f"{log_prefix} Erro no worker: {e}")
+        logging.error(f"{log_prefix} Erro no worker: {e}", exc_info=True)
+        return 0
+    finally:
+        if client:
+            client.close()
 
-        except queue.Empty:
-            # A fila está vazia, o que é normal. Continua o loop para verificar a flag.
-            continue
-        except Exception as e:
-            log_callback(f"{log_prefix} Erro no worker: {e}")
-            logging.error(f"{log_prefix} Erro no worker: {e}", exc_info=True)
-            # Em caso de erro, fecha a conexão para forçar uma reconexão na próxima tarefa
-            if client: client.close()
-            client, shell, current_olt_ip = None, None, None
-            time.sleep(10) # Pausa antes de tentar a próxima tarefa
+def parse_ont_ethernet_stats(output, eth_port):
+    """
+    Parseia a saída do comando de estatísticas Ethernet da ONT.
+    
+    Args:
+        output (str): Saída bruta do comando
+        eth_port (int): Número da porta Ethernet
+        
+    Returns:
+        dict: Dicionário com os dados parseados ou None se falhar
+    """
+    try:
+        # Inicializar dicionário de dados
+        data = {
+            'eth_port_id': eth_port,
+            'rx_frames': 0,
+            'tx_frames': 0,
+            'rx_bytes': 0,
+            'tx_bytes': 0,
+            'rx_error_frames': 0,
+            'tx_error_frames': 0,
+            'tx_collision_frames': 0,
+            'duration_seconds': 0
+        }
+        
+        # Dividir a saída em linhas
+        lines = output.strip().split('\n')
+        
+        # Procurar por padrões na saída
+        for line in lines:
+            line = line.strip()
+            
+            # Padrão para frames RX
+            if "RX frames" in line or "Received frames" in line or "Rx frames" in line:
+                match = re.search(r'(\d+)', line)
+                if match:
+                    data['rx_frames'] = int(match.group(1))
+            
+            # Padrão para frames TX
+            elif "TX frames" in line or "Transmitted frames" in line or "Tx frames" in line:
+                match = re.search(r'(\d+)', line)
+                if match:
+                    data['tx_frames'] = int(match.group(1))
+            
+            # Padrão para bytes RX
+            elif "RX bytes" in line or "Received bytes" in line or "Rx bytes" in line:
+                match = re.search(r'(\d+)', line)
+                if match:
+                    data['rx_bytes'] = int(match.group(1))
+            
+            # Padrão para bytes TX
+            elif "TX bytes" in line or "Transmitted bytes" in line or "Tx bytes" in line:
+                match = re.search(r'(\d+)', line)
+                if match:
+                    data['tx_bytes'] = int(match.group(1))
+            
+            # Padrão para erros RX
+            elif "RX error frames" in line or "Receive error frames" in line or "Rx error frames" in line:
+                match = re.search(r'(\d+)', line)
+                if match:
+                    data['rx_error_frames'] = int(match.group(1))
+            
+            # Padrão para erros TX
+            elif "TX error frames" in line or "Transmit error frames" in line or "Tx error frames" in line:
+                match = re.search(r'(\d+)', line)
+                if match:
+                    data['tx_error_frames'] = int(match.group(1))
+            
+            # Padrão para colisões TX
+            elif "TX collision frames" in line or "Transmit collision frames" in line or "Tx collision frames" in line:
+                match = re.search(r'(\d+)', line)
+                if match:
+                    data['tx_collision_frames'] = int(match.group(1))
+            
+            # Padrão para duração
+            elif "Duration" in line or "Time" in line:
+                # Procurar por padrão de tempo como 00:01:23
+                time_match = re.search(r'(\d+):(\d+):(\d+)', line)
+                if time_match:
+                    hours, minutes, seconds = map(int, time_match.groups())
+                    data['duration_seconds'] = hours * 3600 + minutes * 60 + seconds
+        
+        # Verificar se encontramos algum dado útil
+        if any(data.values()):
+            return data
+        else:
+            return None
+            
+    except Exception as e:
+        logging.error(f"Erro ao parsear estatísticas Ethernet: {str(e)}")
+        return None
 
-    if client:
-        client.close()
-    log_callback(f"{log_prefix} Finalizado.")
+def save_ont_ethernet_stats(eth_data_list, olt_ip, fsp, ont_id):
+    """
+    Salva as estatísticas Ethernet das ONTs no banco de dados.
+    """
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        # Obter o identificador da OLT
+        olt_identifier = olt_ip.replace('.', '_')
+        
+        for eth_data in eth_data_list:
+            # Inserir os dados no banco
+            query = """
+                INSERT INTO ont_eth_port_statistics (
+                    olt_ip, olt_identifier, fsp, ont_id, eth_port_id, collection_time,
+                    rx_frames, tx_frames, rx_bytes, tx_bytes,
+                    rx_error_frames, tx_error_frames, tx_collision_frames,
+                    duration_seconds
+                ) VALUES (
+                    %s, %s, %s, %s, %s, NOW(),
+                    %s, %s, %s, %s,
+                    %s, %s, %s, %s
+                )
+            """
+            
+            cursor.execute(query, (
+                olt_ip,
+                olt_identifier, fsp, ont_id, eth_data['eth_port_id'],
+                eth_data['rx_frames'], eth_data['tx_frames'],
+                eth_data['rx_bytes'], eth_data['tx_bytes'],
+                eth_data['rx_error_frames'], eth_data['tx_error_frames'],
+                eth_data['tx_collision_frames'], eth_data['duration_seconds']
+            ))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        logging.info(f"Estatísticas Ethernet salvas com sucesso para ONT {ont_id} na PON {fsp}")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Erro ao salvar estatísticas Ethernet: {str(e)}")
+        if 'conn' in locals():
+            conn.rollback()
+        return False
 
 def run_data_collection(olt_ip, username, password, gui_window_instance, log_callback, eth_task_queue):
     """
@@ -641,7 +872,6 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
     cycle_count = 0
     
     NUM_PON_THREADS = 3 
-
     while gui_window_instance.collection_running:
         cycle_count += 1
         log_callback(f"[{olt_ip}] Iniciando ciclo de coleta #{cycle_count}")
@@ -668,7 +898,6 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
                 if "Password" in response_buffer or "#" in response_buffer:
                     break
                 time.sleep(0.5)
-
             if "Password" in response_buffer:
                 log_callback(f"[{olt_ip}] Senha solicitada. Enviando...")
                 main_shell.send(f"{password}\n")
@@ -682,19 +911,16 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
             active_boards_info = get_active_gpon_slots(main_shell)
             main_client.close()
             log_callback(f"[{olt_ip}] Placas ativas encontradas: {len(active_boards_info)}")
-
             if not active_boards_info:
                 log_callback(f"[{olt_ip}] Nenhuma placa GPON/XGPON ativa encontrada. Pulando ciclo.")
                 time.sleep(30)
                 continue
-
             # --- Etapa 2: Processar todas as portas PON em paralelo ---
             pon_tasks = [(b['slot'], p) for b in active_boards_info for p in range(b['ports'])]
             log_callback(f"[{olt_ip}] Total de {len(pon_tasks)} PONs para processar com {NUM_PON_THREADS} threads.")
             
             total_onts_processed_cycle = 0
             
-            # --- INÍCIO DA ÁREA CORRIGIDA (INDENTAÇÃO) ---
             with ThreadPoolExecutor(max_workers=NUM_PON_THREADS) as executor:
                 future_to_pon = {
                     executor.submit(process_pon_worker, olt_ip, username, password, s, p, gui_window_instance, log_callback, eth_task_queue): f"{s}/{p}" 
@@ -707,12 +933,9 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
                         total_onts_processed_cycle += result
                     except Exception as exc:
                         log_callback(f'[{olt_ip}] PON {future_to_pon[future]} gerou uma exceção: {exc}')
-            # --- FIM DA ÁREA CORRIGIDA ---
-
             if not gui_window_instance.collection_running:
                 log_callback(f"[{olt_ip}] Coleta interrompida durante o ciclo.")
                 break
-
             # --- Etapa 3: Finalização do ciclo e espera ---
             end_cycle_time = time.time()
             cycle_duration = end_cycle_time - start_cycle_time
@@ -724,7 +947,6 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
             db_signals.pon_port_state_updated.emit()
             db_signals.pon_stats_packets_updated.emit()
             db_signals.ont_traffic_data_updated.emit()
-
             wait_time_seconds = 60
             log_callback(f"[{olt_ip}] Aguardando {wait_time_seconds / 60:.1f} minuto(s) para o próximo ciclo.")
             for _ in range(wait_time_seconds):
@@ -772,7 +994,9 @@ def run_temp_monitoring(olt_ip, username, password, gui_window_instance):
 
             try:
                 # Comando para obter as temperaturas das placas.
-                temp_output = send_command(shell, "display temperature 0", wait_time=3, timeout=20)
+                # Adicionando o prompt esperado como argumento
+                # Removendo o argumento wait_time
+                temp_output = send_command_with_pagination(shell, "display temperature 0", "#", timeout=20)
                 temp_data = []
                 for line in temp_output.splitlines():
                     # Regex para extrair slot, nome da placa e temperatura.
@@ -827,7 +1051,9 @@ def parse_board_info(board_output):
 def get_slot_cpu_usage(shell, slot):
     """Obtém o uso de CPU para um slot específico."""
     try:
-        cpu_output = send_command(shell, f"display cpu 0/{slot}", wait_time=2, timeout=10)
+        # Adicionando o prompt esperado como argumento
+        # Removendo o argumento wait_time
+        cpu_output = send_command_with_pagination(shell, f"display cpu 0/{slot}", "#", timeout=10)
         match = re.search(r"CPU occupancy\s*:\s*(\d+)\s*%", cpu_output)
         return int(match.group(1)) if match else None
     except Exception as e:
@@ -837,7 +1063,9 @@ def get_slot_cpu_usage(shell, slot):
 def get_slot_memory_usage(shell, slot):
     """Obtém o uso de memória para um slot específico."""
     try:
-        mem_output = send_command(shell, f"display mem 0/{slot}", wait_time=2, timeout=10)
+        # Adicionando o prompt esperado como argumento
+        # Removendo o argumento wait_time
+        mem_output = send_command_with_pagination(shell, f"display mem 0/{slot}", "#", timeout=10)
         # Lista de padrões regex para compatibilidade com diferentes versões de firmware.
         patterns = [r"Memory occupancy:\s*(\d+)%", r"Memory Usage Rate:\s*(\d+)%", r"Mem Usage:\s*(\d+)%"]
         for pattern in patterns:
@@ -879,7 +1107,9 @@ def run_resource_monitoring(olt_ip, username, password, gui_window_instance):
 
             try:
                 # Obtém a lista de placas ativas.
-                board_output = send_command(shell, "display board 0", wait_time=2, timeout=15)
+                # Obtém a lista de placas ativas.
+                # Adicionando o prompt esperado como argumento
+                board_output = send_command_with_pagination(shell, "display board 0", "#", timeout=15)
                 active_boards = parse_board_info(board_output)
 
                 # Itera sobre cada placa ativa para coletar dados de CPU e memória.

@@ -268,8 +268,9 @@ def create_tables():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_traffic_fsp_ont_id_time ON public.ont_traffic_data(fsp, ont_id, collection_time DESC);")
             logging.info("Tabela 'public.ont_traffic_data' verificada/criada.")
         
+            # Tabela de Estatísticas de Porta Ethernet por ONT
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS public.ont_eth_port_statistics (
+                CREATE TABLE IF NOT EXISTS ont_eth_port_statistics (
                     id SERIAL PRIMARY KEY,
                     olt_ip VARCHAR(50) NOT NULL,
                     olt_identifier VARCHAR(10) NOT NULL,
@@ -277,18 +278,26 @@ def create_tables():
                     ont_id INTEGER NOT NULL,
                     eth_port_id INTEGER NOT NULL,
                     collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
-                    rx_frames BIGINT, tx_frames BIGINT, rx_bytes BIGINT, tx_bytes BIGINT,
-                    rx_unicast_frames BIGINT, tx_unicast_frames BIGINT, rx_multicast_frames BIGINT,
-                    tx_multicast_frames BIGINT, rx_broadcast_frames BIGINT, tx_broadcast_frames BIGINT,
-                    rx_error_frames BIGINT, tx_error_frames BIGINT, rx_discarded_frames BIGINT,
-                    tx_discarded_frames BIGINT, tx_collision_frames BIGINT, duration_seconds BIGINT
+                    rx_frames BIGINT,
+                    tx_frames BIGINT,
+                    rx_bytes BIGINT,
+                    tx_bytes BIGINT,
+                    rx_unicast_frames BIGINT,
+                    tx_unicast_frames BIGINT,
+                    rx_multicast_frames BIGINT,
+                    tx_multicast_frames BIGINT,
+                    rx_broadcast_frames BIGINT,
+                    tx_broadcast_frames BIGINT,
+                    rx_error_frames BIGINT,
+                    tx_error_frames BIGINT,
+                    rx_discarded_frames BIGINT,
+                    tx_discarded_frames BIGINT,
+                    tx_collision_frames BIGINT,
+                    duration_seconds BIGINT
                 );
             """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_ont_eth_stats_fsp_ont_eth_time 
-                ON public.ont_eth_port_statistics(fsp, ont_id, eth_port_id, collection_time DESC);
-            """)
-            logging.info("Tabela 'public.ont_eth_port_statistics' verificada/criada.")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_eth_stats_fsp_ont_eth_time ON ont_eth_port_statistics(fsp, ont_id, eth_port_id, collection_time DESC);")
+            logging.info("Tabela 'ont_eth_port_statistics' verificada/criada.")
             
         conn.commit()
         logging.info("Todas as tabelas e colunas foram verificadas/criadas com sucesso no esquema 'public'.")

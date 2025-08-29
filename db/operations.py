@@ -817,8 +817,10 @@ def save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list):
 def save_ont_eth_statistics_bulk(olt_ip, fsp, ont_id, stats_list_per_port):
     """
     Salva uma lista de registros de estatísticas de portas Ethernet de uma ONT.
+    Versão melhorada com mais logs e tratamento de erros.
     """
     if not stats_list_per_port:
+        logging.warning(f"save_ont_eth_statistics_bulk: Nenhum dado para salvar para ONT {fsp}/{ont_id}")
         return 0
 
     conn = None
@@ -826,13 +828,17 @@ def save_ont_eth_statistics_bulk(olt_ip, fsp, ont_id, stats_list_per_port):
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
         olt_identifier = olt_ip.split('.')[-1]
-
+        
         args_list = []
         for item in stats_list_per_port:
-            # item é um dict que contém 'eth_port_id' e os dados de stats
             stats = item['stats']
+            eth_port_id = item['eth_port_id']
+            
+            # Log dos dados que serão salvos
+            logging.debug(f"save_ont_eth_statistics_bulk: Preparando dados para porta {eth_port_id}: {stats}")
+            
             args_list.append((
-                olt_ip, olt_identifier, fsp, ont_id, item['eth_port_id'],
+                olt_ip, olt_identifier, fsp, ont_id, eth_port_id,
                 stats.get('rx_frames'), stats.get('tx_frames'),
                 stats.get('rx_bytes'), stats.get('tx_bytes'),
                 stats.get('rx_unicast_frames'), stats.get('tx_unicast_frames'),
@@ -842,7 +848,7 @@ def save_ont_eth_statistics_bulk(olt_ip, fsp, ont_id, stats_list_per_port):
                 stats.get('rx_discarded_frames'), stats.get('tx_discarded_frames'),
                 stats.get('tx_collision_frames'), stats.get('duration_seconds')
             ))
-
+        
         query = """
             INSERT INTO ont_eth_port_statistics (
                 olt_ip, olt_identifier, fsp, ont_id, eth_port_id,
@@ -856,18 +862,25 @@ def save_ont_eth_statistics_bulk(olt_ip, fsp, ont_id, stats_list_per_port):
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
+        logging.info(f"save_ont_eth_statistics_bulk: Salvando {len(args_list)} registros no banco")
+        
         from psycopg2.extras import execute_batch
         execute_batch(cursor, query, args_list)
         conn.commit()
         
-        logging.info(f"{len(args_list)} registros de estatísticas ETH para ONT {fsp}/{ont_id} salvos.")
-        db_signals.ont_eth_stats_updated.emit() # Notifica a GUI
+        logging.info(f"save_ont_eth_statistics_bulk: {len(args_list)} registros de estatísticas ETH para ONT {fsp}/{ont_id} salvos com sucesso.")
+        
+        # Emite sinal para atualizar a GUI
+        if 'db_signals' in globals():
+            db_signals.ont_eth_stats_updated.emit()
+        
         return len(args_list)
 
     except Exception as e:
-        logging.error(f"Erro ao salvar estatísticas ETH para ONT {fsp}/{ont_id}: {e}", exc_info=True)
-        if conn: conn.rollback()
+        logging.error(f"save_ont_eth_statistics_bulk: Erro ao salvar estatísticas ETH para ONT {fsp}/{ont_id}: {e}", exc_info=True)
+        if conn: 
+            conn.rollback()
         return 0
     finally:
-        if conn: conn.close()
-# --- FIM DA MODIFICAÇÃO ---
+        if conn: 
+            conn.close()

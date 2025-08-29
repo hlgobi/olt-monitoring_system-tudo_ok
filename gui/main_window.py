@@ -118,6 +118,7 @@ class OLTDatabaseGUI(QMainWindow):
         self.load_olt_list_to_filters()
         self.load_data()
         self.setup_timers()
+        self.init_eth_workers()
 
         db_signals.data_updated.connect(self.safe_update)
         db_signals.pon_status_updated.connect(self.update_pon_status_display)
@@ -134,6 +135,26 @@ class OLTDatabaseGUI(QMainWindow):
         db_signals.pon_port_state_updated.connect(self.update_pon_port_state_display)
         db_signals.ont_eth_stats_updated.connect(self.update_ont_eth_display) # Conecta o novo sinal
         self.log_message_received.connect(self.log_to_gui)
+
+# Em gui/main_window.py, modifique o método init_eth_workers:
+
+    def init_eth_workers(self):
+        """Inicializa as filas e threads para coleta Ethernet."""
+        self.log_to_gui("Inicializando worker Ethernet global...")
+        
+        # Cria uma única fila global para todas as OLTs
+        self.eth_task_queue = queue.Queue()
+        
+        # Cria e inicia um único worker global
+        self.eth_collection_thread = threading.Thread(
+            target=process_ont_eth_worker,
+            args=(self.eth_task_queue, self, self.log_message_received.emit),
+            daemon=True,
+            name="GlobalEthWorker"
+        )
+        self.eth_collection_thread.start()
+        
+        self.log_to_gui("Worker ETH global inicializado")
 
     def connect_to_db(self):
         """Estabelece conexão com o banco de dados PostgreSQL."""
@@ -1208,78 +1229,77 @@ class OLTDatabaseGUI(QMainWindow):
         
         return panel
 
+# Em gui/main_window.py, modifique o método start_selected_collections:
+
     def start_selected_collections(self):
-            """Inicia threads de coleta para cada OLT selecionada na lista."""
-            selected_items = self.olt_list_widget.selectedItems()
-            if not selected_items:
-                QMessageBox.warning(self, "Nenhuma OLT Selecionada", "Por favor, selecione pelo menos uma OLT da lista.")
-                return
-
-            self.collection_running = True
-            self.stop_all_btn.setEnabled(True)
-            self.start_selected_btn.setEnabled(False)
-            self.log_to_gui("--- Iniciando coletas... ---")
-
-            for item in selected_items:
-                # --- INÍCIO DA CORREÇÃO (CÓDIGO REINSERIDO) ---
-                ip_match = re.search(r'\((\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\)', item.text())
-                if not ip_match: continue
+        """Inicia threads de coleta para cada OLT selecionada na lista."""
+        selected_items = self.olt_list_widget.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "Nenhuma OLT Selecionada", "Por favor, selecione pelo menos uma OLT da lista.")
+            return
+            
+        self.collection_running = True
+        self.stop_all_btn.setEnabled(True)
+        self.start_selected_btn.setEnabled(False)
+        self.log_to_gui("--- Iniciando coletas... ---")
+        
+        # Inicializa o worker ETH global se ainda não foi inicializado
+        if not hasattr(self, 'eth_task_queue'):
+            self.init_eth_workers()
+        
+        for item in selected_items:
+            # Extrai o IP da OLT selecionada
+            ip_match = re.search(r'\((\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\)', item.text())
+            if not ip_match: 
+                continue
                 
-                olt_ip = ip_match.group(1)
-                olt_config = next((olt for olt in self.olt_configs if olt['ip'] == olt_ip), None)
+            olt_ip = ip_match.group(1)
+            olt_config = next((olt for olt in self.olt_configs if olt['ip'] == olt_ip), None)
+            
+            if not olt_config:
+                self.log_to_gui(f"ERRO: Configuração não encontrada para o IP {olt_ip}")
+                continue
                 
-                if not olt_config:
-                    self.log_to_gui(f"ERRO: Configuração não encontrada para o IP {olt_ip}")
-                    continue
+            if olt_ip in self.collection_threads and self.collection_threads[olt_ip].is_alive():
+                self.log_to_gui(f"AVISO: A coleta para a OLT {olt_config['name']} já está em execução.")
+                continue
+            
+            # Inicia a thread orquestradora principal
+            thread = threading.Thread(
+                target=run_data_collection,
+                args=(
+                    olt_config['ip'], 
+                    olt_config['username'], 
+                    olt_config['password'], 
+                    self, 
+                    self.log_message_received.emit,
+                    self.eth_task_queue  # Passa a fila global para o orquestrador
+                ),
+                daemon=True,
+                name=f"PonWorker-{olt_ip}"
+            )
+            self.collection_threads[olt_ip] = thread
+            thread.start()
+            self.log_to_gui(f"Thread de coleta iniciada para {olt_config['name']} ({olt_ip})")
 
-                if olt_ip in self.collection_threads and self.collection_threads[olt_ip].is_alive():
-                    self.log_to_gui(f"AVISO: A coleta para a OLT {olt_config['name']} já está em execução.")
-                    continue
-                # --- FIM DA CORREÇÃO ---
-
-                # Cria a fila e a thread do worker ETH antes da thread principal
-                eth_q = queue.Queue()
-                self.eth_task_queues[olt_ip] = eth_q
-                
-                eth_thread = threading.Thread(
-                    target=process_ont_eth_worker,
-                    args=(eth_q, self, self.log_message_received.emit),
-                    daemon=True,
-                    name=f"EthWorker-{olt_ip}" # Adiciona nome para facilitar debug
-                )
-                self.eth_collection_threads[olt_ip] = eth_thread
-                eth_thread.start()
-                
-                # Inicia a thread orquestradora principal
-                thread = threading.Thread(
-                    target=run_data_collection,
-                    args=(
-                        olt_config['ip'], 
-                        olt_config['username'], 
-                        olt_config['password'], 
-                        self, 
-                        self.log_message_received.emit,
-                        eth_q  # Passa a fila para o orquestrador
-                    ),
-                    daemon=True,
-                    name=f"PonWorker-{olt_ip}" # Adiciona nome para facilitar debug
-                )
-                self.collection_threads[olt_ip] = thread
-                thread.start()
+# Em gui/main_window.py, modifique o método stop_all_collections:
 
     def stop_all_collections(self):
         """Sinaliza para todas as threads de coleta pararem."""
-        if not self.collection_running: return
+        if not self.collection_running: 
+            return
             
         self.log_to_gui("--- Sinal de parada enviado para todas as coletas. ---")
         self.collection_running = False
-
-        # --- INÍCIO DA MODIFICAÇÃO ---
-        # Envia sinal de parada para as threads de coleta ETH
-        for q in self.eth_task_queues.values():
-            q.put(None)
-        # --- FIM DA MODIFICAÇÃO ---
-
+        
+        # Envia sinal de parada para o worker ETH global
+        if hasattr(self, 'eth_task_queue'):
+            try:
+                self.eth_task_queue.put(None)  # Sinal de parada para o worker ETH
+                self.log_to_gui("Sinal de parada enviado para thread ETH global")
+            except Exception as e:
+                self.log_to_gui(f"ERRO ao enviar sinal de parada para thread ETH: {e}")
+        
         self.start_selected_btn.setEnabled(True)
         self.stop_all_btn.setEnabled(False)
 
@@ -2772,7 +2792,9 @@ class OLTDatabaseGUI(QMainWindow):
         )
         self.load_olt_list()
 
-    # DENTRO da classe OLTDatabaseGUI em gui/main_window.py
+        # DENTRO da classe OLTDatabaseGUI em gui/main_window.py
+# Em gui/main_window.py, modifique o método closeEvent:
+
     def closeEvent(self, event: QEvent):
         """Manipula o evento de fechamento da janela principal."""
         logging.info("Fechando a aplicação OLT Monitoring System...")
@@ -2786,34 +2808,41 @@ class OLTDatabaseGUI(QMainWindow):
         
         app = QApplication.instance()
         if app: app._app_closing = True
-
+        
         # Para todas as threads de background
-        self.stop_all_collections() # CORRIGIDO: Chama a função correta
+        self.stop_all_collections()  # Isso já cuida das threads ETH
+        
         self.stop_temp_monitoring()
         self.stop_resource_monitoring()
+        
         if self.is_ont_session_active:
             self.disconnect_from_ont() 
-
+        
         threads_to_join = list(self.collection_threads.values())
+        
         if hasattr(self, 'temp_thread'): threads_to_join.append(self.temp_thread)
         if hasattr(self, 'resource_thread'): threads_to_join.append(self.resource_thread)
         if hasattr(self, 'ont_connection_thread'): threads_to_join.append(self.ont_connection_thread)
         if hasattr(self, 'ont_command_thread'): threads_to_join.append(self.ont_command_thread)
-
+        
+        # Adicionar o worker ETH global à lista de threads para aguardar
+        if hasattr(self, 'eth_collection_thread'):
+            threads_to_join.append(self.eth_collection_thread)
+        
         for thread in threads_to_join:
             if thread and thread.is_alive():
                 logging.info(f"Aguardando a thread {thread.name} finalizar...")
-                thread.join(timeout=2.0)
+                thread.join(timeout=5.0)
                 if thread.is_alive():
                     logging.warning(f"A thread {thread.name} não finalizou dentro do tempo esperado.")
-
+            
         if hasattr(self, 'conn') and self.conn:
             try:
                 self.conn.close()
                 logging.info("Conexão com o banco de dados fechada com sucesso.")
             except Exception as e:
                 logging.error(f"Erro ao fechar a conexão com o banco de dados: {e}")
-        
+            
         if app and hasattr(app, '_app_closing'):
             delattr(app, '_app_closing')
         event.accept()

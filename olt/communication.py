@@ -93,60 +93,49 @@ def send_command(shell, command, wait_time=3.0, timeout=45): # Define a função
         raise # Relança a exceção para ser tratada pelo chamador.
 
 
-def connect_to_olt(olt_ip, username, password, max_retries=3): # Define a função para conectar à OLT.
-    """Estabelece conexão SSH com a OLT com lógica de nova tentativa""" # Docstring da função.
-    for attempt in range(max_retries): # Loop para tentar a conexão várias vezes.
-        client = None # Garante que o cliente seja None no início de cada tentativa.
-        try: # Inicia o bloco try-except.
-            client = paramiko.SSHClient() # Cria um objeto SSHClient.
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy()) # Política para adicionar automaticamente chaves de host desconhecidas.
+# Em olt/communication.py, modifique a função connect_to_olt:
 
-            logging.info(f"Tentativa {attempt+1}: Conectando a {olt_ip}...") # Loga a tentativa de conexão.
-            client.connect( # Tenta conectar ao servidor SSH.
-                olt_ip, # Endereço IP da OLT.
-                username=username, # Nome de usuário.
-                password=password, # Senha.
-                timeout=30, # Timeout para a conexão em segundos.
-                look_for_keys=False, # Não procura por chaves SSH privadas.
-                allow_agent=False, # Não permite o uso de um agente SSH.
-                banner_timeout=30 # Timeout para receber o banner SSH.
+def connect_to_olt(olt_ip, username, password, max_retries=3):
+    """
+    Estabelece uma conexão SSH com a OLT usando paramiko.
+    Retorna o cliente SSH e o shell, ou (None, None) em caso de falha.
+    """
+    client = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            logging.info(f"Tentativa {attempt}: Conectando a {olt_ip}...")
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(
+                hostname=olt_ip,
+                username=username,
+                password=password,
+                timeout=10,  # Timeout de conexão
+                auth_timeout=15,  # Timeout de autenticação
+                banner_timeout=15  # Timeout para banner
             )
-            # Loga o sucesso da conexão e a versão do servidor remoto.
-            logging.info(f"Conectado (versão 2.0, cliente {client.get_transport().remote_version})")
-            logging.info(f"Autenticação (senha) bem-sucedida!") # Loga o sucesso da autenticação.
-
-            shell = client.invoke_shell() # Abre um shell interativo na conexão.
-            time.sleep(2) # Espera aumentada para o shell estabilizar.
-
-            # Envia nova linha para obter o prompt inicial e lê-lo
-            shell.send("\n") # Envia uma nova linha para obter o prompt.
-            time.sleep(1) # Espera pela resposta.
-            response = "" # Inicializa a string de resposta.
-            while shell.recv_ready(): # Enquanto houver dados para receber.
-                 response += shell.recv(4096).decode('utf-8', errors='ignore') # Lê e decodifica a resposta.
-                 time.sleep(0.2) # Pequena espera entre leituras.
-
-            logging.debug(f"Resposta inicial da OLT: {response.strip()}") # Loga a resposta inicial.
-
-            if ">" in response or "#" in response: # Verifica se o prompt esperado está na resposta.
-                logging.info(f"Conexão SSH estabelecida com {olt_ip} após {attempt+1} tentativa(s)") # Loga o sucesso.
-                # Envia comando para desabilitar paginação (melhor esforço)
-                shell.send("scroll 512\n") # Comando para desabilitar paginação ou definir um scroll grande.
-                time.sleep(1) # Espera o comando ser processado.
-                while shell.recv_ready(): shell.recv(4096) # Limpa qualquer saída do comando scroll.
-                return client, shell # Retorna o cliente SSH e o shell.
-            else: # Se o prompt não for reconhecido.
-                shell.close() # Fecha o shell.
-                client.close() # Fecha o cliente.
-                raise Exception(f"Prompt não reconhecido na resposta: '{response}'") # Levanta uma exceção.
-
-        except Exception as e: # Captura qualquer exceção durante a conexão.
-            logging.warning(f"Tentativa {attempt+1}/{max_retries}: Conexão SSH com {olt_ip} falhou: {str(e)}") # Loga um aviso.
-            if client: client.close() # Garante que o cliente seja fechado em caso de falha.
-            if attempt < max_retries - 1: # Se não for a última tentativa.
-                time.sleep(10) # Espera 10 segundos antes de tentar novamente.
-                continue # Continua para a próxima tentativa.
-            raise # Relança a exceção se todas as tentativas falharem.
-
-    # Levanta uma exceção se a conexão falhar após todas as tentativas.
-    raise Exception(f"Falha ao estabelecer conexão SSH com {olt_ip} após múltiplas tentativas")
+            logging.info(f"Conectado (versão {client.get_transport().remote_version}, cliente {client.get_transport().local_version})")
+            shell = client.invoke_shell()
+            shell.settimeout(15)  # Define timeout para operações no shell
+            logging.info(f"Shell invocado com sucesso")
+            return client, shell
+        except paramiko.AuthenticationException:
+            logging.error(f"Falha de autenticação para {olt_ip}. Verifique as credenciais.")
+            break  # Se falhar autenticação, não adianta tentar novamente
+        except paramiko.SSHException as e:
+            logging.error(f"Erro SSH ao conectar a {olt_ip}: {str(e)}")
+            if attempt == max_retries:
+                logging.error(f"Máximo de tentativas ({max_retries}) atingido para {olt_ip}.")
+                break
+            time.sleep(2)  # Espera antes de tentar novamente
+        except Exception as e:
+            logging.error(f"Erro inesperado ao conectar a {olt_ip}: {str(e)}")
+            if attempt == max_retries:
+                break
+            time.sleep(2)
+    if client:
+        try:
+            client.close()
+        except:
+            pass
+    return None, None
