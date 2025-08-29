@@ -1075,61 +1075,48 @@ class OLTDatabaseGUI(QMainWindow):
             QMessageBox.critical(self, "Erro ao Carregar Estatísticas", f"Não foi possível carregar os dados das caixas: {str(e)}")
             logging.error(f"Erro ao carregar estatísticas por caixa: {e}", exc_info=True)
     
+
     def load_long_offline_data(self):
-            """Carrega os dados das ONTs com mais de 30 dias de inatividade."""
-            logging.info("Carregando dados de ONTs com longa inatividade.")
-            
-            self.long_offline_onts_table.setSortingEnabled(False)
-            self.long_offline_onts_table.setRowCount(0)
-
-            selected_olt = self.long_offline_olt_filter.currentText()
-            params = []
-            olt_condition = ""
-            if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
-                try:
-                    olt_identifier = selected_olt.split()[-1]
-                    # --- CORREÇÃO: A condição agora aplica-se à tabela final ---
-                    olt_condition = "AND olt_identifier = %s"
-                    params.append(olt_identifier)
-                except IndexError:
-                    logging.warning(f"Formato de OLT inesperado no filtro: {selected_olt}")
-            
-            thirty_days_ago = datetime.now() - timedelta(days=30)
-            params.append(thirty_days_ago)
-
-            # --- CORREÇÃO: Adicionado olt_identifier e ont_id ao SELECT ---
-            query = f"""
-                WITH latest_records AS (
-                    SELECT *, ROW_NUMBER() OVER(PARTITION BY serial_number, olt_identifier ORDER BY collection_time DESC) as rn
-                    FROM ont_data
-                ),
-                converted_times AS (
-                    SELECT
-                        *,
-                        CASE
-                            WHEN last_up_time ~ '^\\d{{2}}/\\d{{2}}/\\d{{4}}' THEN TO_TIMESTAMP(SUBSTRING(last_up_time FROM 1 FOR 19), 'DD/MM/YYYY HH24:MI:SS')
-                            WHEN last_up_time ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}' THEN TO_TIMESTAMP(SUBSTRING(last_up_time FROM 1 FOR 19), 'YYYY-MM-DD HH24:MI:SS')
-                            ELSE NULL
-                        END as last_up_time_ts
-                    FROM latest_records
-                    WHERE rn = 1 AND status = 'offline' AND last_up_time IS NOT NULL
-                )
-                SELECT
-                    olt_identifier, fsp, ont_id, serial_number, client_name, last_up_time,
-                    (NOW() - last_up_time_ts) as offline_duration
-                FROM converted_times
-                WHERE last_up_time_ts IS NOT NULL AND last_up_time_ts < %s
-                {olt_condition}
-                ORDER BY last_up_time_ts ASC;
-            """
-            
+        """Carrega os dados das ONTs com mais de 30 dias de inatividade."""
+        logging.info("Carregando dados de ONTs com longa inatividade.")
+        
+        self.long_offline_onts_table.setSortingEnabled(False)
+        self.long_offline_onts_table.setRowCount(0)
+        selected_olt = self.long_offline_olt_filter.currentText()
+        params = []
+        olt_condition = ""
+        if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
             try:
-                self.cursor.execute(query, tuple(params))
-                results = self.cursor.fetchall()
-                
+                olt_identifier = selected_olt.split()[-1]
+                olt_condition = "AND ld.olt_identifier = %s"
+                params.append(olt_identifier)
+            except IndexError:
+                logging.warning(f"Formato de OLT inesperado no filtro: {selected_olt}")
+        
+        # Abordagem 1: Tentar converter diretamente para timestamp
+        # Isso funcionará se os dados estiverem em um formato reconhecível pelo PostgreSQL
+        query_direct = f"""
+            WITH latest_records AS (
+                SELECT *, ROW_NUMBER() OVER(PARTITION BY serial_number, olt_identifier ORDER BY collection_time DESC) as rn
+                FROM ont_data
+                WHERE status = 'offline' AND last_up_time IS NOT NULL
+            )
+            SELECT
+                olt_identifier, fsp, ont_id, serial_number, client_name, last_up_time,
+                (NOW() - last_up_time) as offline_duration
+            FROM latest_records
+            WHERE rn = 1 AND last_up_time < NOW() - INTERVAL '30 days'
+            {olt_condition}
+            ORDER BY last_up_time ASC;
+        """
+        
+        try:
+            self.cursor.execute(query_direct, tuple(params))
+            results = self.cursor.fetchall()
+            
+            if results:
                 self.long_offline_onts_table.setRowCount(len(results))
                 
-                # --- CORREÇÃO: Loop atualizado para incluir os novos campos 'olt' e 'ont_id' ---
                 for row_idx, (olt, fsp, ont_id, sn, client, last_up, duration) in enumerate(results):
                     days_offline = duration.days if duration else 0
                     items = [
@@ -1138,23 +1125,116 @@ class OLTDatabaseGUI(QMainWindow):
                         QTableWidgetItem(str(ont_id)),
                         QTableWidgetItem(sn),
                         QTableWidgetItem(client if client else "N/A"),
-                        QTableWidgetItem(last_up if last_up else "N/A"),
+                        QTableWidgetItem(last_up.strftime('%d/%m/%Y %H:%M') if last_up else "N/A"),
                         QTableWidgetItem(str(days_offline))
                     ]
                     for col_idx, item in enumerate(items):
                         self.long_offline_onts_table.setItem(row_idx, col_idx, item)
-
+                
                 self.long_offline_onts_table.resizeColumnsToContents()
                 self.long_offline_onts_table.setSortingEnabled(True)
-                logging.info(f"{len(results)} ONTs com longa inatividade carregadas.")
+                logging.info(f"{len(results)} ONTs com longa inatividade carregadas (método direto).")
+                return
+        except Exception as e:
+            logging.warning(f"Método direto falhou: {e}")
+            # Se o método direto falhar, tentar a abordagem de conversão de texto
+            if self.conn:
+                self.conn.rollback()
+        
+        # Abordagem 2: Converter texto para timestamp (se o método direto falhar)
+        logging.info("Tentando método alternativo de conversão de data...")
+        
+        # Primeiro, verificar os formatos de data presentes no banco
+        check_format_query = """
+            SELECT DISTINCT last_up_time 
+            FROM ont_data 
+            WHERE last_up_time IS NOT NULL 
+            LIMIT 10;
+        """
+        
+        try:
+            self.cursor.execute(check_format_query)
+            date_formats = self.cursor.fetchall()
+            logging.info(f"Formatos de data encontrados: {[row[0] for row in date_formats]}")
+        except Exception as e:
+            logging.error(f"Erro ao verificar formatos de data: {e}")
+        
+        # Query alternativa usando conversão de texto
+        query_alternative = f"""
+            WITH latest_records AS (
+                SELECT *, ROW_NUMBER() OVER(PARTITION BY serial_number, olt_identifier ORDER BY collection_time DESC) as rn
+                FROM ont_data
+                WHERE status = 'offline' AND last_up_time IS NOT NULL
+            ),
+            converted_times AS (
+                SELECT
+                    *,
+                    CASE
+                        WHEN last_up_time ~ '^\\d{{2}}/\\d{{2}}/\\d{{4}} \\d{{2}}:\\d{{2}}:\\d{{2}}' 
+                            THEN TO_TIMESTAMP(last_up_time, 'DD/MM/YYYY HH24:MI:SS')
+                        WHEN last_up_time ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}} \\d{{2}}:\\d{{2}}:\\d{{2}}' 
+                            THEN TO_TIMESTAMP(last_up_time, 'YYYY-MM-DD HH24:MI:SS')
+                        ELSE NULL
+                    END as last_up_time_ts
+                FROM latest_records
+            )
+            SELECT
+                olt_identifier, fsp, ont_id, serial_number, client_name, last_up_time,
+                (NOW() - last_up_time_ts) as offline_duration
+            FROM converted_times
+            WHERE rn = 1 AND last_up_time_ts IS NOT NULL AND last_up_time_ts < NOW() - INTERVAL '30 days'
+            {olt_condition}
+            ORDER BY last_up_time_ts ASC;
+        """
+        
+        try:
+            self.cursor.execute(query_alternative, tuple(params))
+            results = self.cursor.fetchall()
+            
+            self.long_offline_onts_table.setRowCount(len(results))
+            
+            for row_idx, (olt, fsp, ont_id, sn, client, last_up, duration) in enumerate(results):
+                days_offline = duration.days if duration else 0
+                items = [
+                    QTableWidgetItem(str(olt)),
+                    QTableWidgetItem(fsp),
+                    QTableWidgetItem(str(ont_id)),
+                    QTableWidgetItem(sn),
+                    QTableWidgetItem(client if client else "N/A"),
+                    QTableWidgetItem(last_up.strftime('%d/%m/%Y %H:%M') if last_up else "N/A"),
+                    QTableWidgetItem(str(days_offline))
+                ]
+                for col_idx, item in enumerate(items):
+                    self.long_offline_onts_table.setItem(row_idx, col_idx, item)
+            
+            self.long_offline_onts_table.resizeColumnsToContents()
+            self.long_offline_onts_table.setSortingEnabled(True)
+            logging.info(f"{len(results)} ONTs com longa inatividade carregadas (método alternativo).")
+            
+        except psycopg2.Error as e:
+            if self.conn:
+                self.conn.rollback()
+            QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível carregar ONTs inativas:\n{e}")
+            logging.error(f"Erro ao carregar ONTs com longa inatividade: {e}", exc_info=True)
+            
+            # Se ambos os métodos falharem, mostrar uma mensagem mais informativa
+            error_msg = f"""
+            <b>Erro ao carregar dados de ONTs inativas</b><br><br>
+            Erro técnico: {str(e)}<br><br>
+            <b>Possíveis causas:</b><br>
+            1. Formato de data/hora não reconhecido pelo PostgreSQL<br>
+            2. Dados corrompidos ou inconsistentes na tabela<br>
+            3. Problemas com a conexão do banco de dados<br><br>
+            <b>Soluções sugeridas:</b><br>
+            1. Verificar o formato dos dados na coluna 'last_up_time'<br>
+            2. Executar uma consulta manual para diagnosticar o problema
+            """
+            QMessageBox.critical(self, "Erro Crítico", error_msg)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erro ao Carregar ONTs Inativas", f"Erro inesperado: {str(e)}")
+            logging.error(f"Erro inesperado ao carregar ONTs com longa inatividade: {e}", exc_info=True)
 
-            except psycopg2.Error as e:
-                self.conn.rollback() # Desfaz a transação em caso de erro
-                QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível carregar ONTs inativas:\n{e}")
-                logging.error(f"Erro ao carregar ONTs com longa inatividade: {e}", exc_info=True)
-            except Exception as e:
-                QMessageBox.critical(self, "Erro ao Carregar ONTs Inativas", f"{str(e)}")
-                logging.error(f"Erro ao carregar ONTs com longa inatividade: {e}", exc_info=True)
 
     def setup_data_tab(self):
         # Remove qualquer layout existente para evitar duplicação
