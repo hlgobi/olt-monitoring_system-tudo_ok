@@ -9,9 +9,18 @@ def create_tables():
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
+
+                
+        # Em db/connection.py, na função create_tables, após a conexão
         with conn.cursor() as cursor:
-            # Primeiro, vamos definir o fuso horário padrão da sessão para America/Sao_Paulo
+            # Verificar a configuração de fuso horário atual
+            cursor.execute("SHOW timezone;")
+            tz = cursor.fetchone()[0]
+            logging.info(f"Fuso horário atual do banco: {tz}")
+            
+            # Definir o fuso horário para America/Sao_Paulo
             cursor.execute("SET TIME ZONE 'America/Sao_Paulo';")
+            logging.info("Fuso horário definido para America/Sao_Paulo")
             
             # Tabela de Dados ONT (Optical Network Terminal)
             cursor.execute("""
@@ -48,6 +57,7 @@ def create_tables():
                     client_name VARCHAR(100)
                 );
             """)
+
             logging.info("Tabela 'public.ont_data' verificada/criada.")
             
             cursor.execute("""
@@ -111,6 +121,21 @@ def create_tables():
                 END $$;
                 """,
             ]
+
+                        # Em connection.py, na função create_tables, após a criação da tabela ont_data
+            cursor.execute("""
+                DO $$
+                BEGIN
+                    -- Verifica se a coluna collection_time existe e qual é seu tipo
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ont_data' AND column_name = 'collection_time') THEN
+                        -- Se não for TIMESTAMP WITH TIME ZONE, altera
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ont_data' AND column_name = 'collection_time' AND data_type = 'timestamp with time zone') THEN
+                            ALTER TABLE public.ont_data ALTER COLUMN collection_time TYPE TIMESTAMP WITH TIME ZONE;
+                            RAISE NOTICE 'Coluna collection_time alterada para TIMESTAMP WITH TIME ZONE';
+                        END IF;
+                    END IF;
+                END $$;
+""")
             
             for command in alter_commands:
                 cursor.execute(command)
@@ -264,6 +289,8 @@ def create_tables():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pon_stats_packets_fsp_time ON public.pon_statistics_packets(fsp, collection_time DESC);")
             logging.info("Tabela 'public.pon_statistics_packets' verificada/criada.")
         
+            # Em db/connection.py, na função create_tables
+
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.ont_traffic_data (
                     id SERIAL PRIMARY KEY,
@@ -271,7 +298,7 @@ def create_tables():
                     olt_identifier VARCHAR(10) NOT NULL,
                     fsp VARCHAR(20) NOT NULL,
                     ont_id INTEGER NOT NULL,
-                    collection_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    collection_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     up_traffic_kbps INTEGER,
                     down_traffic_kbps INTEGER
                 );
@@ -280,6 +307,7 @@ def create_tables():
             logging.info("Tabela 'public.ont_traffic_data' verificada/criada.")
         
             # Tabela de Estatísticas de Porta Ethernet por ONT
+            # Para a tabela ont_eth_port_statistics
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ont_eth_port_statistics (
                     id SERIAL PRIMARY KEY,
@@ -309,7 +337,20 @@ def create_tables():
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_eth_stats_fsp_ont_eth_time ON ont_eth_port_statistics(fsp, ont_id, eth_port_id, collection_time DESC);")
             logging.info("Tabela 'ont_eth_port_statistics' verificada/criada.")
-            
+                        
+            # Faça o mesmo para a tabela ont_eth_port_statistics
+            cursor.execute("""
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ont_eth_port_statistics' AND column_name = 'collection_time') THEN
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ont_eth_port_statistics' AND column_name = 'collection_time' AND data_type = 'timestamp with time zone') THEN
+                            ALTER TABLE public.ont_eth_port_statistics ALTER COLUMN collection_time TYPE TIMESTAMP WITH TIME ZONE;
+                            RAISE NOTICE 'Coluna collection_time da tabela ont_eth_port_statistics alterada para TIMESTAMP WITH TIME ZONE';
+                        END IF;
+                    END IF;
+                END $$;
+            """)
+
             # Tabela de dados DDM de uplink
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.uplink_ddm_data (
@@ -343,6 +384,7 @@ def create_tables():
         if conn: 
             conn.close()
 
+# Em connection.py, modifique a função check_db_connection
 def check_db_connection():
     """Verifica a conexão com o banco de dados PostgreSQL com lógica de nova tentativa."""
     max_retries = 3
@@ -353,6 +395,10 @@ def check_db_connection():
             # Definir o fuso horário da sessão para America/Sao_Paulo
             with conn.cursor() as cursor:
                 cursor.execute("SET TIME ZONE 'America/Sao_Paulo';")
+                # Verifica se o fuso foi definido corretamente
+                cursor.execute("SHOW timezone;")
+                tz = cursor.fetchone()[0]
+                logging.info(f"Fuso horário da sessão PostgreSQL: {tz}")
             return True
         except Exception as e:
             logging.warning(f"Tentativa {attempt+1}/{max_retries}: Conexão PostgreSQL falhou: {e}")

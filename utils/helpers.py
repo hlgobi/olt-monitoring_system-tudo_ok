@@ -101,17 +101,23 @@ def clean_response(response: str) -> str:
     # Substitui o caractere de retorno de carro ('\r') por nada.
     cleaned = cleaned.replace('\r', '')
     return cleaned
+# Em utils/helpers.py
 
 def parse_descricao_avancada(description_str: str) -> dict:
     """
     Analisa a string de descrição da OLT para extrair informações estruturadas
     como primária, secundária e porta, seguindo um padrão predefinido.
     """
-    primaria, secundaria, porta_secundaria = "N/A", "N/A", "N/A"
+    # Inicializa todas as chaves com valores padrão
+    result = {
+        'primaria': 'N/A',
+        'secundaria': 'N/A',
+        'porta_secundaria': 'N/A'
+    }
     
     # Retorna valores padrão se a descrição for vazia ou um placeholder.
     if not description_str or description_str.strip().upper() in ["N/A", "ONT_NO_DESCRIPTION", ""]:
-        return {'primaria': primaria, 'secundaria': secundaria, 'porta_secundaria': porta_secundaria}
+        return result
     
     original_desc = description_str.strip()
     base_description = original_desc
@@ -119,7 +125,7 @@ def parse_descricao_avancada(description_str: str) -> dict:
     # Tenta encontrar um indicador de porta (ex: P1, PORTA 2) no final da descrição.
     match_p = re.search(r'\s+(P\d+|PORTA\s*\d+)$', base_description, re.I)
     if match_p:
-        porta_secundaria = match_p.group(1).strip().upper()
+        result['porta_secundaria'] = match_p.group(1).strip().upper()
         # Remove a parte da porta da descrição para continuar o parsing.
         base_description = base_description[:match_p.start()].strip()
         
@@ -128,18 +134,18 @@ def parse_descricao_avancada(description_str: str) -> dict:
     if match_s:
         primaria_cand = match_s.group(1).strip()
         if primaria_cand:
-            primaria = primaria_cand
+            result['primaria'] = primaria_cand
             # Monta a secundária completa (ex: PRIMARIA-S1).
-            secundaria = f"{primaria_cand}-{match_s.group(2).strip().upper()}"
+            result['secundaria'] = f"{primaria_cand}-{match_s.group(2).strip().upper()}"
         else:
             # Se não houver primária antes da secundária, a descrição inteira é a primária.
-            primaria = base_description
+            result['primaria'] = base_description
     else:
         # Se nenhum padrão de secundária for encontrado, toda a descrição é a primária.
         if base_description:
-            primaria = base_description
+            result['primaria'] = base_description
             
-    return {'primaria': primaria, 'secundaria': secundaria, 'porta_secundaria': porta_secundaria}
+    return result
 
 def parse_ont_device_info(raw_output: str) -> tuple[str, dict]:
     """

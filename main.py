@@ -142,3 +142,32 @@ except ImportError:
     logging.warning("Arquivo uplinks_config.py não encontrado. A funcionalidade de DDM não estará disponível.")
     UPLINKS = {}
 
+# No início da sua aplicação (main.py ou onde inicia a conexão)
+def check_postgresql_timezone():
+    """Verifica e define o fuso horário do PostgreSQL"""
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        with conn.cursor() as cursor:
+            # Verifica o fuso horário atual
+            cursor.execute("SHOW timezone;")
+            current_tz = cursor.fetchone()[0]
+            logging.info(f"Fuso horário atual do PostgreSQL: {current_tz}")
+            
+            # Define o fuso horário correto se necessário
+            if current_tz != 'America/Sao_Paulo':
+                cursor.execute("SET TIME ZONE 'America/Sao_Paulo';")
+                cursor.execute("SHOW timezone;")
+                new_tz = cursor.fetchone()[0]
+                logging.info(f"Fuso horário do PostgreSQL alterado para: {new_tz}")
+                
+                # Torna a alteração permanente para a sessão
+                cursor.execute("ALTER DATABASE Olt SET timezone TO 'America/Sao_Paulo';")
+                logging.info("Fuso horário definido permanentemente para o banco de dados")
+    except Exception as e:
+        logging.error(f"Erro ao verificar/definir fuso horário do PostgreSQL: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+# Chame esta função no início da sua aplicação
+check_postgresql_timezone()
