@@ -1,6 +1,7 @@
 # gui/signals.py
 from PyQt5.QtCore import QObject, pyqtSignal
 
+
 class DatabaseSignals(QObject):
     """
     Sinais personalizados para comunicação com o banco de dados entre threads.
@@ -33,6 +34,9 @@ class DatabaseSignals(QObject):
     
     # Sinal para atualização de dados DDM
     uplink_ddm_updated = pyqtSignal()  # Sinal emitido quando os dados DDM são atualizados
+    
+    # NOVO: Sinal para mensagens de log
+    log_message = pyqtSignal(str)  # Sinal para enviar mensagens de log para a GUI
 
 # Instância global de sinais
 db_signals = DatabaseSignals()

@@ -1,4 +1,3 @@
-# olt_monitoring_system/gui/main_window.py
 
 import json
 import psycopg2
@@ -15,11 +14,10 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QMessageBox, QComboBox, QDialog, QFormLayout,
                              QInputDialog, QGroupBox, QTabWidget, QTextEdit, QSplitter,
                              QFileDialog, QScrollArea, QSizePolicy, QGridLayout,
-                             QListWidget, QAbstractItemView)
+                             QListWidget, QAbstractItemView, QCheckBox)  # NOVO: QCheckBox
 from PyQt5.QtCore import (QObject, pyqtSignal, QTimer, Qt, QEvent, QMetaObject, 
                           pyqtSlot, Q_ARG, QPropertyAnimation, pyqtProperty)
 from PyQt5 import QtGui
-from PyQt5.QtGui import QColor
 import pyqtgraph as pg
 import queue
 from config import DB_CONFIG, get_olt_configs
@@ -82,7 +80,10 @@ class OLTDatabaseGUI(QMainWindow):
         self.ont_command_thread = None
         self.active_ont_olt_client = None
         self.active_ont_olt_shell = None
-        self.is_ont_session_active = False
+        self.is_ont_session_active = None
+        
+        # NOVO: Widget para exibição de logs
+        self.log_text_edit = None
         
         self.common_ont_credentials = [
             ('root', '@gigabgtR'), ('admin', 'admin'),
@@ -94,18 +95,18 @@ class OLTDatabaseGUI(QMainWindow):
         self.ont_login_prompt_pass_re = re.compile(r"Password:", re.I)
         self.ont_shell_prompt_re = re.compile(r"(WAP>)\s*$")
         self.ont_root_prompt_re = re.compile(r"(SU_WAP>)\s*$")
-        self.olt_telnet_param_prompt_re = re.compile(r"\{\s*<cr>.*\}\s*:\s*$")
-        self.olt_diagnose_prompt_re = re.compile(r"\(diagnose\)\s*[>#]\s*$")
-        self.olt_standard_prompt_re = re.compile(r"[>#]\s*$")
+        self.olt_telnet_param_prompt_re = re.compile(r"\{\\s*<cr>.*\}\\s*:\\s*$")
+        self.olt_diagnose_prompt_re = re.compile(r"\(diagnose\)\\s*[>#]\\s*$")
+        self.olt_standard_prompt_re = re.compile(r"[>#]\\s*$")
         self.diag_sections_config = [
-            {"title": "1. Informações Básicas da ONT", "id": "device_info", "commands": "display deviceInfo\ndisplay version"},
-            {"title": "2. Status da Conexão Óptica", "id": "optic_status", "commands": "display optic\ndisplay board-temperatures"},
-            {"title": "3. Status da WAN/PPPoE", "id": "wan_status", "commands": "display pppoe client all\ndisplay wan layer all"},
-            {"title": "4. Dispositivos Conectados (LAN/Wi-Fi)", "id": "lan_wifi_devices", "commands": "display dhcp server user all\ndisplay wifi associate"},
+            {"title": "1. Informações Básicas da ONT", "id": "device_info", "commands": "display deviceInfo\\ndisplay version"},
+            {"title": "2. Status da Conexão Óptica", "id": "optic_status", "commands": "display optic\\ndisplay board-temperatures"},
+            {"title": "3. Status da WAN/PPPoE", "id": "wan_status", "commands": "display pppoe client all\\ndisplay wan layer all"},
+            {"title": "4. Dispositivos Conectados (LAN/Wi-Fi)", "id": "lan_wifi_devices", "commands": "display dhcp server user all\\ndisplay wifi associate"},
             {"title": "5. Redes Wi-Fi Vizinhas", "id": "wifi_neighbors", "commands": "display wifi neighbor"},
-            {"title": "6. Configurações Wi-Fi da ONT", "id": "wifi_config", "commands": "display wifi information\ndisplay wifi radio"},
-            {"title": "7. Telefonia (VoIP)", "id": "voip_status", "commands": "display voice hs status\ndisplay voip info"},
-            {"title": "8. Rotas e Vizinhos IP", "id": "ip_routes", "commands": "display ip route\ndisplay ip neigh"},
+            {"title": "6. Configurações Wi-Fi da ONT", "id": "wifi_config", "commands": "display wifi information\\ndisplay wifi radio"},
+            {"title": "7. Telefonia (VoIP)", "id": "voip_status", "commands": "display voice hs status\\ndisplay voip info"},
+            {"title": "8. Rotas e Vizinhos IP", "id": "ip_routes", "commands": "display ip route\\ndisplay ip neigh"},
             {"title": "9. Testes de Conectividade", "id": "connectivity_tests", "commands": "(Executado por worker dedicado)"},
             {"title": "10. Logs e Eventos", "id": "logs_events", "commands": "display log info"},
             {"title": "11. TR-069 (Gestão Remota)", "id": "tr069_status", "commands": "display tr069 info"},
@@ -143,6 +144,9 @@ class OLTDatabaseGUI(QMainWindow):
         except Exception as e:
             logging.error(f"Erro ao conectar sinal data_updated: {e}")
         self.log_message_received.connect(self.log_to_gui)
+        
+        # NOVO: Conectar o sinal global de logs
+        db_signals.log_message.connect(self.log_to_gui)
 
 # Em gui/main_window.py, modifique o método init_eth_workers:
 
@@ -427,6 +431,78 @@ class OLTDatabaseGUI(QMainWindow):
     def setup_logs_tab(self):
         """Configura a aba de logs."""
         layout = QVBoxLayout(self.logs_tab)
+        
+        # Criar widget para exibição de logs
+        self.log_text_edit = QTextEdit()
+        self.log_text_edit.setReadOnly(True)
+        self.log_text_edit.setFont(QtGui.QFont("Courier New", 9))
+        
+        # Adicionar botões de controle
+        control_layout = QHBoxLayout()
+        
+        clear_btn = QPushButton("Limpar Logs")
+        clear_btn.clicked.connect(self.clear_logs)
+        
+        save_btn = QPushButton("Salvar Logs")
+        save_btn.clicked.connect(self.save_logs)
+        
+        auto_scroll_cb = QCheckBox("Rolagem Automática")
+        auto_scroll_cb.setChecked(True)
+        auto_scroll_cb.stateChanged.connect(self.toggle_auto_scroll)
+        self.auto_scroll = True
+        
+        control_layout.addWidget(clear_btn)
+        control_layout.addWidget(save_btn)
+        control_layout.addWidget(auto_scroll_cb)
+        control_layout.addStretch()
+        
+        layout.addLayout(control_layout)
+        layout.addWidget(self.log_text_edit)
+        
+        # Adicionar logs iniciais se houver
+        if hasattr(self, 'initial_logs'):
+            for log_msg in self.initial_logs:
+                self.log_text_edit.append(log_msg)
+    
+    def log_to_gui(self, message):
+        """Adiciona uma mensagem de log ao widget de logs."""
+        if self.log_text_edit:
+            self.log_text_edit.append(message)
+            
+            # Rolar automaticamente para o final se ativado
+            if self.auto_scroll:
+                scrollbar = self.log_text_edit.verticalScrollBar()
+                scrollbar.setValue(scrollbar.maximum())
+    
+    def clear_logs(self):
+        """Limpa o conteúdo do widget de logs."""
+        if self.log_text_edit:
+            self.log_text_edit.clear()
+    
+    def save_logs(self):
+        """Salva o conteúdo dos logs em um arquivo."""
+        if not self.log_text_edit:
+            return
+            
+        filename, _ = QFileDialog.getSaveFileName(
+            self, 
+            "Salvar Logs", 
+            f"olt_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            "Arquivos de Texto (*.txt);;Todos os Arquivos (*)"
+        )
+        
+        if filename:
+            try:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(self.log_text_edit.toPlainText())
+                QMessageBox.information(self, "Sucesso", f"Logs salvos em:\n{filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Não foi possível salvar os logs:\n{str(e)}")
+    
+    def toggle_auto_scroll(self, state):
+        """Ativa/desativa a rolagem automática dos logs."""
+        self.auto_scroll = (state == Qt.Checked)
+    
 
     def setup_diag_ont_tab(self):
         """Configura a interface da aba 'Diagnóstico ONT'."""
@@ -1408,11 +1484,7 @@ class OLTDatabaseGUI(QMainWindow):
         self.start_selected_btn.setEnabled(True)
         self.stop_all_btn.setEnabled(False)
 
-    @pyqtSlot(str)
-    def log_to_gui(self, message):
-        """Adiciona uma mensagem à área de log da GUI de forma segura."""
-        self.log_output_area.append(f"{datetime.now().strftime('%H:%M:%S')} - {message}")
-        # --- Fim da Modificação ---
+
 
     def load_olt_list_to_filters(self):
         """Carrega a lista de OLTs disponíveis do banco para os ComboBoxes de filtro."""
