@@ -3,6 +3,8 @@
 # Ele implementa a persistência de dados coletados das OLTs, incluindo informações de ONTs, status de PONs,
 # dados de temperatura e recursos, além de histórico de diagnósticos.
 
+from datetime import datetime, timezone, timedelta
+
 # Importação do módulo psycopg2, que é o adaptador PostgreSQL para Python
 import psycopg2
 
@@ -23,6 +25,28 @@ from utils.helpers import parse_descricao_avancada
 
 from PyQt5.QtCore import QObject, pyqtSignal
 
+
+# Adicione no início do arquivo
+from datetime import datetime, timezone, timedelta
+
+# Adicione esta função no nível do módulo
+def to_db_timestamp(ts_str):
+    """
+    Converte string de timestamp para objeto datetime com fuso horário de Brasília (UTC-3)
+    """
+    if ts_str in ['N/A', '-', None, '']:
+        return None
+    try:
+        # Tenta converter no formato dd/mm/yyyy HH:MM:SS
+        dt = datetime.strptime(ts_str, '%d/%m/%Y %H:%M:%S')
+        # Define o fuso horário de Brasília (UTC-3)
+        brasilia_tz = timezone(timedelta(hours=-3))
+        dt = dt.replace(tzinfo=brasilia_tz)
+        return dt
+    except ValueError:
+        return None
+
+# Na função save_ont_data, remova a função interna to_db_timestamp e use a do módulo
 def save_ont_data(olt_ip, ont_info):
     """
     Salva ou atualiza os dados de uma ONT no banco de dados, incluindo detalhes de status
@@ -38,12 +62,6 @@ def save_ont_data(olt_ip, ont_info):
     # Inicializa a variável de conexão como None
     conn = None
     try:
-        # --- FUNÇÃO AUXILIAR PARA TRATAR TIMESTAMPS INVÁLIDOS ---
-        def to_db_timestamp(ts_str):
-            if ts_str in ['N/A', '-', None, '']:
-                return None
-            return ts_str
-            
         # Extrai o identificador da OLT a partir do último octeto do endereço IP
         olt_identifier = olt_ip.split('.')[-1]
         
@@ -52,7 +70,7 @@ def save_ont_data(olt_ip, ont_info):
         parsed_desc = parse_descricao_avancada(ont_info.get('description', 'N/A'))
         primaria = parsed_desc['primaria']
         secundaria = parsed_desc['secundaria']
-        porta_secundaria = parsed_desc['porta_secundaria']
+        porta_secundaria = parsed_desc['porta_secundária']
         
         # Estabelece conexão com o banco de dados usando as configurações do DB_CONFIG
         conn = psycopg2.connect(**DB_CONFIG)
@@ -97,8 +115,8 @@ def save_ont_data(olt_ip, ont_info):
                 last_dying_gasp_time, line_profile_name, services,
                 ont_distance, memory_occupation, cpu_occupation, temperature,
                 ont_ip_address, line_profile_id, service_profile_id, service_profile_name,
-                connection_code)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                connection_code, collection_time)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW() AT TIME ZONE 'America/Sao_Paulo')
             """
             
             # Tupla de parâmetros correspondentes aos placeholders no SQL
@@ -622,7 +640,6 @@ def save_pon_port_state(olt_ip, fsp, state_data):
         
         olt_identifier = olt_ip.split('.')[-1]
         
-        # --- INÍCIO DA MODIFICAÇÃO ---
         query = """
             INSERT INTO pon_port_state (
                 olt_ip, olt_identifier, fsp, port_state, last_down_cause, last_up_time, last_down_time,
@@ -639,8 +656,8 @@ def save_pon_port_state(olt_ip, fsp, state_data):
             fsp,
             state_data.get('port_state'),
             state_data.get('last_down_cause'),
-            state_data.get('last_up_time'),
-            state_data.get('last_down_time'),
+            to_db_timestamp(state_data.get('last_up_time')),  # Usando a função de conversão
+            to_db_timestamp(state_data.get('last_down_time')),  # Usando a função de conversão
             state_data.get('signal_detect'),
             state_data.get('available_bandwidth_kbps'),
             state_data.get('illegal_rogue_ont'),
@@ -651,10 +668,9 @@ def save_pon_port_state(olt_ip, fsp, state_data):
             state_data.get('tx_bias_current_ma'),
             state_data.get('supply_voltage_v'),
             state_data.get('tx_power_dbm'),
-            state_data.get('left_guaranteed_bandwidth_kbps'), # Novo campo
-            state_data.get('admin_state')                     # Novo campo
+            state_data.get('left_guaranteed_bandwidth_kbps'),
+            state_data.get('admin_state')
         ))
-        # --- FIM DA MODIFICAÇÃO ---
         
         conn.commit()
         logging.info(f"Dados de estado da porta PON {fsp} salvos com sucesso.")
@@ -667,8 +683,6 @@ def save_pon_port_state(olt_ip, fsp, state_data):
     finally:
         if conn:
             conn.close()
-
-# Em db/operations.py, adicione esta função ao final do arquivo
 
 def save_pon_statistics_packets(olt_ip, fsp, stats_data):
     """Salva as estatísticas de pacotes de uma porta PON no banco de dados."""
@@ -757,7 +771,7 @@ def save_ont_traffic_bulk(olt_ip, fsp, traffic_list):
             INSERT INTO ont_traffic_data (
                 olt_ip, olt_identifier, fsp, ont_id, collection_time,
                 up_traffic_kbps, down_traffic_kbps
-            ) VALUES (%s, %s, %s, %s, NOW(), %s, %s)
+            ) VALUES (%s, %s, %s, %s, NOW() AT TIME ZONE 'America/Sao_Paulo', %s, %s)
         """
         
         # Usar execute_batch para melhor performance
@@ -777,7 +791,6 @@ def save_ont_traffic_bulk(olt_ip, fsp, traffic_list):
         if conn:
             conn.close()
 
-# --- INÍCIO DA MODIFICAÇÃO ---
 def save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list):
     """Salva uma lista de registros de estatísticas de pacotes de ONTs."""
     if not stats_list:
@@ -814,9 +827,7 @@ def save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list):
         return 0
     finally:
         if conn: conn.close()
-# --- FIM DA MODIFICAÇÃO ---
 
-# --- INÍCIO DA MODIFICAÇÃO ---
 def save_ont_eth_statistics_bulk(olt_ip, fsp, ont_id, stats_list_per_port):
     """
     Salva uma lista de registros de estatísticas de portas Ethernet de uma ONT.

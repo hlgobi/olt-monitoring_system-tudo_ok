@@ -122,13 +122,23 @@ def main():
 
 # Verifica se o script está sendo executado diretamente (não importado como módulo)
 if __name__ == '__main__':
-    # Se estiver, chama a função main() para iniciar a aplicação
+    # Configura o fuso horário padrão para o sistema
+    import os
+    os.environ['TZ'] = 'America/Sao_Paulo'
+    
+    # Tenta configurar o fuso horário (funciona em sistemas Unix-like)
+    try:
+        import time
+        time.tzset()
+    except:
+        pass
+    
+    # Chama a função principal
     main()
-
-# Em main.py, após as outras importações
 try:
     from uplinks_config import UPLINKS
     logging.info("Configurações de uplinks carregadas com sucesso.")
 except ImportError:
     logging.warning("Arquivo uplinks_config.py não encontrado. A funcionalidade de DDM não estará disponível.")
     UPLINKS = {}
+

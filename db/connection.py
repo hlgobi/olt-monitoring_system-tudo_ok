@@ -10,6 +10,9 @@ def create_tables():
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         with conn.cursor() as cursor:
+            # Primeiro, vamos definir o fuso horário padrão da sessão para America/Sao_Paulo
+            cursor.execute("SET TIME ZONE 'America/Sao_Paulo';")
+            
             # Tabela de Dados ONT (Optical Network Terminal)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.ont_data (
@@ -40,7 +43,7 @@ def create_tables():
                     line_profile_name VARCHAR(50),
                     service_profile_id VARCHAR(20),
                     service_profile_name VARCHAR(50),
-                    collection_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    collection_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     connection_code VARCHAR(50),
                     client_name VARCHAR(100)
                 );
@@ -52,7 +55,7 @@ def create_tables():
                     id SERIAL PRIMARY KEY,
                     olt_ip VARCHAR(50) NOT NULL,
                     fsp VARCHAR(20) NOT NULL,
-                    collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                    collection_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     up_traffic_kbps FLOAT,
                     down_traffic_kbps FLOAT,
                     upstream_broadcast_pps INTEGER,
@@ -68,7 +71,7 @@ def create_tables():
             # Índices para melhor performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pon_traffic_olt_fsp ON public.pon_traffic_data (olt_ip, fsp);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pon_traffic_time ON public.pon_traffic_data (collection_time);")
-
+            
             # --- CORREÇÃO: Garante que as colunas de data/hora usem o tipo correto ---
             alter_commands = [
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS olt_ip VARCHAR(15);",
@@ -98,6 +101,15 @@ def create_tables():
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS line_profile_id VARCHAR(20);",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS service_profile_name VARCHAR(100);",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS service_profile_id VARCHAR(20);",
+                # Corrigir o tipo da coluna collection_time se já existir
+                """
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ont_data' AND column_name = 'collection_time' AND data_type != 'timestamp with time zone') THEN
+                        ALTER TABLE public.ont_data ALTER COLUMN collection_time TYPE TIMESTAMP WITH TIME ZONE;
+                    END IF;
+                END $$;
+                """,
             ]
             
             for command in alter_commands:
@@ -117,7 +129,7 @@ def create_tables():
                     id SERIAL PRIMARY KEY,
                     olt_ip VARCHAR(15) NOT NULL,
                     olt_identifier VARCHAR(10) NOT NULL,
-                    collection_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    collection_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     fsp VARCHAR(10) NOT NULL,
                     online_count INTEGER NOT NULL,
                     total_count INTEGER NOT NULL,
@@ -132,7 +144,7 @@ def create_tables():
                     id SERIAL PRIMARY KEY,
                     olt_ip VARCHAR(15) NOT NULL,
                     olt_identifier VARCHAR(10) NOT NULL,
-                    collection_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    collection_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     slot_id VARCHAR(10) NOT NULL,
                     board_name VARCHAR(50),
                     temperature_c FLOAT NOT NULL,
@@ -142,18 +154,18 @@ def create_tables():
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_temp_monitoring_olt_slot_time ON public.temperature_monitoring(olt_identifier, slot_id, collection_time DESC);")
             logging.info("Tabela 'public.temperature_monitoring' verificada/criada.")
-
+            
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.pon_port_state (
                     id SERIAL PRIMARY KEY,
                     olt_ip VARCHAR(50) NOT NULL,
                     olt_identifier VARCHAR(10) NOT NULL,
                     fsp VARCHAR(20) NOT NULL,
-                    collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                    collection_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     port_state VARCHAR(20),
                     last_down_cause VARCHAR(100),
-                    last_up_time TIMESTAMP,
-                    last_down_time TIMESTAMP,
+                    last_up_time TIMESTAMP WITH TIME ZONE,
+                    last_down_time TIMESTAMP WITH TIME ZONE,
                     signal_detect VARCHAR(20),
                     available_bandwidth_kbps INTEGER,
                     illegal_rogue_ont VARCHAR(50),
@@ -173,7 +185,6 @@ def create_tables():
             cursor.execute("ALTER TABLE public.pon_port_state ADD COLUMN IF NOT EXISTS olt_identifier VARCHAR(10);")
             cursor.execute("ALTER TABLE public.pon_port_state ADD COLUMN IF NOT EXISTS left_guaranteed_bandwidth_kbps INTEGER;")
             cursor.execute("ALTER TABLE public.pon_port_state ADD COLUMN IF NOT EXISTS admin_state VARCHAR(20);")
-
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pon_port_state_olt_fsp ON public.pon_port_state (olt_ip, fsp);")
             
             cursor.execute("""
@@ -181,7 +192,7 @@ def create_tables():
                     id SERIAL PRIMARY KEY,
                     olt_ip VARCHAR(15) NOT NULL,
                     olt_identifier VARCHAR(10) NOT NULL,
-                    collection_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    collection_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     slot_id VARCHAR(10) NOT NULL,
                     board_name VARCHAR(50),
                     resource_type VARCHAR(10) NOT NULL,
@@ -201,7 +212,7 @@ def create_tables():
                     fsp VARCHAR(20),
                     ont_id_on_pon INT,
                     diag_section_id VARCHAR(50) NOT NULL,
-                    diag_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    diag_timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     raw_output TEXT,
                     parsed_data JSONB,
                     manufacturer VARCHAR(255) DEFAULT NULL,
@@ -219,7 +230,7 @@ def create_tables():
                     olt_identifier VARCHAR(10) NOT NULL,
                     fsp VARCHAR(20) NOT NULL,
                     ont_id INTEGER NOT NULL,
-                    collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                    collection_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     upstream_frames BIGINT,
                     upstream_bytes BIGINT,
                     upstream_discarded_frames BIGINT,
@@ -230,14 +241,14 @@ def create_tables():
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_stats_packets_fsp_ont_id_time ON public.ont_statistics_packets(fsp, ont_id, collection_time DESC);")
             logging.info("Tabela 'public.ont_statistics_packets' verificada/criada.")
-
+            
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.pon_statistics_packets (
                     id SERIAL PRIMARY KEY,
                     olt_ip VARCHAR(50) NOT NULL,
                     olt_identifier VARCHAR(10) NOT NULL,
                     fsp VARCHAR(20) NOT NULL,
-                    collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                    collection_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     rx_frames BIGINT, rx_bytes BIGINT, rx_unicast_frames BIGINT, rx_multicast_frames BIGINT,
                     rx_broadcast_frames BIGINT, rx_64_byte_frames BIGINT, rx_65_127_byte_frames BIGINT,
                     rx_128_255_byte_frames BIGINT, rx_256_511_byte_frames BIGINT, rx_512_1023_byte_frames BIGINT,
@@ -260,7 +271,7 @@ def create_tables():
                     olt_identifier VARCHAR(10) NOT NULL,
                     fsp VARCHAR(20) NOT NULL,
                     ont_id INTEGER NOT NULL,
-                    collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                    collection_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     up_traffic_kbps INTEGER,
                     down_traffic_kbps INTEGER
                 );
@@ -277,7 +288,7 @@ def create_tables():
                     fsp VARCHAR(20) NOT NULL,
                     ont_id INTEGER NOT NULL,
                     eth_port_id INTEGER NOT NULL,
-                    collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                    collection_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     rx_frames BIGINT,
                     tx_frames BIGINT,
                     rx_bytes BIGINT,
@@ -298,14 +309,14 @@ def create_tables():
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_eth_stats_fsp_ont_eth_time ON ont_eth_port_statistics(fsp, ont_id, eth_port_id, collection_time DESC);")
             logging.info("Tabela 'ont_eth_port_statistics' verificada/criada.")
-
-            # Em db/connection.py, dentro da função create_tables
+            
+            # Tabela de dados DDM de uplink
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.uplink_ddm_data (
                     id SERIAL PRIMARY KEY,
                     olt_ip VARCHAR(50) NOT NULL,
                     olt_identifier VARCHAR(10) NOT NULL,
-                    collection_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                    collection_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     placa VARCHAR(50) NOT NULL,
                     slot INTEGER NOT NULL,
                     port INTEGER NOT NULL,
@@ -319,7 +330,7 @@ def create_tables():
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_uplink_ddm_olt_slot_port_time ON public.uplink_ddm_data(olt_identifier, slot, port, collection_time DESC);")
             logging.info("Tabela 'public.uplink_ddm_data' verificada/criada.")
-
+            
         conn.commit()
         logging.info("Todas as tabelas e colunas foram verificadas/criadas com sucesso no esquema 'public'.")
         return True
@@ -339,6 +350,9 @@ def check_db_connection():
         conn = None
         try:
             conn = psycopg2.connect(**DB_CONFIG)
+            # Definir o fuso horário da sessão para America/Sao_Paulo
+            with conn.cursor() as cursor:
+                cursor.execute("SET TIME ZONE 'America/Sao_Paulo';")
             return True
         except Exception as e:
             logging.warning(f"Tentativa {attempt+1}/{max_retries}: Conexão PostgreSQL falhou: {e}")
