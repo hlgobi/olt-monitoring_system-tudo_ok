@@ -4065,25 +4065,49 @@ class OLTDatabaseGUI(QMainWindow):
         # --- PAINEL DE CONTROLE COM FILTROS ---
         control_panel = QWidget()
         control_layout = QHBoxLayout(control_panel)
+        
+        # Filtro de OLT
         self.ont_stats_olt_filter = QComboBox()
         if self.ont_stats_olt_filter not in self.olt_filters_to_update:
             self.olt_filters_to_update.append(self.ont_stats_olt_filter)
         
+        # Filtro de F/S/P
         self.ont_stats_fsp_filter = QComboBox()
+        self.ont_stats_fsp_filter.addItem("Todas as PONs")
+        self.ont_stats_fsp_filter.setEnabled(False)  # Inicialmente desabilitado
+        
+        # Filtro de ONT ID
+        self.ont_stats_ont_id_filter = QComboBox()
+        self.ont_stats_ont_id_filter.addItem("Todas as ONTs")
+        self.ont_stats_ont_id_filter.setEnabled(False)  # Inicialmente desabilitado
+        
         # Conecta os sinais para atualização dinâmica
         self.ont_stats_olt_filter.currentTextChanged.connect(self.update_ont_stats_fsp_filter)
-        self.ont_stats_fsp_filter.currentTextChanged.connect(self.load_ont_stats_data)
-
+        self.ont_stats_fsp_filter.currentTextChanged.connect(self.update_ont_stats_ont_id_filter)
+        self.ont_stats_ont_id_filter.currentTextChanged.connect(self.load_ont_stats_data)
+        
         control_layout.addWidget(QLabel("Filtrar por OLT:"))
         control_layout.addWidget(self.ont_stats_olt_filter)
         control_layout.addWidget(QLabel("Filtrar por F/S/P:"))
         control_layout.addWidget(self.ont_stats_fsp_filter)
+        control_layout.addWidget(QLabel("Filtrar por ONT ID:"))
+        control_layout.addWidget(self.ont_stats_ont_id_filter)
+        
+        # Botões de ação
+        refresh_btn = QPushButton("Atualizar")
+        refresh_btn.clicked.connect(self.load_ont_stats_data)
+        
+        export_btn = QPushButton("Exportar CSV")
+        export_btn.clicked.connect(self.export_ont_stats_to_csv)
+        
+        control_layout.addWidget(refresh_btn)
+        control_layout.addWidget(export_btn)
         control_layout.addStretch()
         layout.addWidget(control_panel)
-
+        
         # --- TABELA DE DADOS ---
         self.ont_stats_table = QTableWidget()
-        self.ont_stats_table.setColumnCount(9) # Corrigido para 9 colunas
+        self.ont_stats_table.setColumnCount(9)
         self.ont_stats_table.setHorizontalHeaderLabels([
             "F/S/P", "ONT ID", "Hora", "Up Frames", "Up Bytes", "Up Discard",
             "Down Frames", "Down Bytes", "Down Discard"
@@ -4091,65 +4115,199 @@ class OLTDatabaseGUI(QMainWindow):
         self.ont_stats_table.setSortingEnabled(True)
         self.ont_stats_table.setEditTriggers(QTableWidget.NoEditTriggers)
         layout.addWidget(self.ont_stats_table)
-
+        
         # --- TIMER PARA ATUALIZAÇÃO AUTOMÁTICA ---
         self.ont_stats_timer = QTimer(self)
         self.ont_stats_timer.setInterval(60000) # Atualiza a cada 60 segundos
         self.ont_stats_timer.timeout.connect(self.load_ont_stats_data)
+        
+        # Carrega as OLTs disponíveis
+        self.load_ont_stats_olt_list()
+
+    def load_ont_stats_olt_list(self):
+        """Carrega a lista de OLTs disponíveis na tabela de estatísticas de ONT"""
+        try:
+            self.ont_stats_olt_filter.blockSignals(True)
+            self.ont_stats_olt_filter.clear()
+            self.ont_stats_olt_filter.addItem("Todas as OLTs")
+            
+            # Verifica se a conexão está ativa
+            if not self.conn or self.conn.closed:
+                logging.warning("Conexão com o banco fechada, tentando reconectar...")
+                self.connect_to_db()
+                if not self.conn or self.conn.closed:
+                    raise Exception("Não foi possível estabelecer conexão com o banco de dados")
+            
+            # Busca OLTs distintas na tabela de estatísticas
+            query = "SELECT DISTINCT olt_identifier FROM ont_statistics_packets ORDER BY olt_identifier"
+            self.cursor.execute(query)
+            olts = [row[0] for row in self.cursor.fetchall()]
+            
+            for olt in olts:
+                self.ont_stats_olt_filter.addItem(f"OLT {olt}")
+            
+            self.ont_stats_olt_filter.blockSignals(False)
+            logging.info(f"OLTs carregadas para filtro de estatísticas de ONT: {olts}")
+            
+            # Se houver OLTs, seleciona a primeira por padrão
+            if olts and self.ont_stats_olt_filter.count() > 1:
+                self.ont_stats_olt_filter.setCurrentIndex(1)  # Pula "Todas as OLTs"
+                logging.info(f"OLT padrão selecionada: {self.ont_stats_olt_filter.currentText()}")
+                
+        except Exception as e:
+            logging.error(f"Erro ao carregar OLTs para filtro de estatísticas de ONT: {e}", exc_info=True)
+            if self.conn:
+                self.conn.rollback()
+            self.ont_stats_olt_filter.addItem("Erro ao carregar")
+            self.ont_stats_olt_filter.blockSignals(False)
 
     def update_ont_stats_fsp_filter(self):
-        """Atualiza o filtro de F/S/P com base na OLT selecionada para a aba de estatísticas."""
+        """Atualiza o filtro de F/S/P com base na OLT selecionada para a aba de estatísticas de ONT."""
+        selected_olt = self.ont_stats_olt_filter.currentText()
+        
+        # Bloqueia sinais para evitar chamadas recursivas
         self.ont_stats_fsp_filter.blockSignals(True)
         self.ont_stats_fsp_filter.clear()
         self.ont_stats_fsp_filter.addItem("Todas as PONs")
         
-        selected_olt = self.ont_stats_olt_filter.currentText()
-        if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+        # Bloqueia os filtros dependentes
+        self.ont_stats_ont_id_filter.blockSignals(True)
+        self.ont_stats_ont_id_filter.clear()
+        self.ont_stats_ont_id_filter.addItem("Todas as ONTs")
+        self.ont_stats_ont_id_filter.setEnabled(False)
+        self.ont_stats_ont_id_filter.blockSignals(False)
+        
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
             try:
-                olt_identifier = selected_olt.split()[-1]
+                # Extrai o identificador da OLT
+                olt_identifier = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                
+                # Busca F/S/P distintos para essa OLT
                 query = "SELECT DISTINCT fsp FROM ont_statistics_packets WHERE olt_identifier = %s ORDER BY fsp;"
                 self.cursor.execute(query, (olt_identifier,))
                 fsps = [row[0] for row in self.cursor.fetchall()]
-                self.ont_stats_fsp_filter.addItems(fsps)
+                
+                for fsp in fsps:
+                    self.ont_stats_fsp_filter.addItem(fsp)
+                
+                # Habilita o filtro de F/S/P
+                self.ont_stats_fsp_filter.setEnabled(True)
+                
+                logging.info(f"F/S/P carregados para {olt_identifier}: {fsps}")
             except Exception as e:
-                logging.error(f"Erro ao carregar FSPs para o filtro de estatísticas de ONT: {e}")
-                if self.conn: self.conn.rollback() # Limpa a transação em caso de erro
+                logging.error(f"Erro ao carregar F/S/P para o filtro de estatísticas de ONT: {e}")
+                if self.conn:
+                    self.conn.rollback()
+        else:
+            # Desabilita o filtro de F/S/P se nenhuma OLT for selecionada
+            self.ont_stats_fsp_filter.setEnabled(False)
+            logging.info("Nenhuma OLT selecionada, filtro de F/S/P desabilitado")
         
         self.ont_stats_fsp_filter.blockSignals(False)
-        self.load_ont_stats_data() # Força o recarregamento dos dados com o novo filtro de OLT
+        
+        # Carrega os dados após atualizar os filtros
+        self.load_ont_stats_data()
+
+    def update_ont_stats_ont_id_filter(self):
+        """Atualiza o filtro de ONT ID com base na OLT e F/S/P selecionados para a aba de estatísticas de ONT."""
+        selected_olt = self.ont_stats_olt_filter.currentText()
+        selected_fsp = self.ont_stats_fsp_filter.currentText()
+        
+        # Bloqueia sinais
+        self.ont_stats_ont_id_filter.blockSignals(True)
+        self.ont_stats_ont_id_filter.clear()
+        self.ont_stats_ont_id_filter.addItem("Todas as ONTs")
+        
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            try:
+                # Extrai o identificador da OLT
+                olt_identifier = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                
+                if selected_fsp and selected_fsp != "Todas as PONs":
+                    # Busca ONT IDs distintos para essa OLT e F/S/P
+                    query = "SELECT DISTINCT ont_id FROM ont_statistics_packets WHERE olt_identifier = %s AND fsp = %s ORDER BY ont_id"
+                    self.cursor.execute(query, (olt_identifier, selected_fsp))
+                    ont_ids = [row[0] for row in self.cursor.fetchall()]
+                    
+                    for ont_id in ont_ids:
+                        self.ont_stats_ont_id_filter.addItem(str(ont_id))
+                    
+                    # Habilita o filtro de ONT ID
+                    self.ont_stats_ont_id_filter.setEnabled(True)
+                    
+                    logging.info(f"ONT IDs carregados para {olt_identifier}, F/S/P {selected_fsp}: {ont_ids}")
+                else:
+                    # Se "Todas as PONs" for selecionado, busca todos os ONT IDs da OLT
+                    query = "SELECT DISTINCT ont_id FROM ont_statistics_packets WHERE olt_identifier = %s ORDER BY ont_id"
+                    self.cursor.execute(query, (olt_identifier,))
+                    ont_ids = [row[0] for row in self.cursor.fetchall()]
+                    
+                    for ont_id in ont_ids:
+                        self.ont_stats_ont_id_filter.addItem(str(ont_id))
+                    
+                    self.ont_stats_ont_id_filter.setEnabled(True)
+                    
+                    logging.info(f"ONT IDs carregados para {olt_identifier} (todas as PONs): {ont_ids}")
+            except Exception as e:
+                logging.error(f"Erro ao carregar ONT IDs para filtro de estatísticas de ONT: {e}")
+                if self.conn:
+                    self.conn.rollback()
+        else:
+            # Desabilita o filtro de ONT ID se nenhuma OLT for selecionada
+            self.ont_stats_ont_id_filter.setEnabled(False)
+            logging.info("Nenhuma OLT selecionada, filtro de ONT ID desabilitado")
+        
+        self.ont_stats_ont_id_filter.blockSignals(False)
+        
+        # Carrega os dados após atualizar os filtros
+        self.load_ont_stats_data()
+
 
     def load_ont_stats_data(self):
-        """Carrega os dados de estatísticas de pacotes por ONT."""
+        """Carrega os dados de estatísticas de pacotes por ONT com base nos filtros selecionados."""
         if not self.isVisible() or self.tab_widget.currentWidget() != self.ont_stats_tab:
             return
-
+        
         logging.info("Carregando estatísticas de pacotes de ONT.")
         self.ont_stats_table.setSortingEnabled(False)
         self.ont_stats_table.setRowCount(0)
         
         selected_olt = self.ont_stats_olt_filter.currentText()
         selected_fsp = self.ont_stats_fsp_filter.currentText()
+        selected_ont_id = self.ont_stats_ont_id_filter.currentText()
         
         conditions = []
         params = []
-
-        if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
-            olt_identifier = selected_olt.split()[-1]
+        
+        # Aplicar filtro de OLT se selecionado
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            olt_identifier = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
             conditions.append("olt_identifier = %s")
             params.append(olt_identifier)
         
-        if selected_fsp != "Todas as PONs":
+        # Aplicar filtro de F/S/P se selecionado
+        if selected_fsp and selected_fsp != "Todas as PONs":
             conditions.append("fsp = %s")
             params.append(selected_fsp)
-
+        
+        # Aplicar filtro de ONT ID se selecionado
+        if selected_ont_id and selected_ont_id != "Todas as ONTs":
+            try:
+                ont_id_num = int(selected_ont_id)
+                conditions.append("ont_id = %s")
+                params.append(ont_id_num)
+            except ValueError:
+                logging.warning(f"ONT ID inválido: {selected_ont_id}")
+        
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         
         query = f"""
             SELECT fsp, ont_id, collection_time, upstream_frames, upstream_bytes,
-                   upstream_discarded_frames, downstream_frames, downstream_bytes,
-                   downstream_discarded_frames
+                upstream_discarded_frames, downstream_frames, downstream_bytes,
+                downstream_discarded_frames
             FROM ont_statistics_packets {where_clause} ORDER BY collection_time DESC LIMIT 1000;
         """
+        
         try:
             self.cursor.execute(query, tuple(params))
             results = self.cursor.fetchall()
@@ -4179,14 +4337,56 @@ class OLTDatabaseGUI(QMainWindow):
                 if (up_d and up_d > 0) or (down_d and down_d > 0):
                     for col in range(self.ont_stats_table.columnCount()):
                         self.ont_stats_table.item(row_idx, col).setBackground(QColor("#FFCDD2")) # Vermelho claro
-
+            
             self.ont_stats_table.resizeColumnsToContents()
+            logging.info(f"{len(results)} registros de estatísticas de ONT carregados.")
+            
         except Exception as e:
             logging.error(f"Erro ao carregar estatísticas de pacotes de ONT: {e}", exc_info=True)
-            if self.conn: self.conn.rollback() # Limpa a transação em caso de erro
+            if self.conn: 
+                self.conn.rollback() # Limpa a transação em caso de erro
         finally:
             self.ont_stats_table.setSortingEnabled(True)
 
+
+    def export_ont_stats_to_csv(self):
+        """Exporta os dados da tabela de estatísticas de ONT para um arquivo CSV"""
+        if self.ont_stats_table.rowCount() == 0:
+            QMessageBox.information(self, "Nada para Exportar", "A tabela de estatísticas de ONT está vazia.")
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Estatísticas de ONT", 
+            f"ont_stats_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "Arquivos CSV (*.csv);;Todos os Arquivos (*)"
+        )
+        
+        if not filename:
+            return
+        
+        try:
+            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile, delimiter=';')
+                
+                # Escreve cabeçalho
+                headers = [self.ont_stats_table.horizontalHeaderItem(col).text() 
+                        for col in range(self.ont_stats_table.columnCount())]
+                writer.writerow(headers)
+                
+                # Escreve dados
+                for row in range(self.ont_stats_table.rowCount()):
+                    row_data = [self.ont_stats_table.item(row, col).text() 
+                            for col in range(self.ont_stats_table.columnCount())]
+                    writer.writerow(row_data)
+            
+            QMessageBox.information(self, "Exportação Concluída", 
+                                f"Dados exportados com sucesso para:\n{filename}")
+            logging.info(f"Dados de estatísticas de ONT exportados para {filename}")
+            
+        except Exception as e:
+            logging.error(f"Erro ao exportar dados de estatísticas de ONT: {e}")
+            QMessageBox.critical(self, "Erro de Exportação", 
+                            f"Não foi possível exportar os dados:\n{str(e)}")
 
     def update_ont_stats_display(self):
         """Atualiza a exibição de estatísticas de pacotes de ONT se a aba estiver ativa."""
