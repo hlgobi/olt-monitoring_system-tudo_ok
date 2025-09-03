@@ -3736,33 +3736,32 @@ class OLTDatabaseGUI(QMainWindow):
             self.load_pon_traffic_data()
 
     def setup_pon_stats_tab(self):
-        """Configura a interface da aba 'Estatísticas da PON' com layout ultra compacto."""
+        """Configura a interface da aba 'Estatísticas da PON' com layout ultra compacto e categorização."""
         layout = QVBoxLayout(self.pon_stats_tab)
-        layout.setContentsMargins(0, 0, 0, 0)  # Sem margens
-        layout.setSpacing(0)  # Sem espaçamento
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
-        # Painel de controle ultra compacto - sem bordas visíveis
+        # Painel de controle ultra compacto
         control_panel = QWidget()
-        control_panel.setMaximumHeight(25)  # Altura máxima reduzida
+        control_panel.setMaximumHeight(25)
         control_layout = QHBoxLayout(control_panel)
-        control_layout.setContentsMargins(5, 2, 5, 2)  # Apenas margens horizontais
+        control_layout.setContentsMargins(5, 2, 5, 2)
         control_layout.setSpacing(5)
         
-        # Filtro de OLT
+        # Filtros
         self.pon_stats_olt_filter = QComboBox()
         self.pon_stats_olt_filter.setMaximumWidth(120)
         self.pon_stats_olt_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         if self.pon_stats_olt_filter not in self.olt_filters_to_update:
             self.olt_filters_to_update.append(self.pon_stats_olt_filter)
         
-        # Filtro de F/S/P
         self.pon_stats_fsp_filter = QComboBox()
         self.pon_stats_fsp_filter.addItem("Todas as PONs")
         self.pon_stats_fsp_filter.setEnabled(False)
         self.pon_stats_fsp_filter.setMaximumWidth(100)
         self.pon_stats_fsp_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         
-        # Conecta os sinais
+        # Conecta sinais
         self.pon_stats_olt_filter.currentTextChanged.connect(self.update_pon_stats_fsp_filter)
         self.pon_stats_fsp_filter.currentTextChanged.connect(self.load_pon_stats_data)
         
@@ -3772,14 +3771,21 @@ class OLTDatabaseGUI(QMainWindow):
         fsp_label = QLabel("F/S/P:")
         fsp_label.setStyleSheet("font-size: 9px; padding: 0px;")
         
-        # Adiciona elementos ao layout
+        # Adiciona elementos
         control_layout.addWidget(olt_label)
         control_layout.addWidget(self.pon_stats_olt_filter)
         control_layout.addWidget(fsp_label)
         control_layout.addWidget(self.pon_stats_fsp_filter)
         control_layout.addStretch()
         
-        # Status ultra compacto
+        # Botão de legenda
+        legend_btn = QPushButton("Legenda")
+        legend_btn.setMaximumWidth(60)
+        legend_btn.setStyleSheet("font-size: 8px; padding: 1px; background-color: #e1f5fe;")
+        legend_btn.clicked.connect(self.show_pon_stats_legend)
+        control_layout.addWidget(legend_btn)
+        
+        # Status
         self.pon_stats_status_label = QLabel("0 regs")
         self.pon_stats_status_label.setStyleSheet("color: green; font-weight: bold; font-size: 8px;")
         self.pon_stats_status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -3790,18 +3796,24 @@ class OLTDatabaseGUI(QMainWindow):
         # Splitter para as tabelas
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
-        splitter.setHandleWidth(1)  # Handle mais fino
+        splitter.setHandleWidth(1)
         
         # Configuração comum para ambos os grupos
         def setup_table_group(title, table):
             group = QGroupBox(title)
             layout_group = QVBoxLayout(group)
-            layout_group.setContentsMargins(2, 15, 2, 2)  # Apenas margem superior para o título
+            layout_group.setContentsMargins(2, 15, 2, 2)
             layout_group.setSpacing(0)
-            table.setColumnCount(4)
-            table.setHorizontalHeaderLabels(["F/S/P", "Hora", "Métrica", "Valor"])
-            table.horizontalHeader().setMinimumHeight(20)  # Cabeçalho mais baixo
-            table.verticalHeader().setDefaultSectionSize(18)  # Linhas mais baixas
+            table.setColumnCount(5)  # Adicionada coluna de categoria
+            table.setHorizontalHeaderLabels(["F/S/P", "Hora", "Métrica", "Valor", "Cat."])
+            table.horizontalHeader().setMinimumHeight(20)
+            table.verticalHeader().setDefaultSectionSize(18)
+            # Ajuste de largura das colunas
+            table.setColumnWidth(0, 60)   # F/S/P
+            table.setColumnWidth(1, 70)   # Hora
+            table.setColumnWidth(2, 180)  # Métrica
+            table.setColumnWidth(3, 80)   # Valor
+            table.setColumnWidth(4, 30)   # Categoria
             layout_group.addWidget(table)
             return group
         
@@ -3822,6 +3834,137 @@ class OLTDatabaseGUI(QMainWindow):
         self.pon_stats_timer = QTimer(self)
         self.pon_stats_timer.setInterval(60000)
         self.pon_stats_timer.timeout.connect(self.load_pon_stats_data)
+
+    def show_pon_stats_legend(self):
+        """Exibe uma janela com a legenda de categorias dos contadores PON"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Legenda - Categorias de Contadores PON")
+        dialog.setMinimumSize(700, 500)
+        dialog.setModal(True)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Criar um widget com abas para organizar as informações
+        tab_widget = QTabWidget()
+        layout.addWidget(tab_widget)
+        
+        # Aba 1: Contadores Normais (Verde)
+        normal_tab = QWidget()
+        normal_layout = QVBoxLayout(normal_tab)
+        
+        normal_title = QLabel("<h2 style='color: #2e7d32;'>✅ Contadores que é normal crescer bastante</h2>")
+        normal_layout.addWidget(normal_title)
+        
+        normal_info = QLabel("""
+        <p><b>Esses crescem o tempo todo, não são problema em si. O que importa é a taxa de crescimento e se bate com o uso real:</b></p>
+        <ul>
+            <li><b>Frames / Bytes (RX e TX)</b> → indicam tráfego total</li>
+            <li><b>Unicast Frames</b> → tráfego normal da rede</li>
+            <li><b>Multicast Frames</b> → depende da rede (IGMP, IPTV etc.)</li>
+            <li><b>Broadcast Frames</b> → deve existir, mas em baixa quantidade</li>
+            <li><b>Frames por faixa de tamanho</b> → apenas estatística, esperado</li>
+        </ul>
+        <br>
+        <p><b>Monitoramento:</b> Apenas variações súbitas ou tráfego muito fora do padrão (ex.: broadcast disparado)</p>
+        """)
+        normal_layout.addWidget(normal_info)
+        
+        tab_widget.addTab(normal_tab, "Contadores Normais")
+        
+        # Aba 2: Contadores de Atenção (Amarelo)
+        warning_tab = QWidget()
+        warning_layout = QVBoxLayout(warning_tab)
+        
+        warning_title = QLabel("<h2 style='color: #f57c00;'>⚠️ Contadores que devem ficar sempre baixos ou zero</h2>")
+        warning_layout.addWidget(warning_title)
+        
+        warning_info = QLabel("""
+        <p><b>Se começarem a subir, já é observância (Warning):</b></p>
+        <ul>
+            <li><b>Broadcast Frames</b> → não deve ser gigante; se ficar alto, pode causar lentidão</li>
+            <li><b>Multicast Frames</b> → depende do uso; se a rede não tem IPTV, deveria ser quase zero</li>
+            <li><b>Over 1518 Byte Frames</b> → quadros maiores que o MTU normal; se aparecer sem motivo (jumbo frames configurados), é suspeito</li>
+        </ul>
+        <br>
+        <p><b>Ação:</b> Investigar causa do aumento anormal</p>
+        """)
+        warning_layout.addWidget(warning_info)
+        
+        tab_widget.addTab(warning_tab, "Contadores de Atenção")
+        
+        # Aba 3: Contadores Críticos (Vermelho)
+        critical_tab = QWidget()
+        critical_layout = QVBoxLayout(critical_tab)
+        
+        critical_title = QLabel("<h2 style='color: #c62828;'>🚨 Contadores que devem ser sempre ZERO</h2>")
+        critical_layout.addWidget(critical_title)
+        
+        critical_info = QLabel("""
+        <p><b>Esses apontam problemas reais de rede ou hardware. Qualquer número > 0 já merece atenção:</b></p>
+        <ul>
+            <li><b>Undersize Discarded Frames</b> → pacote abaixo do tamanho mínimo (erro físico, colisão)</li>
+            <li><b>Oversize Discarded Frames</b> → pacote acima do permitido (erro, má config de MTU)</li>
+            <li><b>Crc Error Frames</b> → erro de integridade → quase sempre cabo/conector ruim</li>
+            <li><b>Error Frames</b> → pacotes corrompidos → idem</li>
+            <li><b>Discarded Frames (genérico)</b> → perda de pacotes dentro da ONT (buffer cheio, congestionamento)</li>
+            <li><b>Buffer Overflow Frames (no TX)</b> → indica que a ONT não conseguiu processar o tráfego (tráfego excessivo, gargalo)</li>
+        </ul>
+        <br>
+        <p><b>Se for poucos e isolados:</b> pode ser normal (picos)</p>
+        <p><b>Se for constante:</b> precisa investigar (cabo, porta, congestionamento, mau contato)</p>
+        """)
+        critical_layout.addWidget(critical_info)
+        
+        tab_widget.addTab(critical_tab, "Contadores Críticos")
+        
+        # Aba 4: Exemplos Práticos
+        examples_tab = QWidget()
+        examples_layout = QVBoxLayout(examples_tab)
+        
+        examples_title = QLabel("<h2>📋 Exemplos Práticos</h2>")
+        examples_layout.addWidget(examples_title)
+        
+        examples_info = QLabel("""
+        <p><b>Análise da sua captura:</b></p>
+        <table border='1' cellpadding='5' style='border-collapse: collapse;'>
+            <tr style='background-color: #c8e6c9;'>
+                <td><b>Frames, Bytes, Unicast</b></td>
+                <td>tudo ok, altos porque é tráfego normal</td>
+            </tr>
+            <tr style='background-color: #c8e6c9;'>
+                <td><b>Broadcast</b></td>
+                <td>baixo (exemplo: 58, 1816) → está ótimo</td>
+            </tr>
+            <tr style='background-color: #ffcdd2;'>
+                <td><b>Buffer Overflow Frames (TX)</b></td>
+                <td>valor 2.497.590.394 em uma porta → ⚠️ não é bom</td>
+            </tr>
+            <tr style='background-color: #c8e6c9;'>
+                <td><b>Discarded / Error / CRC / Oversize / Undersize</b></td>
+                <td>todos zerados → perfeito 👍</td>
+            </tr>
+        </table>
+        <br>
+        <p><b>Investigação necessária para Buffer Overflow:</b></p>
+        <ul>
+            <li>Verificar se a ONT está saturada</li>
+            <li>Verificar configuração da porta</li>
+            <li>Verificar se há gargalo no caminho</li>
+            <li>Verificar se o tráfego está dentro do esperado para o plano contratado</li>
+        </ul>
+        """)
+        examples_layout.addWidget(examples_info)
+        
+        tab_widget.addTab(examples_tab, "Exemplos Práticos")
+        
+        # Botão de fechar
+        close_button = QPushButton("Fechar")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+        
+        # Exibir o diálogo
+        dialog.exec_()
+
 
     def update_pon_stats_fsp_filter(self):
         """Atualiza o filtro de F/S/P com base na OLT selecionada para a aba de estatísticas PON."""
@@ -3865,7 +4008,7 @@ class OLTDatabaseGUI(QMainWindow):
 
 
     def load_pon_stats_data(self):
-        """Carrega os dados de estatísticas de pacotes e os exibe nas tabelas."""
+        """Carrega os dados de estatísticas de pacotes com categorização e cores."""
         logging.info("Carregando estatísticas de pacotes da PON.")
         self.pon_stats_rx_table.setRowCount(0)
         self.pon_stats_tx_table.setRowCount(0)
@@ -3892,10 +4035,27 @@ class OLTDatabaseGUI(QMainWindow):
             self.cursor.execute(query, tuple(params))
             results = self.cursor.fetchall()
             
-            # --- CORREÇÃO: Adiciona a função enumerate() para obter o índice (i) e o item (desc) corretamente.
             col_map = {desc[0]: i for i, desc in enumerate(self.cursor.description)}
-            # --- FIM DA CORREÇÃO ---
             
+            # Definir categorias para cada métrica
+            def get_metric_category(metric_name):
+                metric_lower = metric_name.lower()
+                
+                # Contadores normais (verde)
+                if any(x in metric_lower for x in ['frames', 'bytes', 'unicast', 'multicast', 'broadcast', '64_bytes', '65_127_bytes', '128_255_bytes', '256_511_bytes', '512_1023_bytes', '1024_1518_bytes']):
+                    return "normal"
+                
+                # Contadores de atenção (amarelo)
+                elif any(x in metric_lower for x in ['over_1518_bytes']):
+                    return "warning"
+                
+                # Contadores críticos (vermelho)
+                elif any(x in metric_lower for x in ['discarded', 'error', 'crc', 'undersize', 'oversize', 'buffer_overflow']):
+                    return "critical"
+                
+                return "unknown"
+            
+            # Obter métricas RX e TX
             rx_metrics = [k for k in col_map if k.startswith('rx_')]
             tx_metrics = [k for k in col_map if k.startswith('tx_')]
             
@@ -3907,36 +4067,79 @@ class OLTDatabaseGUI(QMainWindow):
                 fsp = record[col_map['fsp']]
                 timestamp = record[col_map['collection_time']].strftime('%H:%M:%S')
                 
+                # Processar métricas RX
                 for metric in rx_metrics:
                     value = record[col_map[metric]]
-                    self.pon_stats_rx_table.setItem(rx_row, 0, QTableWidgetItem(fsp))
-                    self.pon_stats_rx_table.setItem(rx_row, 1, QTableWidgetItem(timestamp))
-                    self.pon_stats_rx_table.setItem(rx_row, 2, QTableWidgetItem(metric.replace('rx_', '').replace('_', ' ').title()))
-                    self.pon_stats_rx_table.setItem(rx_row, 3, QTableWidgetItem(f"{value:,}" if value is not None else "0"))
+                    category = get_metric_category(metric)
+                    
+                    # Criar itens
+                    items = [
+                        QTableWidgetItem(fsp),
+                        QTableWidgetItem(timestamp),
+                        QTableWidgetItem(metric.replace('rx_', '').replace('_', ' ').title()),
+                        QTableWidgetItem(f"{value:,}" if value is not None else "0"),
+                        QTableWidgetItem("✅" if category == "normal" else "⚠️" if category == "warning" else "🚨")
+                    ]
+                    
+                    # Aplicar cores baseado na categoria
+                    color = None
+                    if category == "normal":
+                        color = QColor('#c8e6c9')  # Verde claro
+                    elif category == "warning":
+                        color = QColor('#fff9c4')  # Amarelo claro
+                    elif category == "critical":
+                        color = QColor('#ffcdd2')  # Vermelho claro
+                    
+                    for item in items:
+                        if color:
+                            item.setBackground(color)
+                        self.pon_stats_rx_table.setItem(rx_row, items.index(item), item)
+                    
                     rx_row += 1
                 
+                # Processar métricas TX
                 for metric in tx_metrics:
                     value = record[col_map[metric]]
-                    self.pon_stats_tx_table.setItem(tx_row, 0, QTableWidgetItem(fsp))
-                    self.pon_stats_tx_table.setItem(tx_row, 1, QTableWidgetItem(timestamp))
-                    self.pon_stats_tx_table.setItem(tx_row, 2, QTableWidgetItem(metric.replace('tx_', '').replace('_', ' ').title()))
-                    self.pon_stats_tx_table.setItem(tx_row, 3, QTableWidgetItem(f"{value:,}" if value is not None else "0"))
+                    category = get_metric_category(metric)
+                    
+                    # Criar itens
+                    items = [
+                        QTableWidgetItem(fsp),
+                        QTableWidgetItem(timestamp),
+                        QTableWidgetItem(metric.replace('tx_', '').replace('_', ' ').title()),
+                        QTableWidgetItem(f"{value:,}" if value is not None else "0"),
+                        QTableWidgetItem("✅" if category == "normal" else "⚠️" if category == "warning" else "🚨")
+                    ]
+                    
+                    # Aplicar cores baseado na categoria
+                    color = None
+                    if category == "normal":
+                        color = QColor('#c8e6c9')  # Verde claro
+                    elif category == "warning":
+                        color = QColor('#fff9c4')  # Amarelo claro
+                    elif category == "critical":
+                        color = QColor('#ffcdd2')  # Vermelho claro
+                    
+                    for item in items:
+                        if color:
+                            item.setBackground(color)
+                        self.pon_stats_tx_table.setItem(tx_row, items.index(item), item)
+                    
                     tx_row += 1
             
+            # Ajustar colunas
             self.pon_stats_rx_table.resizeColumnsToContents()
             self.pon_stats_tx_table.resizeColumnsToContents()
             
-            # Atualiza o status com a contagem de registros
+            # Atualizar status
             total_records = len(results)
-            self.pon_stats_status_label.setText(f"Status: {total_records} registros carregados")
-            self.pon_stats_status_label.setStyleSheet("color: green; font-weight: bold;")
+            self.pon_stats_status_label.setText(f"{total_records} regs")
+            self.pon_stats_status_label.setStyleSheet("color: green; font-weight: bold; font-size: 8px;")
             
         except Exception as e:
             logging.error(f"Erro ao carregar estatísticas de pacotes: {e}", exc_info=True)
-            
-            # Atualiza o status para mostrar erro
-            self.pon_stats_status_label.setText("Status: Erro ao carregar dados")
-            self.pon_stats_status_label.setStyleSheet("color: red; font-weight: bold;")
+            self.pon_stats_status_label.setText("Erro")
+            self.pon_stats_status_label.setStyleSheet("color: red; font-weight: bold; font-size: 8px;")
 
     def update_pon_stats_display(self):
         """Atualiza a exibição de estatísticas de pacotes se a aba estiver ativa."""
