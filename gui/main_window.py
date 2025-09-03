@@ -373,19 +373,19 @@ class OLTDatabaseGUI(QMainWindow):
             if hasattr(self, 'ont_traffic_timer') and self.ont_traffic_timer.isActive():
                 logging.info("Saindo da aba de tráfego ONT. Parando timer.")
                 self.ont_traffic_timer.stop()
-
-        # --- INÍCIO DA MODIFICAÇÃO ---
-        # Adicione a lógica para a nova aba
+                
+        # Em handle_tab_change, adicione esta parte
         if current_tab == self.ont_eth_tab:
             logging.info("Aba 'ONT Ethernet' ativada. Iniciando timer.")
-            self.load_ont_eth_data()
-            if hasattr(self, 'ont_eth_timer'):
-                self.ont_eth_timer.start()
+            # Carrega as OLTs disponíveis no filtro
+            self.load_ont_eth_olt_list()
+            # Carrega os dados imediatamente
+            QTimer.singleShot(100, self.load_ont_eth_data)
+            self.ont_eth_timer.start()
         else:
             if hasattr(self, 'ont_eth_timer') and self.ont_eth_timer.isActive():
-                logging.info("Saindo da aba de estatísticas ETH de ONT. Parando timer.")
+                logging.info("Saindo da aba de Ethernet ONT. Parando timer.")
                 self.ont_eth_timer.stop()
-        # --- FIM DA MODIFICAÇÃO ---
 
         # Lógica para a aba de Uplink DDM
         # Em handle_tab_change, na parte da aba Uplink DDM
@@ -4193,90 +4193,529 @@ class OLTDatabaseGUI(QMainWindow):
         if hasattr(self, 'ont_stats_tab') and self.tab_widget.currentWidget() == self.ont_stats_tab:
             self.load_ont_stats_data()
 
-    # Adicione este novo método para configurar a aba ONT Ethernet
     def setup_ont_eth_tab(self):
         layout = QVBoxLayout(self.ont_eth_tab)
         
+        # Painel de controle
         control_panel = QWidget()
         control_layout = QHBoxLayout(control_panel)
-        self.ont_eth_olt_filter = QComboBox()
-        if self.ont_eth_olt_filter not in self.olt_filters_to_update: # Correção de bug potencial
-            self.olt_filters_to_update.append(self.ont_eth_olt_filter)
-        self.ont_eth_fsp_filter = QComboBox()
         
+        # Filtro de OLT
+        self.ont_eth_olt_filter_label = QLabel("OLT:")
+        self.ont_eth_olt_filter = QComboBox()
+        self.ont_eth_olt_filter.addItem("Todas as OLTs")
+        
+        # Filtro de F/S/P
+        self.ont_eth_fsp_filter_label = QLabel("F/S/P:")
+        self.ont_eth_fsp_filter = QComboBox()
+        self.ont_eth_fsp_filter.addItem("Todas as PONs")
+        self.ont_eth_fsp_filter.setEnabled(False)  # Inicialmente desabilitado
+        
+        # Filtro de ONT ID
+        self.ont_eth_ont_id_filter_label = QLabel("ONT ID:")
+        self.ont_eth_ont_id_filter = QComboBox()
+        self.ont_eth_ont_id_filter.addItem("Todas as ONTs")
+        self.ont_eth_ont_id_filter.setEnabled(False)  # Inicialmente desabilitado
+        
+        # Filtro de Porta Ethernet
+        self.ont_eth_port_filter_label = QLabel("Porta ETH:")
+        self.ont_eth_port_filter = QComboBox()
+        self.ont_eth_port_filter.addItem("Todas as Portas")
+        self.ont_eth_port_filter.setEnabled(False)  # Inicialmente desabilitado
+        
+        # Conecta os sinais
         self.ont_eth_olt_filter.currentTextChanged.connect(self.update_ont_eth_fsp_filter)
-        self.ont_eth_fsp_filter.currentTextChanged.connect(self.load_ont_eth_data)
-
-        control_layout.addWidget(QLabel("OLT:"))
+        self.ont_eth_fsp_filter.currentTextChanged.connect(self.update_ont_eth_ont_id_filter)
+        self.ont_eth_ont_id_filter.currentTextChanged.connect(self.update_ont_eth_port_filter)
+        self.ont_eth_port_filter.currentTextChanged.connect(self.load_ont_eth_data)
+        
+        control_layout.addWidget(self.ont_eth_olt_filter_label)
         control_layout.addWidget(self.ont_eth_olt_filter)
-        control_layout.addWidget(QLabel("F/S/P:"))
+        control_layout.addWidget(self.ont_eth_fsp_filter_label)
         control_layout.addWidget(self.ont_eth_fsp_filter)
+        control_layout.addWidget(self.ont_eth_ont_id_filter_label)
+        control_layout.addWidget(self.ont_eth_ont_id_filter)
+        control_layout.addWidget(self.ont_eth_port_filter_label)
+        control_layout.addWidget(self.ont_eth_port_filter)
+        
+        # Botões de ação
+        refresh_btn = QPushButton("Atualizar")
+        refresh_btn.clicked.connect(self.load_ont_eth_data)
+        
+        export_btn = QPushButton("Exportar CSV")
+        export_btn.clicked.connect(self.export_ont_eth_to_csv)
+        
+        # Botão para verificar estrutura
+        debug_btn = QPushButton("Debug")
+        debug_btn.clicked.connect(self.check_ont_eth_table_structure)
+        
+        control_layout.addWidget(refresh_btn)
+        control_layout.addWidget(export_btn)
+        control_layout.addWidget(debug_btn)
         control_layout.addStretch()
         layout.addWidget(control_panel)
-
+        
+        # Tabela de dados
         self.ont_eth_table = QTableWidget()
         self.ont_eth_table.setColumnCount(12)
         self.ont_eth_table.setHorizontalHeaderLabels([
-            "F/S/P", "ONT ID", "ETH Port", "Hora", "RX Frames", "TX Frames", 
+            "F/S/P", "ONT ID", "Porta ETH", "Hora", "RX Frames", "TX Frames", 
             "RX Bytes", "TX Bytes", "RX Erros", "TX Erros", "TX Colisões", "Duração (s)"
         ])
         self.ont_eth_table.setSortingEnabled(True)
+        self.ont_eth_table.setEditTriggers(QTableWidget.NoEditTriggers)
         layout.addWidget(self.ont_eth_table)
-
-        self.ont_eth_timer = QTimer(self)
-        self.ont_eth_timer.setInterval(60000)
-        self.ont_eth_timer.timeout.connect(self.load_ont_eth_data)
         
-    # Adicione este novo método para atualizar o filtro de FSP
+        # Timer para atualização automática
+        self.ont_eth_timer = QTimer(self)
+        self.ont_eth_timer.setInterval(60000)  # 1 minuto
+        
+        # Adiciona um label de status
+        self.ont_eth_status_label = QLabel("Status: Pronto")
+        self.ont_eth_status_label.setStyleSheet("color: green; font-weight: bold;")
+        layout.addWidget(self.ont_eth_status_label)
+        
+        # Verifica a estrutura da tabela para debug
+        logging.info("Verificando estrutura da tabela ont_eth_port_statistics...")
+        self.check_ont_eth_table_structure()
+        
+        # Carrega as OLTs disponíveis
+        self.load_ont_eth_olt_list()
+        
+        # Carrega os dados iniciais
+        logging.info("Configuração da aba ONT Ethernet concluída. Carregando dados iniciais...")
+        QTimer.singleShot(500, self.load_ont_eth_data)
+        
+    def load_ont_eth_olt_list(self):
+        """Carrega a lista de OLTs disponíveis na tabela Ethernet"""
+        try:
+            self.ont_eth_olt_filter.blockSignals(True)
+            self.ont_eth_olt_filter.clear()
+            self.ont_eth_olt_filter.addItem("Todas as OLTs")
+            
+            # Verifica se a conexão está ativa
+            if not self.conn or self.conn.closed:
+                logging.warning("Conexão com o banco fechada, tentando reconectar...")
+                self.connect_to_db()
+                if not self.conn or self.conn.closed:
+                    raise Exception("Não foi possível estabelecer conexão com o banco de dados")
+            
+            # Primeiro, verifica se a tabela existe e tem dados
+            check_table_query = """
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'ont_eth_port_statistics'
+                )
+            """
+            self.cursor.execute(check_table_query)
+            table_exists = self.cursor.fetchone()[0]
+            
+            if not table_exists:
+                logging.error("A tabela 'ont_eth_port_statistics' não existe!")
+                self.ont_eth_olt_filter.addItem("Tabela não encontrada")
+                self.ont_eth_olt_filter.blockSignals(False)
+                return
+            
+            # Verifica quantos registros existem
+            count_query = "SELECT COUNT(*) FROM ont_eth_port_statistics"
+            self.cursor.execute(count_query)
+            total_count = self.cursor.fetchone()[0]
+            logging.info(f"Total de registros na tabela ont_eth_port_statistics: {total_count}")
+            
+            if total_count == 0:
+                logging.warning("A tabela ont_eth_port_statistics está vazia")
+                self.ont_eth_olt_filter.addItem("Sem dados")
+                self.ont_eth_olt_filter.blockSignals(False)
+                return
+            
+            # Busca OLTs distintas na tabela Ethernet
+            query = "SELECT DISTINCT olt_identifier FROM ont_eth_port_statistics ORDER BY olt_identifier"
+            logging.info(f"Buscando OLTs com consulta: {query}")
+            
+            self.cursor.execute(query)
+            olts = [row[0] for row in self.cursor.fetchall()]
+            
+            logging.info(f"OLTs encontradas: {olts}")
+            
+            for olt in olts:
+                self.ont_eth_olt_filter.addItem(f"OLT {olt}")
+            
+            self.ont_eth_olt_filter.blockSignals(False)
+            logging.info(f"OLTs carregadas para filtro Ethernet: {olts}")
+            
+            # Se houver OLTs, seleciona a primeira por padrão
+            if olts and self.ont_eth_olt_filter.count() > 1:
+                self.ont_eth_olt_filter.setCurrentIndex(1)  # Pula "Todas as OLTs"
+                logging.info(f"OLT padrão selecionada: {self.ont_eth_olt_filter.currentText()}")
+                
+        except Exception as e:
+            logging.error(f"Erro ao carregar OLTs para filtro Ethernet: {e}", exc_info=True)
+            if self.conn:
+                self.conn.rollback()
+            self.ont_eth_olt_filter.addItem("Erro ao carregar")
+            self.ont_eth_olt_filter.blockSignals(False)
+
+    def check_ont_eth_table_structure(self):
+        """Verifica a estrutura da tabela ont_eth_port_statistics"""
+        try:
+            # Verifica se a conexão está ativa
+            if not self.conn or self.conn.closed:
+                logging.warning("Conexão com o banco fechada, tentando reconectar...")
+                self.connect_to_db()
+                if not self.conn or self.conn.closed:
+                    raise Exception("Não foi possível estabelecer conexão com o banco de dados")
+            
+            # Busca informações sobre as colunas
+            query = """
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = 'ont_eth_port_statistics' 
+                ORDER BY ordinal_position
+            """
+            self.cursor.execute(query)
+            columns = self.cursor.fetchall()
+            
+            logging.info("Estrutura da tabela ont_eth_port_statistics:")
+            for col in columns:
+                logging.info(f"  {col[0]}: {col[1]}")
+            
+            # Busca alguns dados de exemplo
+            query = "SELECT * FROM ont_eth_port_statistics LIMIT 3"
+            self.cursor.execute(query)
+            sample_data = self.cursor.fetchall()
+            
+            logging.info("Exemplo de dados na tabela:")
+            for i, row in enumerate(sample_data):
+                logging.info(f"  Registro {i+1}: {row}")
+                
+        except Exception as e:
+            logging.error(f"Erro ao verificar estrutura da tabela: {e}", exc_info=True)
+            if self.conn:
+                self.conn.rollback()
+
     def update_ont_eth_fsp_filter(self):
+        """Atualiza o filtro de F/S/P com base na OLT selecionada"""
+        selected_olt = self.ont_eth_olt_filter.currentText()
+        
+        # Bloqueia sinais para evitar chamadas recursivas
         self.ont_eth_fsp_filter.blockSignals(True)
         self.ont_eth_fsp_filter.clear()
         self.ont_eth_fsp_filter.addItem("Todas as PONs")
-        selected_olt = self.ont_eth_olt_filter.currentText()
-        if selected_olt != "Todas as OLTs":
+        
+        # Bloqueia os filtros dependentes
+        self.ont_eth_ont_id_filter.blockSignals(True)
+        self.ont_eth_ont_id_filter.clear()
+        self.ont_eth_ont_id_filter.addItem("Todas as ONTs")
+        self.ont_eth_ont_id_filter.setEnabled(False)
+        self.ont_eth_ont_id_filter.blockSignals(False)
+        
+        self.ont_eth_port_filter.blockSignals(True)
+        self.ont_eth_port_filter.clear()
+        self.ont_eth_port_filter.addItem("Todas as Portas")
+        self.ont_eth_port_filter.setEnabled(False)
+        self.ont_eth_port_filter.blockSignals(False)
+        
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
             try:
-                olt_id = selected_olt.split()[-1]
-                query = "SELECT DISTINCT fsp FROM ont_eth_port_statistics WHERE olt_identifier = %s ORDER BY fsp;"
+                # Extrai o identificador da OLT
+                olt_id = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                
+                # Busca F/S/P distintos para essa OLT
+                query = "SELECT DISTINCT fsp FROM ont_eth_port_statistics WHERE olt_identifier = %s ORDER BY fsp"
                 self.cursor.execute(query, (olt_id,))
-                self.ont_eth_fsp_filter.addItems([row[0] for row in self.cursor.fetchall()])
+                fsps = [row[0] for row in self.cursor.fetchall()]
+                
+                for fsp in fsps:
+                    self.ont_eth_fsp_filter.addItem(fsp)
+                
+                # Habilita o filtro de F/S/P
+                self.ont_eth_fsp_filter.setEnabled(True)
+                
+                logging.info(f"F/S/P carregados para {olt_id}: {fsps}")
             except Exception as e:
-                logging.error(f"Erro ao carregar FSPs para filtro ETH: {e}")
+                logging.error(f"Erro ao carregar F/S/P para filtro Ethernet: {e}")
+                if self.conn:
+                    self.conn.rollback()
+        else:
+            # Desabilita o filtro de F/S/P se nenhuma OLT for selecionada
+            self.ont_eth_fsp_filter.setEnabled(False)
+            logging.info("Nenhuma OLT selecionada, filtro de F/S/P desabilitado")
+        
         self.ont_eth_fsp_filter.blockSignals(False)
+        
+        # Carrega os dados após atualizar os filtros
+        self.load_ont_eth_data()
+
+    def update_ont_eth_ont_id_filter(self):
+        """Atualiza o filtro de ONT ID com base na OLT e F/S/P selecionados"""
+        selected_olt = self.ont_eth_olt_filter.currentText()
+        selected_fsp = self.ont_eth_fsp_filter.currentText()
+        
+        # Bloqueia sinais
+        self.ont_eth_ont_id_filter.blockSignals(True)
+        self.ont_eth_ont_id_filter.clear()
+        self.ont_eth_ont_id_filter.addItem("Todas as ONTs")
+        
+        # Bloqueia o filtro de porta
+        self.ont_eth_port_filter.blockSignals(True)
+        self.ont_eth_port_filter.clear()
+        self.ont_eth_port_filter.addItem("Todas as Portas")
+        self.ont_eth_port_filter.setEnabled(False)
+        self.ont_eth_port_filter.blockSignals(False)
+        
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            try:
+                # Extrai o identificador da OLT
+                olt_id = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                
+                if selected_fsp and selected_fsp != "Todas as PONs":
+                    # Busca ONT IDs distintos para essa OLT e F/S/P
+                    query = "SELECT DISTINCT ont_id FROM ont_eth_port_statistics WHERE olt_identifier = %s AND fsp = %s ORDER BY ont_id"
+                    self.cursor.execute(query, (olt_id, selected_fsp))
+                    ont_ids = [row[0] for row in self.cursor.fetchall()]
+                    
+                    for ont_id in ont_ids:
+                        self.ont_eth_ont_id_filter.addItem(str(ont_id))
+                    
+                    # Habilita o filtro de ONT ID
+                    self.ont_eth_ont_id_filter.setEnabled(True)
+                    
+                    logging.info(f"ONT IDs carregados para {olt_id}, F/S/P {selected_fsp}: {ont_ids}")
+                else:
+                    # Se "Todas as PONs" for selecionado, busca todos os ONT IDs da OLT
+                    query = "SELECT DISTINCT ont_id FROM ont_eth_port_statistics WHERE olt_identifier = %s ORDER BY ont_id"
+                    self.cursor.execute(query, (olt_id,))
+                    ont_ids = [row[0] for row in self.cursor.fetchall()]
+                    
+                    for ont_id in ont_ids:
+                        self.ont_eth_ont_id_filter.addItem(str(ont_id))
+                    
+                    self.ont_eth_ont_id_filter.setEnabled(True)
+                    
+                    logging.info(f"ONT IDs carregados para {olt_id} (todas as PONs): {ont_ids}")
+            except Exception as e:
+                logging.error(f"Erro ao carregar ONT IDs para filtro Ethernet: {e}")
+                if self.conn:
+                    self.conn.rollback()
+        else:
+            # Desabilita o filtro de ONT ID se nenhuma OLT for selecionada
+            self.ont_eth_ont_id_filter.setEnabled(False)
+            logging.info("Nenhuma OLT selecionada, filtro de ONT ID desabilitado")
+        
+        self.ont_eth_ont_id_filter.blockSignals(False)
+        
+        # Carrega os dados após atualizar os filtros
+        self.load_ont_eth_data()
+
+    def update_ont_eth_port_filter(self):
+        """Atualiza o filtro de Porta Ethernet com base na OLT, F/S/P e ONT ID selecionados"""
+        selected_olt = self.ont_eth_olt_filter.currentText()
+        selected_fsp = self.ont_eth_fsp_filter.currentText()
+        selected_ont_id = self.ont_eth_ont_id_filter.currentText()
+        
+        # Bloqueia sinais
+        self.ont_eth_port_filter.blockSignals(True)
+        self.ont_eth_port_filter.clear()
+        self.ont_eth_port_filter.addItem("Todas as Portas")
+        
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            try:
+                # Extrai o identificador da OLT
+                olt_id = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                
+                if selected_ont_id and selected_ont_id != "Todas as ONTs":
+                    ont_id_num = int(selected_ont_id)
+                    
+                    if selected_fsp and selected_fsp != "Todas as PONs":
+                        # Busca portas Ethernet distintas para essa OLT, F/S/P e ONT ID
+                        query = "SELECT DISTINCT eth_port_id FROM ont_eth_port_statistics WHERE olt_identifier = %s AND fsp = %s AND ont_id = %s ORDER BY eth_port_id"
+                        self.cursor.execute(query, (olt_id, selected_fsp, ont_id_num))
+                    else:
+                        # Busca portas Ethernet distintas para essa OLT e ONT ID (todas as PONs)
+                        query = "SELECT DISTINCT eth_port_id FROM ont_eth_port_statistics WHERE olt_identifier = %s AND ont_id = %s ORDER BY eth_port_id"
+                        self.cursor.execute(query, (olt_id, ont_id_num))
+                    
+                    ports = [row[0] for row in self.cursor.fetchall()]
+                    
+                    for port in ports:
+                        self.ont_eth_port_filter.addItem(str(port))
+                    
+                    # Habilita o filtro de porta
+                    self.ont_eth_port_filter.setEnabled(True)
+                    
+                    logging.info(f"Portas Ethernet carregadas para {olt_id}, ONT {selected_ont_id}: {ports}")
+                else:
+                    # Se "Todas as ONTs" for selecionado, busca todas as portas da OLT
+                    if selected_fsp and selected_fsp != "Todas as PONs":
+                        query = "SELECT DISTINCT eth_port_id FROM ont_eth_port_statistics WHERE olt_identifier = %s AND fsp = %s ORDER BY eth_port_id"
+                        self.cursor.execute(query, (olt_id, selected_fsp))
+                    else:
+                        query = "SELECT DISTINCT eth_port_id FROM ont_eth_port_statistics WHERE olt_identifier = %s ORDER BY eth_port_id"
+                        self.cursor.execute(query, (olt_id,))
+                    
+                    ports = [row[0] for row in self.cursor.fetchall()]
+                    
+                    for port in ports:
+                        self.ont_eth_port_filter.addItem(str(port))
+                    
+                    self.ont_eth_port_filter.setEnabled(True)
+                    
+                    logging.info(f"Portas Ethernet carregadas para {olt_id} (todas as ONTs): {ports}")
+            except Exception as e:
+                logging.error(f"Erro ao carregar portas Ethernet para filtro: {e}")
+                if self.conn:
+                    self.conn.rollback()
+        else:
+            # Desabilita o filtro de porta se nenhuma OLT for selecionada
+            self.ont_eth_port_filter.setEnabled(False)
+            logging.info("Nenhuma OLT selecionada, filtro de porta Ethernet desabilitado")
+        
+        self.ont_eth_port_filter.blockSignals(False)
+        
+        # Carrega os dados após atualizar os filtros
         self.load_ont_eth_data()
         
-    # Adicione este novo método para carregar os dados
     def load_ont_eth_data(self):
-        if not self.isVisible() or self.tab_widget.currentWidget() != self.ont_eth_tab: return
-        self.ont_eth_table.setSortingEnabled(False)
-        self.ont_eth_table.setRowCount(0)
+        """Carrega os dados Ethernet das ONTs do banco de dados"""
+        if not self.isVisible() or self.tab_widget.currentWidget() != self.ont_eth_tab: 
+            return
         
-        conditions, params = [], []
-        if self.ont_eth_olt_filter.currentText() != "Todas as OLTs":
-            conditions.append("olt_identifier = %s")
-            params.append(self.ont_eth_olt_filter.currentText().split()[-1])
-        if self.ont_eth_fsp_filter.currentText() != "Todas as PONs":
-            conditions.append("fsp = %s")
-            params.append(self.ont_eth_fsp_filter.currentText())
+        logging.info("Carregando dados Ethernet das ONTs.")
         
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        query = f"""
-            SELECT fsp, ont_id, eth_port_id, collection_time, rx_frames, tx_frames,
-                   rx_bytes, tx_bytes, rx_error_frames, tx_error_frames,
-                   tx_collision_frames, duration_seconds
-            FROM ont_eth_port_statistics {where_clause} ORDER BY collection_time DESC LIMIT 2000;
-        """
+        selected_olt = self.ont_eth_olt_filter.currentText()
+        selected_fsp = self.ont_eth_fsp_filter.currentText()
+        selected_ont_id = self.ont_eth_ont_id_filter.currentText()
+        selected_port = self.ont_eth_port_filter.currentText()
+        
+        logging.info(f"Filtros selecionados - OLT: '{selected_olt}', F/S/P: '{selected_fsp}', ONT ID: '{selected_ont_id}', Porta: '{selected_port}'")
+        
+        # Atualiza status
+        if hasattr(self, 'ont_eth_status_label'):
+            self.ont_eth_status_label.setText("Status: Carregando...")
+            self.ont_eth_status_label.setStyleSheet("color: orange; font-weight: bold;")
+        
         try:
+            self.ont_eth_table.setSortingEnabled(False)
+            self.ont_eth_table.setRowCount(0)
+            
+            conditions, params = [], []
+            
+            # Aplicar filtro de OLT se selecionado
+            if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+                olt_id = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                conditions.append("olt_identifier = %s")
+                params.append(olt_id)
+            
+            # Aplicar filtro de F/S/P se selecionado
+            if selected_fsp and selected_fsp != "Todas as PONs":
+                conditions.append("fsp = %s")
+                params.append(selected_fsp)
+            
+            # Aplicar filtro de ONT ID se selecionado
+            if selected_ont_id and selected_ont_id != "Todas as ONTs":
+                try:
+                    ont_id_num = int(selected_ont_id)
+                    conditions.append("ont_id = %s")
+                    params.append(ont_id_num)
+                except ValueError:
+                    logging.warning(f"ONT ID inválido: {selected_ont_id}")
+            
+            # Aplicar filtro de Porta Ethernet se selecionado
+            if selected_port and selected_port != "Todas as Portas":
+                try:
+                    port_num = int(selected_port)
+                    conditions.append("eth_port_id = %s")
+                    params.append(port_num)
+                except ValueError:
+                    logging.warning(f"Porta Ethernet inválida: {selected_port}")
+            
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            query = f"""
+                SELECT fsp, ont_id, eth_port_id, collection_time, rx_frames, tx_frames,
+                    rx_bytes, tx_bytes, rx_error_frames, tx_error_frames,
+                    tx_collision_frames, duration_seconds
+                FROM ont_eth_port_statistics {where_clause} 
+                ORDER BY collection_time DESC LIMIT 2000;
+            """
+            
+            logging.info(f"Executando consulta: {query}")
+            logging.info(f"Parâmetros: {params}")
+            
             self.cursor.execute(query, tuple(params))
             for row_idx, row in enumerate(self.cursor.fetchall()):
                 self.ont_eth_table.insertRow(row_idx)
                 for col_idx, data in enumerate(row):
                     item = QTableWidgetItem(str(data) if data is not None else "")
+                    
+                    # Aplica cores baseado em erros
+                    if col_idx == 8 and data and int(data) > 0:  # RX Erros
+                        item.setBackground(QColor('#ffcdd2'))
+                    elif col_idx == 9 and data and int(data) > 0:  # TX Erros
+                        item.setBackground(QColor('#ffcdd2'))
+                    elif col_idx == 10 and data and int(data) > 0:  # TX Colisões
+                        item.setBackground(QColor('#fff9c4'))
+                    
                     self.ont_eth_table.setItem(row_idx, col_idx, item)
+            
             self.ont_eth_table.resizeColumnsToContents()
+            logging.info(f"Tabela Ethernet atualizada com {self.ont_eth_table.rowCount()} registros.")
+            
+            # Atualiza status
+            if hasattr(self, 'ont_eth_status_label'):
+                self.ont_eth_status_label.setText(f"Status: {self.ont_eth_table.rowCount()} registros")
+                self.ont_eth_status_label.setStyleSheet("color: green; font-weight: bold;")
+                
         except Exception as e:
             logging.error(f"Erro ao carregar dados de ETH ONT: {e}")
+            if self.conn:
+                self.conn.rollback()
+            
+            # Atualiza status de erro
+            if hasattr(self, 'ont_eth_status_label'):
+                self.ont_eth_status_label.setText(f"Status: Erro")
+                self.ont_eth_status_label.setStyleSheet("color: red; font-weight: bold;")
+        
         finally:
             self.ont_eth_table.setSortingEnabled(True)
+                
+    def export_ont_eth_to_csv(self):
+        """Exporta os dados da tabela Ethernet para um arquivo CSV"""
+        if self.ont_eth_table.rowCount() == 0:
+            QMessageBox.information(self, "Nada para Exportar", "A tabela Ethernet está vazia.")
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Dados Ethernet", 
+            f"ont_ethernet_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "Arquivos CSV (*.csv);;Todos os Arquivos (*)"
+        )
+        
+        if not filename:
+            return
+        
+        try:
+            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile, delimiter=';')
+                
+                # Escreve cabeçalho
+                headers = [self.ont_eth_table.horizontalHeaderItem(col).text() 
+                        for col in range(self.ont_eth_table.columnCount())]
+                writer.writerow(headers)
+                
+                # Escreve dados
+                for row in range(self.ont_eth_table.rowCount()):
+                    row_data = [self.ont_eth_table.item(row, col).text() 
+                            for col in range(self.ont_eth_table.columnCount())]
+                    writer.writerow(row_data)
+            
+            QMessageBox.information(self, "Exportação Concluída", 
+                                f"Dados exportados com sucesso para:\n{filename}")
+            logging.info(f"Dados Ethernet exportados para {filename}")
+            
+        except Exception as e:
+            logging.error(f"Erro ao exportar dados Ethernet: {e}")
+            QMessageBox.critical(self, "Erro de Exportação", 
+                            f"Não foi possível exportar os dados:\n{str(e)}")
 
     # Adicione este novo método para ser o slot do sinal
     def update_ont_eth_display(self):
