@@ -3896,10 +3896,14 @@ class OLTDatabaseGUI(QMainWindow):
         self.ont_traffic_table = QTableWidget()
         self.ont_traffic_table.setColumnCount(6)
         self.ont_traffic_table.setHorizontalHeaderLabels([
-            "OLT", "F/S/P", "ONT ID", "Upload (kbps)", "Download (kbps)", "Hora"
+            "OLT", "F/S/P", "ONT ID", "Upload (kbps/Mbps)", "Download (kbps/Mbps)", "Hora"
         ])
         self.ont_traffic_table.setSortingEnabled(True)
         self.ont_traffic_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        
+        # Ajusta a altura das linhas para acomodar duas linhas de texto
+        self.ont_traffic_table.verticalHeader().setDefaultSectionSize(40)
+        
         layout.addWidget(self.ont_traffic_table)
         
         # --- RODAPÉ COM CONTADOR DE REGISTROS ---
@@ -3909,7 +3913,7 @@ class OLTDatabaseGUI(QMainWindow):
         
         # Adiciona o contador de registros
         self.ont_traffic_record_count = QLabel("Status: 0 registros")
-        self.ont_traffic_record_count.setStyleSheet("color: green; font-weight: bold;")
+        self.ont_traffic_record_count.setStyleSheet("color: #666; font-size: 10px;")
         footer_layout.addWidget(self.ont_traffic_record_count)
         footer_layout.addStretch()
         
@@ -4083,15 +4087,58 @@ class OLTDatabaseGUI(QMainWindow):
             with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile, delimiter=';')
                 
-                # Escreve cabeçalho
-                headers = [self.ont_traffic_table.horizontalHeaderItem(col).text() 
-                        for col in range(self.ont_traffic_table.columnCount())]
+                # Escreve cabeçalho com ambas as unidades
+                headers = [
+                    "OLT", 
+                    "F/S/P", 
+                    "ONT ID", 
+                    "Upload (kbps)", 
+                    "Upload (Mbps)", 
+                    "Download (kbps)", 
+                    "Download (Mbps)", 
+                    "Hora"
+                ]
                 writer.writerow(headers)
                 
                 # Escreve dados
                 for row in range(self.ont_traffic_table.rowCount()):
-                    row_data = [self.ont_traffic_table.item(row, col).text() 
-                            for col in range(self.ont_traffic_table.columnCount())]
+                    # Obtém os valores básicos
+                    olt_ip = self.ont_traffic_table.item(row, 0).text()
+                    fsp = self.ont_traffic_table.item(row, 1).text()
+                    ont_id = self.ont_traffic_table.item(row, 2).text()
+                    hora = self.ont_traffic_table.item(row, 5).text()
+                    
+                    # Processa o valor de Upload
+                    upload_text = self.ont_traffic_table.item(row, 3).text()
+                    if upload_text != "N/A":
+                        # Extrai o valor em kbps (primeiro número antes do espaço)
+                        upload_kbps = float(upload_text.split()[0])
+                        upload_mbps = upload_kbps / 1000
+                    else:
+                        upload_kbps = "N/A"
+                        upload_mbps = "N/A"
+                    
+                    # Processa o valor de Download
+                    download_text = self.ont_traffic_table.item(row, 4).text()
+                    if download_text != "N/A":
+                        # Extrai o valor em kbps (primeiro número antes do espaço)
+                        download_kbps = float(download_text.split()[0])
+                        download_mbps = download_kbps / 1000
+                    else:
+                        download_kbps = "N/A"
+                        download_mbps = "N/A"
+                    
+                    # Escreve a linha no CSV
+                    row_data = [
+                        olt_ip,
+                        fsp,
+                        ont_id,
+                        upload_kbps,
+                        upload_mbps,
+                        download_kbps,
+                        download_mbps,
+                        hora
+                    ]
                     writer.writerow(row_data)
             
             QMessageBox.information(self, "Exportação Concluída", 
@@ -4229,12 +4276,27 @@ class OLTDatabaseGUI(QMainWindow):
             for row_idx, row_data in enumerate(results):
                 olt_ip, fsp, ont_id, up_traffic, down_traffic, collection_time = row_data
                 
-                # Preenche todas as 6 colunas
+                # Preenche as colunas básicas
                 self.ont_traffic_table.setItem(row_idx, 0, QTableWidgetItem(olt_ip))
                 self.ont_traffic_table.setItem(row_idx, 1, QTableWidgetItem(fsp))
                 self.ont_traffic_table.setItem(row_idx, 2, QTableWidgetItem(str(ont_id)))
-                self.ont_traffic_table.setItem(row_idx, 3, QTableWidgetItem(f"{up_traffic:.2f}" if up_traffic else "N/A"))
-                self.ont_traffic_table.setItem(row_idx, 4, QTableWidgetItem(f"{down_traffic:.2f}" if down_traffic else "N/A"))
+                
+                # Formata o Upload com conversão para Mbps
+                if up_traffic is not None:
+                    up_mbps = up_traffic / 1000  # Converte kbps para Mbps
+                    up_text = f"{up_traffic:.2f} kbps\n({up_mbps:.2f} Mbps)"
+                    self.ont_traffic_table.setItem(row_idx, 3, QTableWidgetItem(up_text))
+                else:
+                    self.ont_traffic_table.setItem(row_idx, 3, QTableWidgetItem("N/A"))
+                
+                # Formata o Download com conversão para Mbps
+                if down_traffic is not None:
+                    down_mbps = down_traffic / 1000  # Converte kbps para Mbps
+                    down_text = f"{down_traffic:.2f} kbps\n({down_mbps:.2f} Mbps)"
+                    self.ont_traffic_table.setItem(row_idx, 4, QTableWidgetItem(down_text))
+                else:
+                    self.ont_traffic_table.setItem(row_idx, 4, QTableWidgetItem("N/A"))
+                
                 # Formata a data/hora para exibição
                 formatted_time = collection_time.strftime('%d/%m/%Y %H:%M:%S') if collection_time else "N/A"
                 self.ont_traffic_table.setItem(row_idx, 5, QTableWidgetItem(formatted_time))
@@ -4242,12 +4304,16 @@ class OLTDatabaseGUI(QMainWindow):
             self.ont_traffic_table.setSortingEnabled(True)
             self.ont_traffic_table.resizeColumnsToContents()
             
+            # Ajusta a altura das linhas para acomodar duas linhas de texto
+            for row in range(self.ont_traffic_table.rowCount()):
+                self.ont_traffic_table.setRowHeight(row, 40)
+            
             logging.info(f"Tabela de tráfego ONT atualizada com {len(results)} registros.")
             
             # Atualiza o contador de registros com estilo normal
             if hasattr(self, 'ont_traffic_record_count'):
-                self.ont_traffic_record_count.setText(f"Status: {len(results)} registros carregados")
-                self.ont_traffic_record_count.setStyleSheet("color: green; font-weight: bold;")
+                self.ont_traffic_record_count.setText(f"Status: {len(results)} registros")
+                self.ont_traffic_record_count.setStyleSheet("color: #666; font-size: 10px;")
             
         except Exception as e:
             logging.error(f"Erro ao carregar dados de tráfego por ONT: {str(e)}", exc_info=True)
@@ -4266,45 +4332,6 @@ class OLTDatabaseGUI(QMainWindow):
             if hasattr(self, 'traffic_loading_label'):
                 self.traffic_loading_label.setVisible(False)
             self._loading_ont_traffic = False  # Libera o flag
-
-    def export_ont_traffic_to_csv(self):
-        """Exporta os dados da tabela de tráfego ONT para um arquivo CSV"""
-        if self.ont_traffic_table.rowCount() == 0:
-            QMessageBox.information(self, "Nada para Exportar", "A tabela de tráfego ONT está vazia.")
-            return
-        
-        filename, _ = QFileDialog.getSaveFileName(
-            self, "Exportar Tráfego ONT", 
-            f"ont_traffic_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            "Arquivos CSV (*.csv);;Todos os Arquivos (*)"
-        )
-        
-        if not filename:
-            return
-        
-        try:
-            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.writer(csvfile, delimiter=';')
-                
-                # Escreve cabeçalho
-                headers = [self.ont_traffic_table.horizontalHeaderItem(col).text() 
-                        for col in range(self.ont_traffic_table.columnCount())]
-                writer.writerow(headers)
-                
-                # Escreve dados
-                for row in range(self.ont_traffic_table.rowCount()):
-                    row_data = [self.ont_traffic_table.item(row, col).text() 
-                            for col in range(self.ont_traffic_table.columnCount())]
-                    writer.writerow(row_data)
-            
-            QMessageBox.information(self, "Exportação Concluída", 
-                                f"Dados exportados com sucesso para:\n{filename}")
-            logging.info(f"Dados de tráfego ONT exportados para {filename}")
-            
-        except Exception as e:
-            logging.error(f"Erro ao exportar dados de tráfego ONT: {e}")
-            QMessageBox.critical(self, "Erro de Exportação", 
-                            f"Não foi possível exportar os dados:\n{str(e)}")
 
     def update_ont_traffic_display(self):
         """Atualiza a exibição de tráfego de ONT se a aba estiver ativa."""
