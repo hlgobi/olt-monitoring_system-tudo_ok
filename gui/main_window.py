@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt5.QtCore import (QObject, pyqtSignal, QTimer, Qt, QEvent, QMetaObject, 
                           pyqtSlot, Q_ARG, QPropertyAnimation, pyqtProperty)
 from PyQt5 import QtGui
+from PyQt5.QtGui import QColor, QFont, QIcon, QPalette, QPixmap
 import pyqtgraph as pg
 import queue
 from config import DB_CONFIG, get_olt_configs
