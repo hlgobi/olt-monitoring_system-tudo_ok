@@ -1354,62 +1354,66 @@ class OLTDatabaseGUI(QMainWindow):
             QWidget().setLayout(self.data_tab.layout())
         
         # Cria o novo layout
-        layout = QHBoxLayout(self.data_tab)
+        layout = QVBoxLayout(self.data_tab)
+        layout.setContentsMargins(5, 5, 5, 5)  # Reduz as margens
+        layout.setSpacing(5)  # Reduz o espaçamento entre widgets
         
-        splitter = QSplitter(Qt.Horizontal)
+        # Adiciona o painel de seleção de OLTs no topo
+        olt_selection_panel = self.create_multi_olt_control_panel()
+        layout.addWidget(olt_selection_panel)
         
-        control_panel = self.create_multi_olt_control_panel()
-        splitter.addWidget(control_panel)
-        
-        data_panel = QWidget()
-        data_layout = QVBoxLayout(data_panel)
+        # Cria o painel principal com a tabela e controles
+        main_panel = QWidget()
+        main_layout = QVBoxLayout(main_panel)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(5)
         
         action_filter_panel = self.create_action_filter_panel()
         self.status_panel = self.create_status_panel()
         self.setup_data_table()  # Garante que a tabela seja configurada corretamente
         
-        data_layout.addWidget(action_filter_panel)
-        data_layout.addWidget(self.status_panel)
-        data_layout.addWidget(self.table)
+        main_layout.addWidget(action_filter_panel)
+        main_layout.addWidget(self.status_panel)
+        main_layout.addWidget(self.table)
         
-        splitter.addWidget(data_panel)
-        splitter.setSizes([300, 1300]) 
-        layout.addWidget(splitter)
+        layout.addWidget(main_panel)
 
     def create_multi_olt_control_panel(self):
-        """Cria o novo painel de controle para seleção e início da coleta de múltiplas OLTs."""
-        panel = QGroupBox("Controle de Coleta")
+        """Cria o painel de controle para seleção de OLTs com layout vertical compacto."""
+        panel = QGroupBox("OLTs")
+        panel.setMaximumHeight(150)  # Limita a altura total do painel
         layout = QVBoxLayout(panel)
-
-        list_label = QLabel("<b>OLTs Disponíveis:</b>")
+        layout.setContentsMargins(5, 5, 5, 5)  # Reduz as margens
+        layout.setSpacing(3)  # Reduz o espaçamento entre widgets
+        
+        # Lista de OLTs
         self.olt_list_widget = QListWidget()
         self.olt_list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.olt_list_widget.setMaximumHeight(80)  # Limita a altura da lista
         for olt in self.olt_configs:
             self.olt_list_widget.addItem(f"{olt['name']} ({olt['ip']})")
         
-        self.start_selected_btn = QPushButton("Iniciar Coleta Selecionada(s)")
+        # Botões de controle
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(5)  # Reduz o espaçamento entre botões
+        
+        self.start_selected_btn = QPushButton("Iniciar")
         self.start_selected_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
         self.start_selected_btn.clicked.connect(self.start_selected_collections)
         
-        self.stop_all_btn = QPushButton("Parar Todas as Coletas")
+        self.stop_all_btn = QPushButton("Parar")
         self.stop_all_btn.setStyleSheet("background-color: #f44336; color: white; font-weight: bold;")
         self.stop_all_btn.clicked.connect(self.stop_all_collections)
         self.stop_all_btn.setEnabled(False)
-
-        log_label = QLabel("<b>Logs da Coleta:</b>")
-        self.log_output_area = QTextEdit()
-        self.log_output_area.setReadOnly(True)
-        self.log_output_area.setFont(QtGui.QFont("Courier New", 8))
-
-        layout.addWidget(list_label)
+        
+        buttons_layout.addWidget(self.start_selected_btn)
+        buttons_layout.addWidget(self.stop_all_btn)
+        
         layout.addWidget(self.olt_list_widget)
-        layout.addWidget(self.start_selected_btn)
-        layout.addWidget(self.stop_all_btn)
-        layout.addWidget(log_label)
-        layout.addWidget(self.log_output_area)
+        layout.addLayout(buttons_layout)
         
         return panel
-
+    
 # Em gui/main_window.py, modifique o método start_selected_collections:
 
     def start_selected_collections(self):
@@ -1515,30 +1519,40 @@ class OLTDatabaseGUI(QMainWindow):
         """Cria o painel que contém os filtros da tabela e os botões de ação."""
         panel = QWidget()
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0,0,0,0)
-
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)  # Reduz o espaçamento entre seções
+        
+        # Seção de ações
         action_box = QGroupBox("Ações na Tabela")
         action_layout = QHBoxLayout(action_box)
+        action_layout.setContentsMargins(5, 5, 5, 5)
+        action_layout.setSpacing(5)
         
         self.access_ont_btn = QPushButton("Acessar ONT")
         self.access_ont_btn.clicked.connect(self.access_selected_ont)
         self.access_ont_btn.setEnabled(False)
         action_layout.addWidget(self.access_ont_btn)
-
+        
         action_buttons_config = [
             ("Histórico", self.show_history),
             ("Exportar CSV", self.export_to_csv),
             ("Importar Clientes (CSV)", self.import_clients_from_csv),
             ("Limpar Dados", self.show_cleanup_dialog)
         ]
+        
         for text, handler in action_buttons_config:
             btn = QPushButton(text)
             btn.clicked.connect(handler)
             action_layout.addWidget(btn)
+        
         action_layout.addStretch()
         
+        # Seção de filtros
         filter_box = QGroupBox("Filtros e Visualização")
         filter_layout = QGridLayout(filter_box)
+        filter_layout.setContentsMargins(5, 5, 5, 5)
+        filter_layout.setHorizontalSpacing(5)
+        filter_layout.setVerticalSpacing(3)
         
         self.olt_filter_label = QLabel("Filtrar por OLT:")
         self.olt_filter = QComboBox()
@@ -1548,7 +1562,7 @@ class OLTDatabaseGUI(QMainWindow):
         self.filter_field_label = QLabel("Filtrar por:")
         self.filter_field = QComboBox()
         self.filter_field.addItems(["Todos", "FSP", "ONT ID", "Endereço MAC", "S/N", "CLIENTE",
-                                     "Primária", "Secundária", "Descrição", "Status", "Sinal RX"])
+                                    "Primária", "Secundária", "Descrição", "Status", "Sinal RX"])
         self.filter_value = QLineEdit()
         self.filter_value.setPlaceholderText("Digite o valor do filtro")
         
@@ -1567,18 +1581,22 @@ class OLTDatabaseGUI(QMainWindow):
         self.fsp_filter.setPlaceholderText("ex: 0/1/1")
         self.fsp_filter_label.setVisible(False)
         self.fsp_filter.setVisible(False)
+        
         self.desc_filter = QComboBox()
         self.desc_filter.setVisible(False)
+        
         self.signal_filter_options = QComboBox()
         self.signal_filter_options.addItems([
             "Todos os Sinais", "Sinal Bom (>= -22.0 dBm)",
             "Sinal Alerta (-22.0 dBm > RX >= -24.99 dBm)", "Sinal Crítico (RX < -25.0 dBm)"
         ])
         self.signal_filter_options.setVisible(False)
+        
         filter_layout.addWidget(self.fsp_filter_label, 1, 0)
         filter_layout.addWidget(self.fsp_filter, 1, 1)
         filter_layout.addWidget(self.desc_filter, 1, 4, 1, 2)
         filter_layout.addWidget(self.signal_filter_options, 1, 4, 1, 2)
+        
         filter_layout.setColumnStretch(5, 1)
         self.filter_field.currentTextChanged.connect(self.update_filter_ui)
         
