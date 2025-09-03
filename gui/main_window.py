@@ -81,7 +81,8 @@ class OLTDatabaseGUI(QMainWindow):
         self.active_ont_olt_client = None
         self.active_ont_olt_shell = None
         self.is_ont_session_active = None
-        
+        self.olt_checkboxes = {}  # Dicionário para armazenar os checkboxes das OLTs
+
         # NOVO: Widget para exibição de logs
         self.log_text_edit = None
         
@@ -1379,37 +1380,53 @@ class OLTDatabaseGUI(QMainWindow):
         layout.addWidget(main_panel)
 
     def create_multi_olt_control_panel(self):
-        """Cria o painel de controle para seleção de OLTs com layout vertical compacto."""
+        """Cria o painel de controle para seleção de OLTs com checkboxes."""
         panel = QGroupBox("OLTs")
-        panel.setMaximumHeight(150)  # Limita a altura total do painel
+        panel.setMaximumHeight(100)  # Altura reduzida
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(5, 5, 5, 5)  # Reduz as margens
-        layout.setSpacing(3)  # Reduz o espaçamento entre widgets
+        layout.setContentsMargins(5, 3, 5, 3)  # Margens reduzidas
+        layout.setSpacing(2)  # Espaçamento mínimo
         
-        # Lista de OLTs
-        self.olt_list_widget = QListWidget()
-        self.olt_list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.olt_list_widget.setMaximumHeight(80)  # Limita a altura da lista
+        # Layout horizontal para os checkboxes
+        checkboxes_layout = QHBoxLayout()
+        checkboxes_layout.setSpacing(10)  # Espaçamento entre checkboxes
+        
+        # Adiciona checkbox "Todos"
+        self.select_all_checkbox = QCheckBox("Todos")
+        self.select_all_checkbox.setStyleSheet("font-size: 9px; font-weight: bold;")
+        self.select_all_checkbox.stateChanged.connect(self.toggle_all_olts)
+        checkboxes_layout.addWidget(self.select_all_checkbox)
+        
+        # Limpa o dicionário de checkboxes
+        self.olt_checkboxes.clear()
+        
+        # Cria um checkbox para cada OLT
         for olt in self.olt_configs:
-            self.olt_list_widget.addItem(f"{olt['name']} ({olt['ip']})")
+            checkbox = QCheckBox(f"{olt['name']}")
+            checkbox.setStyleSheet("font-size: 9px;")  # Fonte menor
+            checkboxes_layout.addWidget(checkbox)
+            self.olt_checkboxes[olt['ip']] = checkbox
+        
+        checkboxes_layout.addStretch()  # Empurra os checkboxes para a esquerda
         
         # Botões de controle
         buttons_layout = QHBoxLayout()
-        buttons_layout.setSpacing(5)  # Reduz o espaçamento entre botões
+        buttons_layout.setSpacing(5)
         
         self.start_selected_btn = QPushButton("Iniciar")
-        self.start_selected_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        self.start_selected_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; font-size: 9px;")
         self.start_selected_btn.clicked.connect(self.start_selected_collections)
         
         self.stop_all_btn = QPushButton("Parar")
-        self.stop_all_btn.setStyleSheet("background-color: #f44336; color: white; font-weight: bold;")
+        self.stop_all_btn.setStyleSheet("background-color: #f44336; color: white; font-weight: bold; font-size: 9px;")
         self.stop_all_btn.clicked.connect(self.stop_all_collections)
         self.stop_all_btn.setEnabled(False)
         
         buttons_layout.addWidget(self.start_selected_btn)
         buttons_layout.addWidget(self.stop_all_btn)
+        buttons_layout.addStretch()
         
-        layout.addWidget(self.olt_list_widget)
+        layout.addLayout(checkboxes_layout)
         layout.addLayout(buttons_layout)
         
         return panel
@@ -1417,12 +1434,18 @@ class OLTDatabaseGUI(QMainWindow):
 # Em gui/main_window.py, modifique o método start_selected_collections:
 
     def start_selected_collections(self):
-        """Inicia threads de coleta para cada OLT selecionada na lista."""
-        selected_items = self.olt_list_widget.selectedItems()
-        if not selected_items:
-            QMessageBox.warning(self, "Nenhuma OLT Selecionada", "Por favor, selecione pelo menos uma OLT da lista.")
+        """Inicia threads de coleta para cada OLT selecionada via checkbox."""
+        selected_olts = []
+        
+        # Verifica quais checkboxes estão marcados
+        for ip, checkbox in self.olt_checkboxes.items():
+            if checkbox.isChecked():
+                selected_olts.append(ip)
+        
+        if not selected_olts:
+            QMessageBox.warning(self, "Nenhuma OLT Selecionada", "Por favor, selecione pelo menos uma OLT.")
             return
-            
+                
         self.collection_running = True
         self.stop_all_btn.setEnabled(True)
         self.start_selected_btn.setEnabled(False)
@@ -1432,19 +1455,13 @@ class OLTDatabaseGUI(QMainWindow):
         if not hasattr(self, 'eth_task_queue'):
             self.init_eth_workers()
         
-        for item in selected_items:
-            # Extrai o IP da OLT selecionada
-            ip_match = re.search(r'\((\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\)', item.text())
-            if not ip_match: 
-                continue
-                
-            olt_ip = ip_match.group(1)
+        for olt_ip in selected_olts:
             olt_config = next((olt for olt in self.olt_configs if olt['ip'] == olt_ip), None)
             
             if not olt_config:
                 self.log_to_gui(f"ERRO: Configuração não encontrada para o IP {olt_ip}")
                 continue
-                
+                    
             if olt_ip in self.collection_threads and self.collection_threads[olt_ip].is_alive():
                 self.log_to_gui(f"AVISO: A coleta para a OLT {olt_config['name']} já está em execução.")
                 continue
@@ -1467,6 +1484,11 @@ class OLTDatabaseGUI(QMainWindow):
             thread.start()
             self.log_to_gui(f"Thread de coleta iniciada para {olt_config['name']} ({olt_ip})")
 
+
+    def toggle_all_olts(self, checked):
+        """Seleciona ou desmarca todos os checkboxes de OLTs."""
+        for checkbox in self.olt_checkboxes.values():
+            checkbox.setChecked(checked)
 # Em gui/main_window.py, modifique o método stop_all_collections:
 
     def stop_all_collections(self):
