@@ -171,3 +171,53 @@ def check_postgresql_timezone():
 
 # Chame esta função no início da sua aplicação
 check_postgresql_timezone()
+
+
+def setup_logging():
+    """Configura o sistema de logging para lidar com Unicode no Windows."""
+    # Configurar o logger raiz
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    
+    # Verificar se estamos no Windows
+    if sys.platform == 'win32':
+        # Configurar o handler do console para lidar com Unicode
+        try:
+            # Tentar usar utf-8
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(logging.Formatter('%(asctime)s, %(levelname).1s - %(message)s'))
+            console_handler.stream = sys.stdout  # Usar stdout em vez de stderr
+            logger.addHandler(console_handler)
+            
+            # Tentar configurar o código de página do console para UTF-8
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            kernel32.SetConsoleCP(65001)  # CP_UTF8
+            kernel32.SetConsoleOutputCP(65001)  # CP_UTF8
+        except Exception as e:
+            # Se falhar, usar um handler que substitui os caracteres não suportados
+            class UnicodeSafeHandler(logging.StreamHandler):
+                def emit(self, record):
+                    try:
+                        super().emit(record)
+                    except UnicodeEncodeError:
+                        # Substituir caracteres não suportados
+                        msg = self.format(record)
+                        msg = msg.encode('cp1252', errors='replace').decode('cp1252')
+                        stream = self.stream
+                        stream.write(msg + self.terminator)
+                        self.flush()
+            
+            unicode_handler = UnicodeSafeHandler(sys.stdout)
+            unicode_handler.setFormatter(logging.Formatter('%(asctime)s, %(levelname).1s - %(message)s'))
+            logger.addHandler(unicode_handler)
+    else:
+        # Para outros sistemas operacionais, usar a configuração padrão
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(logging.Formatter('%(asctime)s, %(levelname).1s - %(message)s'))
+        logger.addHandler(console_handler)
+    
+    return logger
+
+# No início do arquivo main.py, substitua a configuração de logging existente por:
+logger = setup_logging()

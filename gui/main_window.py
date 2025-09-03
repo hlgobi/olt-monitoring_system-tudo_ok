@@ -3438,58 +3438,207 @@ class OLTDatabaseGUI(QMainWindow):
 
 
     def setup_pon_traffic_tab(self):
-        """Configura a interface da aba 'Dados PON'."""
+        """Configura a interface da aba 'Dados PON' com filtros, cores e conversão de unidades."""
         layout = QVBoxLayout(self.pon_traffic_tab)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
-        # Painel de controle
+        # Painel de controle com filtros
         control_panel = QWidget()
+        control_panel.setMaximumHeight(45)
         control_layout = QHBoxLayout(control_panel)
+        control_layout.setContentsMargins(5, 2, 5, 2)
+        control_layout.setSpacing(5)
         
-        self.pon_traffic_olt_filter_label = QLabel("Filtrar por OLT:")
+        # Filtro de OLT
         self.pon_traffic_olt_filter = QComboBox()
+        self.pon_traffic_olt_filter.setMaximumWidth(100)
+        self.pon_traffic_olt_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         if self.pon_traffic_olt_filter not in self.olt_filters_to_update:
             self.olt_filters_to_update.append(self.pon_traffic_olt_filter)
         
-        self.pon_traffic_olt_filter.currentTextChanged.connect(self.load_pon_traffic_data)
+        # Filtro de F/S/P
+        self.pon_traffic_fsp_filter = QComboBox()
+        self.pon_traffic_fsp_filter.addItem("Todas as PONs")
+        self.pon_traffic_fsp_filter.setEnabled(False)
+        self.pon_traffic_fsp_filter.setMaximumWidth(80)
+        self.pon_traffic_fsp_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         
-        self.pon_traffic_refresh_btn = QPushButton("Atualizar")
-        self.pon_traffic_refresh_btn.clicked.connect(self.load_pon_traffic_data)
+        # Filtro de Métrica
+        self.pon_traffic_metric_filter = QComboBox()
+        self.pon_traffic_metric_filter.addItem("Todas as Métricas")
+        self.pon_traffic_metric_filter.setEnabled(False)
+        self.pon_traffic_metric_filter.setMaximumWidth(150)
+        self.pon_traffic_metric_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         
-        # Status da coleta
-        self.pon_traffic_status = QLabel("Status: Aguardando...")
-        self.pon_traffic_status.setStyleSheet("padding: 3px; background-color: #f0f0f0; border-radius: 3px;")
+        # Filtro de Categoria
+        self.pon_traffic_category_filter = QComboBox()
+        self.pon_traffic_category_filter.addItem("Todas as Categorias")
+        self.pon_traffic_category_filter.addItems(["Normal ✅", "Observar ⚠️", "Crítico 🚨"])
+        self.pon_traffic_category_filter.setMaximumWidth(120)
+        self.pon_traffic_category_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         
-        control_layout.addWidget(self.pon_traffic_olt_filter_label)
+        # Conecta sinais
+        self.pon_traffic_olt_filter.currentTextChanged.connect(self.update_pon_traffic_filters)
+        self.pon_traffic_fsp_filter.currentTextChanged.connect(self.load_pon_traffic_data)
+        self.pon_traffic_metric_filter.currentTextChanged.connect(self.load_pon_traffic_data)
+        self.pon_traffic_category_filter.currentTextChanged.connect(self.load_pon_traffic_data)
+        
+        # Labels mínimos
+        olt_label = QLabel("OLT:")
+        olt_label.setStyleSheet("font-size: 9px; padding: 0px;")
+        fsp_label = QLabel("F/S/P:")
+        fsp_label.setStyleSheet("font-size: 9px; padding: 0px;")
+        metric_label = QLabel("Métrica:")
+        metric_label.setStyleSheet("font-size: 9px; padding: 0px;")
+        cat_label = QLabel("Cat.:")
+        cat_label.setStyleSheet("font-size: 9px; padding: 0px;")
+        
+        # Adiciona elementos
+        control_layout.addWidget(olt_label)
         control_layout.addWidget(self.pon_traffic_olt_filter)
-        control_layout.addWidget(self.pon_traffic_refresh_btn)
-        control_layout.addWidget(self.pon_traffic_status)
+        control_layout.addWidget(fsp_label)
+        control_layout.addWidget(self.pon_traffic_fsp_filter)
+        control_layout.addWidget(metric_label)
+        control_layout.addWidget(self.pon_traffic_metric_filter)
+        control_layout.addWidget(cat_label)
+        control_layout.addWidget(self.pon_traffic_category_filter)
         control_layout.addStretch()
+        
+        # Botões de ação
+        refresh_btn = QPushButton("Atualizar")
+        refresh_btn.setMaximumWidth(60)
+        refresh_btn.setStyleSheet("font-size: 8px; padding: 1px;")
+        refresh_btn.clicked.connect(self.load_pon_traffic_data)
+        
+        export_btn = QPushButton("Exportar")
+        export_btn.setMaximumWidth(60)
+        export_btn.setStyleSheet("font-size: 8px; padding: 1px; background-color: #e1f5fe;")
+        export_btn.clicked.connect(self.export_pon_traffic_to_csv)
+        
+        legend_btn = QPushButton("Legenda")
+        legend_btn.setMaximumWidth(50)
+        legend_btn.setStyleSheet("font-size: 8px; padding: 1px; background-color: #e1f5fe;")
+        legend_btn.clicked.connect(self.show_pon_traffic_legend)
+        
+        control_layout.addWidget(refresh_btn)
+        control_layout.addWidget(export_btn)
+        control_layout.addWidget(legend_btn)
+        
+        # Status
+        self.pon_traffic_status_label = QLabel("0 regs")
+        self.pon_traffic_status_label.setStyleSheet("color: green; font-weight: bold; font-size: 8px;")
+        self.pon_traffic_status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        control_layout.addWidget(self.pon_traffic_status_label)
+        
         layout.addWidget(control_panel)
         
         # Tabela de dados
         self.pon_traffic_table = QTableWidget()
-        self.pon_traffic_table.setColumnCount(11)
-        self.pon_traffic_table.setHorizontalHeaderLabels([
-            "OLT", "F/S/P", "Hora", "Tráfego Subida (kbps)", "Tráfego Descida (kbps)",
-            "Broadcast Subida (p/s)", "Multicast Subida (p/s)", "Unicast Subida (p/s)",
-            "Broadcast Descida (p/s)", "Multicast Descida (p/s)", "Unicast Descida (p/s)"
-        ])
-        self.pon_traffic_table.setSortingEnabled(True)
-        self.pon_traffic_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.pon_traffic_table.setColumnCount(7)  # OLT, F/S/P, Hora, Métrica, Valor, Unidade, Cat.
+        self.pon_traffic_table.setHorizontalHeaderLabels(["OLT", "F/S/P", "Hora", "Métrica", "Valor", "Unidade", "Cat."])
+        self.pon_traffic_table.horizontalHeader().setMinimumHeight(20)
+        self.pon_traffic_table.verticalHeader().setDefaultSectionSize(18)
+        
+        # Ajuste de largura das colunas
+        self.pon_traffic_table.setColumnWidth(0, 60)   # OLT
+        self.pon_traffic_table.setColumnWidth(1, 60)   # F/S/P
+        self.pon_traffic_table.setColumnWidth(2, 70)   # Hora
+        self.pon_traffic_table.setColumnWidth(3, 180)  # Métrica
+        self.pon_traffic_table.setColumnWidth(4, 100)  # Valor
+        self.pon_traffic_table.setColumnWidth(5, 60)   # Unidade
+        self.pon_traffic_table.setColumnWidth(6, 30)   # Categoria
+        
         layout.addWidget(self.pon_traffic_table)
         
         # Timer para atualização automática
         self.pon_traffic_timer = QTimer(self)
-        self.pon_traffic_timer.setInterval(600000)  # 10 minutos
+        self.pon_traffic_timer.setInterval(60000)  # 10 minutos
         self.pon_traffic_timer.timeout.connect(self.load_pon_traffic_data)
         
-        # Conectar sinal de atualização
-        db_signals.pon_traffic_updated.connect(self.update_pon_traffic_display)
-        db_signals.pon_traffic_status_changed.connect(self.update_pon_traffic_status)
+        # Carrega as OLTs disponíveis
+        self.load_pon_traffic_olt_list()
 
-    # Em gui/main_window.py, adicione estes métodos no final da classe
 
-    # --- INÍCIO DA MODIFICAÇÃO (NOVOS MÉTODOS) ---
+    def update_pon_traffic_filters(self):
+        """Atualiza os filtros de F/S/P e Métrica com base na OLT selecionada."""
+        selected_olt = self.pon_traffic_olt_filter.currentText()
+        logging.info(f"OLT selecionada: {selected_olt}")
+        
+        # Bloqueia sinais para evitar chamadas recursivas
+        self.pon_traffic_fsp_filter.blockSignals(True)
+        self.pon_traffic_fsp_filter.clear()
+        self.pon_traffic_fsp_filter.addItem("Todas as PONs")
+        self.pon_traffic_fsp_filter.setEnabled(False)
+        
+        self.pon_traffic_metric_filter.blockSignals(True)
+        self.pon_traffic_metric_filter.clear()
+        self.pon_traffic_metric_filter.addItem("Todas as Métricas")
+        self.pon_traffic_metric_filter.setEnabled(False)
+        
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            try:
+                # CORREÇÃO: Extrair o IP completo da OLT
+                # O formato no filtro é "OLT X.X.X.X", então precisamos extrair apenas o IP
+                if "OLT" in selected_olt:
+                    olt_ip = selected_olt.split()[-1]  # Pega o último elemento após "OLT"
+                    
+                    # Se o IP extraído não for um IP completo (ex: "95"), 
+                    # tentar encontrar o IP completo nas configurações
+                    if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', olt_ip):
+                        # Procurar nas configurações das OLTs
+                        for olt_config in self.olt_configs:
+                            if olt_config['name'] == selected_olt or olt_config['ip'].endswith(f".{olt_ip}"):
+                                olt_ip = olt_config['ip']
+                                break
+                else:
+                    olt_ip = selected_olt
+                
+                logging.info(f"Buscando F/S/P para a OLT IP: {olt_ip}")
+                
+                # Busca F/S/P distintos para essa OLT
+                query_fsp = "SELECT DISTINCT fsp FROM pon_traffic_data WHERE olt_ip = %s ORDER BY fsp;"
+                self.cursor.execute(query_fsp, (olt_ip,))
+                fsps = [row[0] for row in self.cursor.fetchall()]
+                
+                logging.info(f"F/S/P encontrados: {fsps}")
+                
+                for fsp in fsps:
+                    self.pon_traffic_fsp_filter.addItem(fsp)
+                
+                # Adiciona métricas disponíveis
+                metrics = [
+                    ("Tráfego Subida (kbps)", "up_traffic_kbps"),
+                    ("Tráfego Descida (kbps)", "down_traffic_kbps"),
+                    ("Broadcast Subida (p/s)", "upstream_broadcast_pps"),
+                    ("Broadcast Descida (p/s)", "downstream_broadcast_pps"),
+                    ("Multicast Subida (p/s)", "upstream_multicast_pps"),
+                    ("Multicast Descida (p/s)", "downstream_multicast_pps"),
+                    ("Unicast Subida (p/s)", "upstream_unicast_pps"),
+                    ("Unicast Descida (p/s)", "downstream_unicast_pps")
+                ]
+                
+                for display_name, column_name in metrics:
+                    self.pon_traffic_metric_filter.addItem(display_name, column_name)
+                
+                # Habilita os filtros
+                self.pon_traffic_fsp_filter.setEnabled(True)
+                self.pon_traffic_metric_filter.setEnabled(True)
+                
+                logging.info(f"Filtros habilitados. F/S/P: {len(fsps)}, Métricas: {len(metrics)}")
+                
+            except Exception as e:
+                logging.error(f"Erro ao carregar filtros para tráfego PON: {e}", exc_info=True)
+                if self.conn:
+                    self.conn.rollback()
+        else:
+            logging.info("Nenhuma OLT selecionada, filtros desabilitados")
+        
+        self.pon_traffic_fsp_filter.blockSignals(False)
+        self.pon_traffic_metric_filter.blockSignals(False)
+        
+        # Carrega os dados após atualizar os filtros
+        self.load_pon_traffic_data()
 
     def setup_pon_state_tab(self):
         """Configura a interface da aba 'Estado PON'."""
@@ -3678,57 +3827,626 @@ class OLTDatabaseGUI(QMainWindow):
                 self.pon_traffic_status.setStyleSheet("padding: 3px; background-color: #fff9c4; border-radius: 3px;")
 
     def load_pon_traffic_data(self):
-        """Carrega os dados de tráfego PON do banco de dados."""
+        """Carrega os dados de tráfego PON com classificação por limiares e conversão de unidades."""
+        logging.info("Carregando dados de tráfego PON.")
+        self.pon_traffic_table.setRowCount(0)
+        
+        # Obter valores dos filtros
         selected_olt = self.pon_traffic_olt_filter.currentText()
+        selected_fsp = self.pon_traffic_fsp_filter.currentText()
+        selected_metric = self.pon_traffic_metric_filter.currentText()
+        selected_category = self.pon_traffic_category_filter.currentText()
+        
+        # Mapeamento para substituir emojis no log
+        category_log_map = {
+            "Normal ✅": "Normal",
+            "Observar ⚠️": "Observar",
+            "Crítico 🚨": "Critico"
+        }
+        
+        # Log dos filtros selecionados (substituindo emojis)
+        log_category = category_log_map.get(selected_category, selected_category)
+        logging.info(f"Filtros - OLT: {selected_olt}, F/S/P: {selected_fsp}, Métrica: {selected_metric}, Categoria: {log_category}")
+        
+        # Obter o nome da coluna da métrica selecionada
+        metric_column = None
+        if selected_metric != "Todas as Métricas":
+            index = self.pon_traffic_metric_filter.currentIndex()
+            if index > 0:
+                metric_column = self.pon_traffic_metric_filter.itemData(index)
+        
+        # Mapear categoria selecionada
+        category_map = {
+            "Todas as Categorias": None,
+            "Normal ✅": "normal",
+            "Observar ⚠️": "warning",
+            "Crítico 🚨": "critical"
+        }
+        filter_category = category_map.get(selected_category)
+        
+        params = []
+        where_conditions = []
+        
+        # Filtro de OLT
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            # CORREÇÃO: Extrair o IP completo da OLT
+            # O formato no filtro é "OLT X.X.X.X", então precisamos extrair apenas o IP
+            if "OLT" in selected_olt:
+                olt_ip = selected_olt.split()[-1]  # Pega o último elemento após "OLT"
+                
+                # Se o IP extraído não for um IP completo (ex: "95"), 
+                # tentar encontrar o IP completo nas configurações
+                if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', olt_ip):
+                    # Procurar nas configurações das OLTs
+                    for olt_config in self.olt_configs:
+                        if olt_config['name'] == selected_olt or olt_config['ip'].endswith(f".{olt_ip}"):
+                            olt_ip = olt_config['ip']
+                            break
+            else:
+                olt_ip = selected_olt
+            
+            where_conditions.append("olt_ip = %s")
+            params.append(olt_ip)
+            logging.info(f"Aplicando filtro de OLT: {olt_ip}")
+        
+        # Filtro de F/S/P
+        if selected_fsp and selected_fsp != "Todas as PONs":
+            where_conditions.append("fsp = %s")
+            params.append(selected_fsp)
+            logging.info(f"Aplicando filtro de F/S/P: {selected_fsp}")
+        
+        # Construir cláusula WHERE
+        where_clause = ""
+        if where_conditions:
+            where_clause = "WHERE " + " AND ".join(where_conditions)
+            logging.info(f"Cláusula WHERE: {where_clause}")
+            logging.info(f"Parâmetros: {params}")
+        
+        # Construir a consulta SQL completa
+        query = f"""
+            SELECT olt_ip, fsp, collection_time, up_traffic_kbps, down_traffic_kbps,
+                upstream_broadcast_pps, upstream_multicast_pps, upstream_unicast_pps,
+                downstream_broadcast_pps, downstream_multicast_pps, downstream_unicast_pps
+            FROM pon_traffic_data 
+            {where_clause} 
+            ORDER BY collection_time DESC LIMIT 1000;
+        """
         
         try:
-            self.pon_traffic_table.setSortingEnabled(False)
-            self.pon_traffic_table.setRowCount(0)
+            logging.info(f"Executando query: {query}")
+            self.cursor.execute(query, tuple(params) if params else None)
+            results = self.cursor.fetchall()
+            logging.info(f"Resultados encontrados: {len(results)}")
             
-            query = """
-                SELECT olt_ip, fsp, collection_time, up_traffic_kbps, down_traffic_kbps,
-                    upstream_broadcast_pps, upstream_multicast_pps, upstream_unicast_pps,
-                    downstream_broadcast_pps, downstream_multicast_pps, downstream_unicast_pps
-                FROM pon_traffic_data
-                WHERE collection_time >= NOW() - INTERVAL '24 hours'
-            """
-            params = []
+            # Capacidades nominais da PON (em kbps)
+            PON_UP_CAPACITY = 1250000  # 1.25 Gbps = 1,250,000 kbps
+            PON_DOWN_CAPACITY = 2500000  # 2.5 Gbps = 2,500,000 kbps
             
-            if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
-                olt_identifier = selected_olt.split()[-1]
-                query += " AND olt_ip = %s"
-                params.append(olt_identifier)
+            # Mapeamento de colunas para métricas
+            column_to_metric = {
+                'up_traffic_kbps': ('Tráfego Subida (kbps)', 'up'),
+                'down_traffic_kbps': ('Tráfego Descida (kbps)', 'down'),
+                'upstream_broadcast_pps': ('Broadcast Subida (p/s)', 'up_bc'),
+                'downstream_broadcast_pps': ('Broadcast Descida (p/s)', 'down_bc'),
+                'upstream_multicast_pps': ('Multicast Subida (p/s)', 'up_mc'),
+                'downstream_multicast_pps': ('Multicast Descida (p/s)', 'down_mc'),
+                'upstream_unicast_pps': ('Unicast Subida (p/s)', 'up_uc'),
+                'downstream_unicast_pps': ('Unicast Descida (p/s)', 'down_uc')
+            }
             
-            query += " ORDER BY collection_time DESC"
+            # Função para classificar métricas baseado nos limiares
+            def classify_metric(metric_key, value):
+                if value is None:
+                    return "normal", ""
+                
+                # Grupo 1 - Contadores de Capacidade (Banda Agregada)
+                if metric_key == 'up':
+                    percentage = (value / PON_UP_CAPACITY) * 100
+                    if percentage <= 60:
+                        return "normal", f"{percentage:.1f}%"
+                    elif percentage <= 80:
+                        return "warning", f"{percentage:.1f}%"
+                    else:
+                        return "critical", f"{percentage:.1f}%"
+                
+                elif metric_key == 'down':
+                    percentage = (value / PON_DOWN_CAPACITY) * 100
+                    if percentage <= 60:
+                        return "normal", f"{percentage:.1f}%"
+                    elif percentage <= 80:
+                        return "warning", f"{percentage:.1f}%"
+                    else:
+                        return "critical", f"{percentage:.1f}%"
+                
+                # Grupo 2 - Contadores de Broadcast/Multicast
+                elif metric_key == 'up_bc':
+                    if value <= 10:
+                        return "normal", ""
+                    elif value <= 100:
+                        return "warning", ""
+                    else:
+                        return "critical", ""
+                
+                elif metric_key == 'down_bc':
+                    if value <= 50:
+                        return "normal", ""
+                    elif value <= 500:
+                        return "warning", ""
+                    else:
+                        return "critical", ""
+                
+                elif metric_key == 'up_mc':
+                    if value == 0:
+                        return "normal", ""
+                    elif value <= 100:
+                        return "warning", ""
+                    else:
+                        return "critical", ""
+                
+                elif metric_key == 'down_mc':
+                    # Para multicast downstream, consideramos normal se houver IPTV
+                    # Como não temos essa informação, usamos limiares conservadores
+                    if value <= 1000:
+                        return "normal", ""
+                    elif value <= 5000:
+                        return "warning", ""
+                    else:
+                        return "critical", ""
+                
+                # Grupo 3 - Contadores de Unicast (Tráfego Útil)
+                elif metric_key in ['up_uc', 'down_uc']:
+                    # Unicast deve ser predominante, classificamos como normal por padrão
+                    return "normal", ""
+                
+                return "unknown", ""
             
-            self.cursor.execute(query, tuple(params))
-            data = self.cursor.fetchall()
+            # Função para formatar valores com unidades adequadas
+            def format_value(value, metric_key):
+                if value is None:
+                    return "0", ""
+                
+                # Para tráfego em kbps, converter para Mbps se for grande
+                if metric_key in ['up', 'down']:
+                    if value >= 1000:
+                        return f"{value/1000:.2f}", "Mbps"
+                    else:
+                        return f"{value:.0f}", "kbps"
+                
+                # Para pacotes por segundo, manter como está
+                elif metric_key in ['up_bc', 'down_bc', 'up_mc', 'down_mc', 'up_uc', 'down_uc']:
+                    return f"{value:.0f}", "p/s"
+                
+                return str(value), ""
             
-            self.pon_traffic_table.setRowCount(len(data))
+            # Preparar lista para dados processados
+            table_data = []
             
-            for row_idx, row_data in enumerate(data):
-                for col_idx, col_data in enumerate(row_data):
-                    item_text = str(col_data) if col_data is not None else ""
-                    item = QTableWidgetItem(item_text)
+            for record in results:
+                # Criar um dicionário com os valores do registro
+                record_dict = {
+                    'olt_ip': record[0],
+                    'fsp': record[1],
+                    'collection_time': record[2],
+                    'up_traffic_kbps': record[3],
+                    'down_traffic_kbps': record[4],
+                    'upstream_broadcast_pps': record[5],
+                    'upstream_multicast_pps': record[6],
+                    'upstream_unicast_pps': record[7],
+                    'downstream_broadcast_pps': record[8],
+                    'downstream_multicast_pps': record[9],
+                    'downstream_unicast_pps': record[10]
+                }
+                
+                olt_ip = record_dict['olt_ip']
+                fsp = record_dict['fsp']
+                collection_time = record_dict['collection_time']
+                timestamp = collection_time.strftime('%d/%m %H:%M') if collection_time else "N/A"
+                
+                # Processar cada métrica
+                for column_name, (metric_name, metric_key) in column_to_metric.items():
+                    value = record_dict[column_name]
                     
-                    # Destacar valores altos
-                    if col_idx in [3, 4]:  # Tráfego em kbps
-                        try:
-                            value = float(col_data)
-                            if value > 100000:  # Mais de 100 Mbps
-                                item.setBackground(QtGui.QColor(255, 200, 200))
-                        except (ValueError, TypeError):
-                            pass
+                    # Aplicar filtro de métrica se necessário
+                    if metric_column and column_name != metric_column:
+                        continue
                     
+                    category, percentage = classify_metric(metric_key, value)
+                    
+                    # Aplicar filtro de categoria se necessário
+                    if filter_category and category != filter_category:
+                        continue
+                    
+                    formatted_value, unit = format_value(value, metric_key)
+                    
+                    table_data.append((
+                        olt_ip, fsp, timestamp, metric_name, 
+                        formatted_value, unit, category, percentage
+                    ))
+            
+            # Preencher tabela com dados processados
+            self.pon_traffic_table.setRowCount(len(table_data))
+            
+            for row_idx, row_data in enumerate(table_data):
+                # Desempacotar corretamente os dados da linha
+                olt_ip, fsp, timestamp, metric, value, unit, category, percentage = row_data
+                
+                # Mapeamento de categoria para emoji
+                category_emoji_map = {
+                    "normal": "✅",
+                    "warning": "⚠️",
+                    "critical": "🚨"
+                }
+                emoji = category_emoji_map.get(category, "")
+                
+                items = [
+                    QTableWidgetItem(olt_ip),
+                    QTableWidgetItem(fsp),
+                    QTableWidgetItem(timestamp),
+                    QTableWidgetItem(metric),
+                    QTableWidgetItem(value),
+                    QTableWidgetItem(unit),
+                    QTableWidgetItem(emoji)
+                ]
+                
+                # Aplicar cores baseado na categoria
+                color = None
+                if category == "normal":
+                    color = QColor('#c8e6c9')  # Verde claro
+                elif category == "warning":
+                    color = QColor('#fff9c4')  # Amarelo claro
+                elif category == "critical":
+                    color = QColor('#ffcdd2')  # Vermelho claro
+                
+                # Adicionar porcentagem como tooltip para métricas de capacidade
+                if percentage:
+                    items[4].setToolTip(f"{percentage} da capacidade nominal")
+                
+                for col_idx, item in enumerate(items):
+                    if color:
+                        item.setBackground(color)
                     self.pon_traffic_table.setItem(row_idx, col_idx, item)
             
+            # Ajustar colunas
             self.pon_traffic_table.resizeColumnsToContents()
             
+            # Atualizar status
+            self.pon_traffic_status_label.setText(f"{len(table_data)} regs")
+            self.pon_traffic_status_label.setStyleSheet("color: green; font-weight: bold; font-size: 8px;")
+            
+            # Log de estatísticas (sem emojis) - CORRIGIDO
+            critical_count = sum(1 for row_data in table_data if row_data[6] == "critical")
+            warning_count = sum(1 for row_data in table_data if row_data[6] == "warning")
+            normal_count = sum(1 for row_data in table_data if row_data[6] == "normal")
+            
+            logging.info(f"Estatísticas de tráfego PON - Normal: {normal_count}, Observar: {warning_count}, Crítico: {critical_count}")
+            
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Não foi possível carregar os dados de tráfego PON: {str(e)}")
             logging.error(f"Erro ao carregar dados de tráfego PON: {e}", exc_info=True)
-        finally:
-            self.pon_traffic_table.setSortingEnabled(True)
+            self.pon_traffic_status_label.setText("Erro")
+            self.pon_traffic_status_label.setStyleSheet("color: red; font-weight: bold; font-size: 8px;")
+        
+    # Adicionar este método para carregar as OLTs disponíveis
+    def load_pon_traffic_olt_list(self):
+        """Carrega a lista de OLTs disponíveis na tabela de tráfego PON"""
+        try:
+            self.pon_traffic_olt_filter.blockSignals(True)
+            self.pon_traffic_olt_filter.clear()
+            self.pon_traffic_olt_filter.addItem("Todas as OLTs")
+            
+            # Verifica se a conexão está ativa
+            if not self.conn or self.conn.closed:
+                logging.warning("Conexão com o banco fechada, tentando reconectar...")
+                self.connect_to_db()
+                if not self.conn or self.conn.closed:
+                    raise Exception("Não foi possível estabelecer conexão com o banco de dados")
+            
+            # Busca OLTs distintas na tabela de tráfego
+            query = "SELECT DISTINCT olt_ip FROM pon_traffic_data ORDER BY olt_ip"
+            self.cursor.execute(query)
+            olts = [row[0] for row in self.cursor.fetchall()]
+            
+            logging.info(f"OLTs encontradas na tabela pon_traffic_data: {olts}")
+            
+            for olt_ip in olts:
+                self.pon_traffic_olt_filter.addItem(f"OLT {olt_ip}")
+            
+            self.pon_traffic_olt_filter.blockSignals(False)
+            logging.info(f"OLTs carregadas para filtro de tráfego PON: {olts}")
+            
+            # Se houver OLTs, seleciona a primeira por padrão
+            if olts and self.pon_traffic_olt_filter.count() > 1:
+                self.pon_traffic_olt_filter.setCurrentIndex(1)  # Pula "Todas as OLTs"
+                logging.info(f"OLT padrão selecionada: {self.pon_traffic_olt_filter.currentText()}")
+                
+        except Exception as e:
+            logging.error(f"Erro ao carregar OLTs para filtro de tráfego PON: {e}", exc_info=True)
+            if self.conn:
+                self.conn.rollback()
+            self.pon_traffic_olt_filter.addItem("Erro ao carregar")
+            self.pon_traffic_olt_filter.blockSignals(False)
+
+    def export_pon_traffic_to_csv(self):
+        """Exporta os dados da tabela de tráfego PON para um arquivo CSV."""
+        if self.pon_traffic_table.rowCount() == 0:
+            QMessageBox.information(self, "Nada para Exportar", "A tabela de tráfego PON está vazia.")
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Tráfego PON", 
+            f"pon_traffic_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "Arquivos CSV (*.csv);;Todos os Arquivos (*)"
+        )
+        
+        if not filename:
+            return
+        
+        try:
+            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile, delimiter=';')
+                
+                # Escreve cabeçalho
+                headers = [self.pon_traffic_table.horizontalHeaderItem(col).text() 
+                        for col in range(self.pon_traffic_table.columnCount())]
+                writer.writerow(headers)
+                
+                # Escreve dados
+                for row in range(self.pon_traffic_table.rowCount()):
+                    row_data = []
+                    for col in range(self.pon_traffic_table.columnCount()):
+                        item = self.pon_traffic_table.item(row, col)
+                        row_data.append(item.text() if item else "")
+                    writer.writerow(row_data)
+            
+            QMessageBox.information(self, "Exportação Concluída", 
+                                f"Dados exportados com sucesso para:\n{filename}")
+            logging.info(f"Dados de tráfego PON exportados para {filename}")
+            
+        except Exception as e:
+            logging.error(f"Erro ao exportar dados de tráfego PON: {e}")
+            QMessageBox.critical(self, "Erro de Exportação", 
+                            f"Não foi possível exportar os dados:\n{str(e)}")
+
+    def show_pon_traffic_legend(self):
+        """Exibe uma janela com a legenda detalhada da classificação de tráfego PON."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Legenda - Classificação de Tráfego PON")
+        dialog.setMinimumSize(800, 600)
+        dialog.setModal(True)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Criar um widget com abas para organizar as informações
+        tab_widget = QTabWidget()
+        layout.addWidget(tab_widget)
+        
+        # Aba 1: Visão Geral
+        overview_tab = QWidget()
+        overview_layout = QVBoxLayout(overview_tab)
+        
+        overview_title = QLabel("<h2>📊 Modelo de Classificação - Tráfego PON</h2>")
+        overview_layout.addWidget(overview_title)
+        
+        overview_info = QLabel("""
+        <p>Esta aba classifica o tráfego das portas PON em três grupos principais, com limiares específicos 
+        para identificar problemas de capacidade, broadcast excessivo ou anomalias no tráfego.</p>
+        
+        <h3>Capacidades Nominais de Referência:</h3>
+        <ul>
+            <li><b>Upstream:</b> 1,25 Gbps (1.250.000 kbps)</li>
+            <li><b>Downstream:</b> 2,5 Gbps (2.500.000 kbps)</li>
+        </ul>
+        
+        <h3>Legenda de Cores:</h3>
+        <ul>
+            <li><span style='color: #2e7d32;'>✅ Normal (Verde):</span> Dentro dos limiares esperados</li>
+            <li><span style='color: #f57c00;'>⚠️ Observar (Amarelo):</span> Aproximando-se dos limites críticos</li>
+            <li><span style='color: #c62828;'>🚨 Crítico (Vermelho):</span> Acima dos limites seguros</li>
+        </ul>
+        """)
+        overview_layout.addWidget(overview_info)
+        
+        tab_widget.addTab(overview_tab, "Visão Geral")
+        
+        # Aba 2: Grupo 1 - Capacidade
+        capacity_tab = QWidget()
+        capacity_layout = QVBoxLayout(capacity_tab)
+        
+        capacity_title = QLabel("<h2 style='color: #1976d2;'>🔹 Grupo 1 – Contadores de Capacidade (Banda Agregada)</h2>")
+        capacity_layout.addWidget(capacity_title)
+        
+        capacity_info = QLabel("""
+        <table border='1' cellpadding='5' style='border-collapse: collapse; width: 100%;'>
+            <tr style='background-color: #e3f2fd;'>
+                <th><b>Contador</b></th>
+                <th><b>Limiar Ok</b></th>
+                <th><b>Limiar Observar</b></th>
+                <th><b>Limiar Crítico</b></th>
+            </tr>
+            <tr>
+                <td>Up traffic (kbps)</td>
+                <td>Até 60% da capacidade<br>(≤ ~746.000 kbps)</td>
+                <td>Entre 60% e 80% da capacidade</td>
+                <td>Acima de 80% da capacidade<br>(> ~995.000 kbps)</td>
+            </tr>
+            <tr>
+                <td>Down traffic (kbps)</td>
+                <td>Até 60% da capacidade<br>(≤ ~1.492.000 kbps)</td>
+                <td>Entre 60% e 80% da capacidade</td>
+                <td>Acima de 80% da capacidade<br>(> ~1.990.000 kbps)</td>
+            </tr>
+        </table>
+        
+        <br>
+        <p><b>Análise:</b></p>
+        <ul>
+            <li>Utilização acima de 80% indica saturação da porta PON</li>
+            <li>Pode causar lentidão, perda de pacotes e degradação do serviço</li>
+            <li>Requer investigação imediata e possível expansão de capacidade</li>
+        </ul>
+        """)
+        capacity_layout.addWidget(capacity_info)
+        
+        tab_widget.addTab(capacity_tab, "Grupo 1 - Capacidade")
+        
+        # Aba 3: Grupo 2 - Broadcast/Multicast
+        broadcast_tab = QWidget()
+        broadcast_layout = QVBoxLayout(broadcast_tab)
+        
+        broadcast_title = QLabel("<h2 style='color: #f57c00;'>🔹 Grupo 2 – Contadores de Broadcast/Multicast</h2>")
+        broadcast_layout.addWidget(broadcast_title)
+        
+        broadcast_info = QLabel("""
+        <table border='1' cellpadding='5' style='border-collapse: collapse; width: 100%;'>
+            <tr style='background-color: #fff3e0;'>
+                <th><b>Contador</b></th>
+                <th><b>Limiar Ok</b></th>
+                <th><b>Limiar Observar</b></th>
+                <th><b>Limiar Crítico</b></th>
+            </tr>
+            <tr>
+                <td>Upstream Broadcast (p/s)</td>
+                <td>0 a 10 p/s</td>
+                <td>10 a 100 p/s</td>
+                <td>> 100 p/s</td>
+            </tr>
+            <tr>
+                <td>Downstream Broadcast (p/s)</td>
+                <td>0 a 50 p/s</td>
+                <td>50 a 500 p/s</td>
+                <td>> 500 p/s</td>
+            </tr>
+            <tr>
+                <td>Upstream Multicast (p/s)</td>
+                <td>0 (se não há IPTV)</td>
+                <td>1 a 100 p/s (se inesperado)</td>
+                <td>> 100 p/s sem IPTV ativo</td>
+            </tr>
+            <tr>
+                <td>Downstream Multicast (p/s)</td>
+                <td>0 (sem IPTV) / Variável (com IPTV)</td>
+                <td>Consistência com perfil esperado IPTV</td>
+                <td>Alto volume sem configuração de IPTV = Crítico</td>
+            </tr>
+        </table>
+        
+        <br>
+        <p><b>Análise:</b></p>
+        <ul>
+            <li>Broadcast excessivo indica tempestade de broadcast ou loop na rede</li>
+            <li>Multicast inesperado pode indicar configuração incorreta</li>
+            <li>Altos volumes podem causar degradação geral da rede</li>
+        </ul>
+        """)
+        broadcast_layout.addWidget(broadcast_info)
+        
+        tab_widget.addTab(broadcast_tab, "Grupo 2 - Broadcast/Multicast")
+        
+        # Aba 4: Grupo 3 - Unicast
+        unicast_tab = QWidget()
+        unicast_layout = QVBoxLayout(unicast_tab)
+        
+        unicast_title = QLabel("<h2 style='color: #2e7d32;'>🔹 Grupo 3 – Contadores de Unicast (Tráfego Útil)</h2>")
+        unicast_layout.addWidget(unicast_title)
+        
+        unicast_info = QLabel("""
+        <table border='1' cellpadding='5' style='border-collapse: collapse; width: 100%;'>
+            <tr style='background-color: #e8f5e8;'>
+                <th><b>Contador</b></th>
+                <th><b>Limiar Ok</b></th>
+                <th><b>Limiar Observar</b></th>
+                <th><b>Limiar Crítico</b></th>
+            </tr>
+            <tr>
+                <td>Upstream Unicast (p/s)</td>
+                <td>Predominante no upstream</td>
+                <td>Menor que broadcast/multicast</td>
+                <td>Muito baixo comparado ao tráfego total</td>
+            </tr>
+            <tr>
+                <td>Downstream Unicast (p/s)</td>
+                <td>Predominante no downstream</td>
+                <td>Menor que broadcast/multicast</td>
+                <td>Muito baixo comparado ao tráfego total</td>
+            </tr>
+        </table>
+        
+        <br>
+        <p><b>Análise:</b></p>
+        <ul>
+            <li>Unicast deve ser sempre o tráfego predominante em redes normais</li>
+            <li>Se broadcast/multicast superar unicast, indica anomalia</li>
+            <li>Unicast muito baixo pode indicar problemas de conectividade</li>
+        </ul>
+        """)
+        unicast_layout.addWidget(unicast_info)
+        
+        tab_widget.addTab(unicast_tab, "Grupo 3 - Unicast")
+        
+        # Aba 5: Exemplos Práticos
+        examples_tab = QWidget()
+        examples_layout = QVBoxLayout(examples_tab)
+        
+        examples_title = QLabel("<h2>📋 Exemplos Práticos</h2>")
+        examples_layout.addWidget(examples_title)
+        
+        examples_info = QLabel("""
+        <table border='1' cellpadding='5' style='border-collapse: collapse; width: 100%;'>
+            <tr style='background-color: #c8e6c9;'>
+                <td><b>Up: 500.000 kbps (40%)</b></td>
+                <td>✅ Normal - utilização dentro do esperado</td>
+            </tr>
+            <tr style='background-color: #fff9c4;'>
+                <td><b>Down: 1.800.000 kbps (72%)</b></td>
+                <td>⚠️ Observar - se aproximando do limite crítico</td>
+            </tr>
+            <tr style='background-color: #ffcdd2;'>
+                <td><b>Down: 2.100.000 kbps (84%)</b></td>
+                <td>🚨 Crítico - capacidade saturada</td>
+            </tr>
+            <tr style='background-color: #c8e6c9;'>
+                <td><b>Broadcast Up: 5 p/s</b></td>
+                <td>✅ Normal - dentro do limite</td>
+            </tr>
+            <tr style='background-color: #ffcdd2;'>
+                <td><b>Broadcast Down: 800 p/s</b></td>
+                <td>🚨 Crítico - broadcast excessivo</td>
+            </tr>
+            <tr style='background-color: #fff9c4;'>
+                <td><b>Multicast Up: 50 p/s</b></td>
+                <td>⚠️ Observar - inesperado sem IPTV</td>
+            </tr>
+        </table>
+        
+        <br>
+        <p><b>Ações Recomendadas:</b></p>
+        <ul>
+            <li><b>Capacidade Crítica:</b> 
+                <ul>
+                    <li>Verificar utilização por ONT</li>
+                    <li>Considerar balanceamento de carga</li>
+                    <li>Planejar upgrade de capacidade</li>
+                </ul>
+            </li>
+            <li><b>Broadcast/Multicast Crítico:</b>
+                <ul>
+                    <li>Identificar origem do tráfego</li>
+                    <li>Verificar loops na rede</li>
+                    <li>Configurar storm control nas portas</li>
+                </ul>
+            </li>
+        </ul>
+        """)
+        examples_layout.addWidget(examples_info)
+        
+        tab_widget.addTab(examples_tab, "Exemplos Práticos")
+        
+        # Botão de fechar
+        close_button = QPushButton("Fechar")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+        
+        # Exibir o diálogo
+        dialog.exec_()
 
     def update_pon_traffic_display(self):
         """Atualiza a exibição dos dados de tráfego PON."""
