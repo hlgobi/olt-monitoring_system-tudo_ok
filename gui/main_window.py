@@ -4291,36 +4291,42 @@ class OLTDatabaseGUI(QMainWindow):
         control_panel = QWidget()
         control_layout = QHBoxLayout(control_panel)
         
-        self.uplink_ddm_olt_filter_label = QLabel("Filtrar por OLT:")
+        # Filtro de OLT
+        self.uplink_ddm_olt_filter_label = QLabel("OLT:")
         self.uplink_ddm_olt_filter = QComboBox()
-        if self.uplink_ddm_olt_filter not in self.olt_filters_to_update:
-            self.olt_filters_to_update.append(self.uplink_ddm_olt_filter)
-        
-        # Adiciona opção "Todas"
         self.uplink_ddm_olt_filter.addItem("Todas as OLTs")
         
-        # Carrega as OLTs disponíveis
-        try:
-            self.cursor.execute("SELECT DISTINCT olt_ip FROM uplink_ddm_data ORDER BY olt_ip")
-            olts = [row[0] for row in self.cursor.fetchall()]
-            for olt in olts:
-                self.uplink_ddm_olt_filter.addItem(f"OLT {olt}")
-            logging.info(f"OLTs carregadas para filtro DDM: {olts}")
-        except Exception as e:
-            logging.error(f"Erro ao carregar OLTs para filtro DDM: {e}")
-            self.uplink_ddm_olt_filter.addItem("Erro ao carregar OLTs")
+        # Filtro de Slot
+        self.uplink_ddm_slot_filter_label = QLabel("Slot:")
+        self.uplink_ddm_slot_filter = QComboBox()
+        self.uplink_ddm_slot_filter.addItem("Todos os Slots")
+        self.uplink_ddm_slot_filter.setEnabled(False)  # Inicialmente desabilitado
         
-        self.uplink_ddm_olt_filter.currentTextChanged.connect(self.load_uplink_ddm_data)
+        # Filtro de Porta
+        self.uplink_ddm_port_filter_label = QLabel("Porta:")
+        self.uplink_ddm_port_filter = QComboBox()
+        self.uplink_ddm_port_filter.addItem("Todas as Portas")
+        self.uplink_ddm_port_filter.setEnabled(False)  # Inicialmente desabilitado
+        
+        # Conecta os sinais
+        self.uplink_ddm_olt_filter.currentTextChanged.connect(self.update_ddm_slot_filter)
+        self.uplink_ddm_slot_filter.currentTextChanged.connect(self.update_ddm_port_filter)
+        self.uplink_ddm_port_filter.currentTextChanged.connect(self.load_uplink_ddm_data)
+        
+        control_layout.addWidget(self.uplink_ddm_olt_filter_label)
+        control_layout.addWidget(self.uplink_ddm_olt_filter)
+        control_layout.addWidget(self.uplink_ddm_slot_filter_label)
+        control_layout.addWidget(self.uplink_ddm_slot_filter)
+        control_layout.addWidget(self.uplink_ddm_port_filter_label)
+        control_layout.addWidget(self.uplink_ddm_port_filter)
+        
+        # Botões de ação
+        refresh_btn = QPushButton("Atualizar")
+        refresh_btn.clicked.connect(self.load_uplink_ddm_data)
         
         export_btn = QPushButton("Exportar CSV")
         export_btn.clicked.connect(self.export_uplink_ddm_to_csv)
         
-        # Adiciona um botão de atualização manual
-        refresh_btn = QPushButton("Atualizar")
-        refresh_btn.clicked.connect(self.load_uplink_ddm_data)
-        
-        control_layout.addWidget(self.uplink_ddm_olt_filter_label)
-        control_layout.addWidget(self.uplink_ddm_olt_filter)
         control_layout.addWidget(refresh_btn)
         control_layout.addWidget(export_btn)
         control_layout.addStretch()
@@ -4337,7 +4343,7 @@ class OLTDatabaseGUI(QMainWindow):
         ])
         self.uplink_ddm_table.setSortingEnabled(True)
         self.uplink_ddm_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.uplink_ddm_table.setAlternatingRowColors(True)  # Melhora a visualização
+        self.uplink_ddm_table.setAlternatingRowColors(True)
         layout.addWidget(self.uplink_ddm_table)
         
         # Timer para atualização periódica
@@ -4349,16 +4355,152 @@ class OLTDatabaseGUI(QMainWindow):
         self.ddm_status_label.setStyleSheet("color: green; font-weight: bold;")
         layout.addWidget(self.ddm_status_label)
         
+        # Carrega as OLTs disponíveis
+        self.load_ddm_olt_list()
+        
         # Carrega os dados iniciais
         logging.info("Configuração da aba Uplink DDM concluída. Carregando dados iniciais...")
         QTimer.singleShot(500, self.load_uplink_ddm_data)
+
+
+    def load_ddm_olt_list(self):
+        """Carrega a lista de OLTs disponíveis na tabela DDM"""
+        try:
+            self.uplink_ddm_olt_filter.blockSignals(True)
+            self.uplink_ddm_olt_filter.clear()
+            self.uplink_ddm_olt_filter.addItem("Todas as OLTs")
+            
+            # Busca OLTs distintas na tabela DDM
+            self.cursor.execute("SELECT DISTINCT olt_ip FROM uplink_ddm_data ORDER BY olt_ip")
+            olts = [row[0] for row in self.cursor.fetchall()]
+            
+            for olt_ip in olts:
+                self.uplink_ddm_olt_filter.addItem(f"OLT {olt_ip}")
+            
+            self.uplink_ddm_olt_filter.blockSignals(False)
+            logging.info(f"OLTs carregadas para filtro DDM: {olts}")
+        except Exception as e:
+            logging.error(f"Erro ao carregar OLTs para filtro DDM: {e}")
+            if self.conn:
+                self.conn.rollback()
+
+    def update_ddm_slot_filter(self):
+        """Atualiza o filtro de Slot com base na OLT selecionada"""
+        selected_olt = self.uplink_ddm_olt_filter.currentText()
+        
+        # Bloqueia sinais para evitar chamadas recursivas
+        self.uplink_ddm_slot_filter.blockSignals(True)
+        self.uplink_ddm_slot_filter.clear()
+        self.uplink_ddm_slot_filter.addItem("Todos os Slots")
+        
+        # Bloqueia o filtro de porta até que um slot seja selecionado
+        self.uplink_ddm_port_filter.blockSignals(True)
+        self.uplink_ddm_port_filter.clear()
+        self.uplink_ddm_port_filter.addItem("Todas as Portas")
+        self.uplink_ddm_port_filter.setEnabled(False)
+        self.uplink_ddm_port_filter.blockSignals(False)
+        
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            try:
+                # Extrai o IP da OLT
+                olt_ip = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                
+                # Busca slots distintos para essa OLT
+                query = "SELECT DISTINCT slot FROM uplink_ddm_data WHERE olt_ip = %s ORDER BY slot"
+                self.cursor.execute(query, (olt_ip,))
+                slots = [row[0] for row in self.cursor.fetchall()]
+                
+                for slot in slots:
+                    self.uplink_ddm_slot_filter.addItem(str(slot))
+                
+                # Habilita o filtro de slot
+                self.uplink_ddm_slot_filter.setEnabled(True)
+                
+                logging.info(f"Slots carregados para {olt_ip}: {slots}")
+            except Exception as e:
+                logging.error(f"Erro ao carregar slots para filtro DDM: {e}")
+                if self.conn:
+                    self.conn.rollback()
+        else:
+            # Desabilita o filtro de slot se nenhuma OLT for selecionada
+            self.uplink_ddm_slot_filter.setEnabled(False)
+            logging.info("Nenhuma OLT selecionada, filtro de slot desabilitado")
+        
+        self.uplink_ddm_slot_filter.blockSignals(False)
+        
+        # Carrega os dados após atualizar os filtros
+        self.load_uplink_ddm_data()
+
+    def update_ddm_port_filter(self):
+        """Atualiza o filtro de Porta com base na OLT e Slot selecionados"""
+        selected_olt = self.uplink_ddm_olt_filter.currentText()
+        selected_slot = self.uplink_ddm_slot_filter.currentText()
+        
+        # Bloqueia sinais
+        self.uplink_ddm_port_filter.blockSignals(True)
+        self.uplink_ddm_port_filter.clear()
+        self.uplink_ddm_port_filter.addItem("Todas as Portas")
+        
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            if selected_slot and selected_slot != "Todos os Slots":
+                try:
+                    # Extrai o IP da OLT
+                    olt_ip = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                    
+                    # Busca portas distintas para essa OLT e slot
+                    query = "SELECT DISTINCT port FROM uplink_ddm_data WHERE olt_ip = %s AND slot = %s ORDER BY port"
+                    self.cursor.execute(query, (olt_ip, selected_slot))
+                    ports = [row[0] for row in self.cursor.fetchall()]
+                    
+                    for port in ports:
+                        self.uplink_ddm_port_filter.addItem(str(port))
+                    
+                    # Habilita o filtro de porta
+                    self.uplink_ddm_port_filter.setEnabled(True)
+                    
+                    logging.info(f"Portas carregadas para {olt_ip}, slot {selected_slot}: {ports}")
+                except Exception as e:
+                    logging.error(f"Erro ao carregar portas para filtro DDM: {e}")
+                    if self.conn:
+                        self.conn.rollback()
+            else:
+                # Se "Todos os Slots" for selecionado, busca todas as portas da OLT
+                try:
+                    olt_ip = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                    
+                    query = "SELECT DISTINCT port FROM uplink_ddm_data WHERE olt_ip = %s ORDER BY port"
+                    self.cursor.execute(query, (olt_ip,))
+                    ports = [row[0] for row in self.cursor.fetchall()]
+                    
+                    for port in ports:
+                        self.uplink_ddm_port_filter.addItem(str(port))
+                    
+                    self.uplink_ddm_port_filter.setEnabled(True)
+                    
+                    logging.info(f"Portas carregadas para {olt_ip} (todos os slots): {ports}")
+                except Exception as e:
+                    logging.error(f"Erro ao carregar portas para filtro DDM: {e}")
+                    if self.conn:
+                        self.conn.rollback()
+        else:
+            # Desabilita o filtro de porta se nenhuma OLT for selecionada
+            self.uplink_ddm_port_filter.setEnabled(False)
+            logging.info("Nenhuma OLT selecionada, filtro de porta desabilitado")
+        
+        self.uplink_ddm_port_filter.blockSignals(False)
+        
+        # Carrega os dados após atualizar os filtros
+        self.load_uplink_ddm_data()
 
     def load_uplink_ddm_data(self):
         """Carrega os dados DDM do banco de dados e exibe na tabela"""
         logging.info("Método load_uplink_ddm_data chamado para atualizar a tabela DDM.")
         
         selected_olt = self.uplink_ddm_olt_filter.currentText()
-        logging.info(f"OLT selecionada para filtro: '{selected_olt}'")
+        selected_slot = self.uplink_ddm_slot_filter.currentText()
+        selected_port = self.uplink_ddm_port_filter.currentText()
+        
+        logging.info(f"Filtros selecionados - OLT: '{selected_olt}', Slot: '{selected_slot}', Porta: '{selected_port}'")
         
         # Atualiza status de carregamento
         self.update_ddm_status("Carregando dados...")
@@ -4391,7 +4533,7 @@ class OLTDatabaseGUI(QMainWindow):
                                 "Verifique se a coleta de dados DDM está ativada.")
                 return
             
-            # Constrói a consulta SQL de forma mais segura
+            # Constrói a consulta SQL com base nos filtros
             base_query = """
                 SELECT olt_ip, placa, slot, port, 
                     temperature_c, supply_voltage_v, tx_bias_current_ma,
@@ -4403,17 +4545,37 @@ class OLTDatabaseGUI(QMainWindow):
             params = []
             conditions = []
             
-            # Adiciona filtro de OLT se selecionado e não for "Todas as OLTs"
+            # Adiciona filtro de OLT se selecionado
             if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
-                # Extrai o IP da OLT do formato "OLT X.X.X.X"
+                # Extrai o IP da OLT
                 olt_ip = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
-                # Verifica se o IP é válido (formato IPv4 básico)
+                # Verifica se o IP é válido
                 if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', olt_ip):
                     conditions.append("olt_ip = %s")
                     params.append(olt_ip)
                     logging.info(f"Adicionando filtro para OLT: {olt_ip}")
                 else:
                     logging.warning(f"IP de OLT inválido: {olt_ip}. Ignorando filtro.")
+            
+            # Adiciona filtro de Slot se selecionado
+            if selected_slot and selected_slot != "Todos os Slots":
+                try:
+                    slot_num = int(selected_slot)
+                    conditions.append("slot = %s")
+                    params.append(slot_num)
+                    logging.info(f"Adicionando filtro para Slot: {slot_num}")
+                except ValueError:
+                    logging.warning(f"Valor de slot inválido: {selected_slot}. Ignorando filtro.")
+            
+            # Adiciona filtro de Porta se selecionado
+            if selected_port and selected_port != "Todas as Portas":
+                try:
+                    port_num = int(selected_port)
+                    conditions.append("port = %s")
+                    params.append(port_num)
+                    logging.info(f"Adicionando filtro para Porta: {port_num}")
+                except ValueError:
+                    logging.warning(f"Valor de porta inválido: {selected_port}. Ignorando filtro.")
             
             # Constrói a consulta final
             query = base_query
@@ -4433,7 +4595,7 @@ class OLTDatabaseGUI(QMainWindow):
             
             # Se não encontrou registros, verifica se há dados na tabela
             if len(records) == 0:
-                logging.warning("Nenhum registro encontrado na tabela uplink_ddm_data.")
+                logging.warning("Nenhum registro encontrado com os filtros atuais.")
                 # Verifica quantos registros totais existem
                 cursor.execute("SELECT COUNT(*) FROM uplink_ddm_data")
                 total_count = cursor.fetchone()[0]
@@ -4445,6 +4607,8 @@ class OLTDatabaseGUI(QMainWindow):
                                         "A tabela uplink_ddm_data existe mas não contém registros.\n"
                                         "Verifique se a coleta de dados DDM está funcionando.")
                     return
+                else:
+                    self.update_ddm_status("Nenhum registro encontrado com os filtros atuais")
             
             # Limpa a tabela antes de preencher
             self.uplink_ddm_table.setRowCount(0)
