@@ -286,19 +286,19 @@ class OLTDatabaseGUI(QMainWindow):
         """Manipula eventos de mudança de aba, controlando timers e sessões."""
         current_tab = self.tab_widget.widget(index)
         
-        # Lógica para a aba de Estatísticas por Caixa
-        # Em handle_tab_change, na parte do tráfego ONT
+        # No método handle_tab_change, adicione ou modifique este trecho:
+
         if current_tab == self.ont_traffic_tab:
             logging.info("Aba 'Dados ONT por PON' ativada. Iniciando timer.")
-            self.ont_traffic_timer.start()
             # Carrega as OLTs disponíveis no filtro
-            self.load_olt_list_for_traffic_tab()
+            self.load_ont_traffic_olt_list()
             # Carrega os dados imediatamente
             QTimer.singleShot(100, self.load_ont_traffic_data)
+            self.ont_traffic_timer.start()
         else:
-            if self.caixa_stats_update_timer and self.caixa_stats_update_timer.isActive():
-                logging.info("Saindo da aba de estatísticas. Parando timer.")
-                self.caixa_stats_update_timer.stop()
+            if hasattr(self, 'ont_traffic_timer') and self.ont_traffic_timer.isActive():
+                logging.info("Saindo da aba de tráfego ONT. Parando timer.")
+                self.ont_traffic_timer.stop()
         
         # --- NOVA LÓGICA PARA A NOVA ABA ---
         # Lógica para a aba de Longo Tempo Offline
@@ -363,17 +363,6 @@ class OLTDatabaseGUI(QMainWindow):
                 self.ont_stats_timer.stop()
         # --- FIM DA MODIFICAÇÃO ---
 
-        # Em handle_tab_change, na parte do tráfego ONT
-        if current_tab == self.ont_traffic_tab:
-            logging.info("Aba 'Dados ONT por PON' ativada. Iniciando timer.")
-            QTimer.singleShot(100, self.load_ont_traffic_data)
-            self.load_ont_traffic_data()
-            self.ont_traffic_timer.start()
-        else:
-            if hasattr(self, 'ont_traffic_timer') and self.ont_traffic_timer.isActive():
-                logging.info("Saindo da aba de tráfego ONT. Parando timer.")
-                self.ont_traffic_timer.stop()
-                
         # Em handle_tab_change, adicione esta parte
         if current_tab == self.ont_eth_tab:
             logging.info("Aba 'ONT Ethernet' ativada. Iniciando timer.")
@@ -3861,7 +3850,7 @@ class OLTDatabaseGUI(QMainWindow):
         """Configura a interface da aba 'Dados ONT por PON'."""
         layout = QVBoxLayout(self.ont_traffic_tab)
         
-        # Painel de controle
+        # --- PAINEL DE CONTROLE COM FILTROS ---
         control_panel = QWidget()
         control_layout = QHBoxLayout(control_panel)
         
@@ -3872,45 +3861,117 @@ class OLTDatabaseGUI(QMainWindow):
         # Filtro de F/S/P
         self.ont_traffic_fsp_filter = QComboBox()
         self.ont_traffic_fsp_filter.addItem("Todas as PONs")
+        self.ont_traffic_fsp_filter.setEnabled(False)  # Inicialmente desabilitado
         
-        # Conecta os sinais
+        # Filtro de ONT ID
+        self.ont_traffic_ont_id_filter = QComboBox()
+        self.ont_traffic_ont_id_filter.addItem("Todas as ONTs")
+        self.ont_traffic_ont_id_filter.setEnabled(False)  # Inicialmente desabilitado
+        
+        # Conecta os sinais para atualização dinâmica
         self.ont_traffic_olt_filter.currentTextChanged.connect(self.update_ont_traffic_fsp_filter)
-        self.ont_traffic_fsp_filter.currentTextChanged.connect(self.load_ont_traffic_data)
+        self.ont_traffic_fsp_filter.currentTextChanged.connect(self.update_ont_traffic_ont_id_filter)
+        self.ont_traffic_ont_id_filter.currentTextChanged.connect(self.load_ont_traffic_data)
         
         control_layout.addWidget(QLabel("OLT:"))
         control_layout.addWidget(self.ont_traffic_olt_filter)
         control_layout.addWidget(QLabel("F/S/P:"))
         control_layout.addWidget(self.ont_traffic_fsp_filter)
+        control_layout.addWidget(QLabel("ONT ID:"))
+        control_layout.addWidget(self.ont_traffic_ont_id_filter)
         
-        # Adicione um indicador de carregamento
-        self.traffic_loading_label = QLabel("Carregando...")
-        self.traffic_loading_label.setStyleSheet("color: blue; font-weight: bold;")
-        self.traffic_loading_label.setVisible(False)
-        control_layout.addWidget(self.traffic_loading_label)
+        # Botões de ação
+        refresh_btn = QPushButton("Atualizar")
+        refresh_btn.clicked.connect(self.load_ont_traffic_data)
         
+        export_btn = QPushButton("Exportar CSV")
+        export_btn.clicked.connect(self.export_ont_traffic_to_csv)
+        
+        control_layout.addWidget(refresh_btn)
+        control_layout.addWidget(export_btn)
         control_layout.addStretch()
         layout.addWidget(control_panel)
         
+        # Tabela de dados
         self.ont_traffic_table = QTableWidget()
         self.ont_traffic_table.setColumnCount(6)
         self.ont_traffic_table.setHorizontalHeaderLabels([
             "OLT", "F/S/P", "ONT ID", "Upload (kbps)", "Download (kbps)", "Hora"
         ])
         self.ont_traffic_table.setSortingEnabled(True)
+        self.ont_traffic_table.setEditTriggers(QTableWidget.NoEditTriggers)
         layout.addWidget(self.ont_traffic_table)
         
-        self.ont_traffic_timer = QTimer(self)
-        self.ont_traffic_timer.setInterval(60000) # Atualiza a cada minuto
-        self.ont_traffic_timer.timeout.connect(self.load_ont_traffic_data)
+        # --- RODAPÉ COM CONTADOR DE REGISTROS ---
+        footer_panel = QWidget()
+        footer_layout = QHBoxLayout(footer_panel)
+        footer_layout.setContentsMargins(0, 5, 0, 0)
         
-        # Carrega as OLTs disponíveis no filtro
-        self.load_olt_list_for_traffic_tab()
+        # Adiciona o contador de registros
+        self.ont_traffic_record_count = QLabel("Status: 0 registros")
+        self.ont_traffic_record_count.setStyleSheet("color: green; font-weight: bold;")
+        footer_layout.addWidget(self.ont_traffic_record_count)
+        footer_layout.addStretch()
+        
+        layout.addWidget(footer_panel)
+        
+        # Timer para atualização automática
+        self.ont_traffic_timer = QTimer(self)
+        self.ont_traffic_timer.setInterval(60000)  # 1 minuto
+        
+        # Carrega as OLTs disponíveis
+        self.load_ont_traffic_olt_list()
+
+    def load_ont_traffic_olt_list(self):
+        """Carrega a lista de OLTs disponíveis na tabela de tráfego ONT"""
+        try:
+            self.ont_traffic_olt_filter.blockSignals(True)
+            self.ont_traffic_olt_filter.clear()
+            self.ont_traffic_olt_filter.addItem("Todas as OLTs")
+            
+            # Verifica se a conexão está ativa
+            if not self.conn or self.conn.closed:
+                logging.warning("Conexão com o banco fechada, tentando reconectar...")
+                self.connect_to_db()
+                if not self.conn or self.conn.closed:
+                    raise Exception("Não foi possível estabelecer conexão com o banco de dados")
+            
+            # Busca OLTs distintas na tabela de tráfego
+            query = "SELECT DISTINCT olt_ip FROM ont_traffic_data ORDER BY olt_ip"
+            self.cursor.execute(query)
+            olts = [row[0] for row in self.cursor.fetchall()]
+            
+            for olt_ip in olts:
+                self.ont_traffic_olt_filter.addItem(f"OLT {olt_ip}")
+            
+            self.ont_traffic_olt_filter.blockSignals(False)
+            logging.info(f"OLTs carregadas para filtro de tráfego ONT: {olts}")
+            
+            # Se houver OLTs, seleciona a primeira por padrão
+            if olts and self.ont_traffic_olt_filter.count() > 1:
+                self.ont_traffic_olt_filter.setCurrentIndex(1)  # Pula "Todas as OLTs"
+                logging.info(f"OLT padrão selecionada: {self.ont_traffic_olt_filter.currentText()}")
+                
+        except Exception as e:
+            logging.error(f"Erro ao carregar OLTs para filtro de tráfego ONT: {e}", exc_info=True)
+            if self.conn:
+                self.conn.rollback()
+            self.ont_traffic_olt_filter.addItem("Erro ao carregar")
+            self.ont_traffic_olt_filter.blockSignals(False)
+
 
     def update_ont_traffic_fsp_filter(self):
         """Atualiza o filtro de F/S/P com base na OLT selecionada."""
         self.ont_traffic_fsp_filter.blockSignals(True)
         self.ont_traffic_fsp_filter.clear()
         self.ont_traffic_fsp_filter.addItem("Todas as PONs")
+        
+        # Bloqueia os filtros dependentes
+        self.ont_traffic_ont_id_filter.blockSignals(True)
+        self.ont_traffic_ont_id_filter.clear()
+        self.ont_traffic_ont_id_filter.addItem("Todas as ONTs")
+        self.ont_traffic_ont_id_filter.setEnabled(False)
+        self.ont_traffic_ont_id_filter.blockSignals(False)
         
         selected_olt = self.ont_traffic_olt_filter.currentText()
         logging.info(f"Atualizando F/S/P para OLT: {selected_olt}")
@@ -3929,6 +3990,9 @@ class OLTDatabaseGUI(QMainWindow):
                 
                 self.ont_traffic_fsp_filter.addItems(fsps)
                 
+                # Habilita o filtro de F/S/P
+                self.ont_traffic_fsp_filter.setEnabled(True)
+                
                 # Se houver F/S/P, seleciona o primeiro
                 if fsps:
                     self.ont_traffic_fsp_filter.setCurrentIndex(0)
@@ -3938,8 +4002,157 @@ class OLTDatabaseGUI(QMainWindow):
                     self.conn.rollback()
         else:
             logging.info("Nenhuma OLT selecionada, F/S/P não será filtrado")
+            # Desabilita o filtro de F/S/P se nenhuma OLT for selecionada
+            self.ont_traffic_fsp_filter.setEnabled(False)
         
         self.ont_traffic_fsp_filter.blockSignals(False)
+        
+        # Carrega os dados após atualizar os filtros
+        self.load_ont_traffic_data()
+
+    def update_ont_traffic_ont_id_filter(self):
+        """Atualiza o filtro de ONT ID com base na OLT e F/S/P selecionados para a aba de tráfego ONT."""
+        selected_olt = self.ont_traffic_olt_filter.currentText()
+        selected_fsp = self.ont_traffic_fsp_filter.currentText()
+        
+        # Bloqueia sinais
+        self.ont_traffic_ont_id_filter.blockSignals(True)
+        self.ont_traffic_ont_id_filter.clear()
+        self.ont_traffic_ont_id_filter.addItem("Todas as ONTs")
+        
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            try:
+                # Extrai o IP da OLT
+                olt_ip = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                
+                if selected_fsp and selected_fsp != "Todas as PONs":
+                    # Busca ONT IDs distintos para essa OLT e F/S/P
+                    query = "SELECT DISTINCT ont_id FROM ont_traffic_data WHERE olt_ip = %s AND fsp = %s ORDER BY ont_id"
+                    self.cursor.execute(query, (olt_ip, selected_fsp))
+                    ont_ids = [row[0] for row in self.cursor.fetchall()]
+                    
+                    for ont_id in ont_ids:
+                        self.ont_traffic_ont_id_filter.addItem(str(ont_id))
+                    
+                    # Habilita o filtro de ONT ID
+                    self.ont_traffic_ont_id_filter.setEnabled(True)
+                    
+                    logging.info(f"ONT IDs carregados para {olt_ip}, F/S/P {selected_fsp}: {ont_ids}")
+                else:
+                    # Se "Todas as PONs" for selecionado, busca todos os ONT IDs da OLT
+                    query = "SELECT DISTINCT ont_id FROM ont_traffic_data WHERE olt_ip = %s ORDER BY ont_id"
+                    self.cursor.execute(query, (olt_ip,))
+                    ont_ids = [row[0] for row in self.cursor.fetchall()]
+                    
+                    for ont_id in ont_ids:
+                        self.ont_traffic_ont_id_filter.addItem(str(ont_id))
+                    
+                    self.ont_traffic_ont_id_filter.setEnabled(True)
+                    
+                    logging.info(f"ONT IDs carregados para {olt_ip} (todas as PONs): {ont_ids}")
+            except Exception as e:
+                logging.error(f"Erro ao carregar ONT IDs para filtro de tráfego ONT: {e}")
+                if self.conn:
+                    self.conn.rollback()
+        else:
+            # Desabilita o filtro de ONT ID se nenhuma OLT for selecionada
+            self.ont_traffic_ont_id_filter.setEnabled(False)
+            logging.info("Nenhuma OLT selecionada, filtro de ONT ID desabilitado")
+        
+        self.ont_traffic_ont_id_filter.blockSignals(False)
+        
+        # Carrega os dados após atualizar os filtros
+        self.load_ont_traffic_data()
+
+    def export_ont_traffic_to_csv(self):
+        """Exporta os dados da tabela de tráfego ONT para um arquivo CSV"""
+        if self.ont_traffic_table.rowCount() == 0:
+            QMessageBox.information(self, "Nada para Exportar", "A tabela de tráfego ONT está vazia.")
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Tráfego ONT", 
+            f"ont_traffic_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "Arquivos CSV (*.csv);;Todos os Arquivos (*)"
+        )
+        
+        if not filename:
+            return
+        
+        try:
+            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile, delimiter=';')
+                
+                # Escreve cabeçalho
+                headers = [self.ont_traffic_table.horizontalHeaderItem(col).text() 
+                        for col in range(self.ont_traffic_table.columnCount())]
+                writer.writerow(headers)
+                
+                # Escreve dados
+                for row in range(self.ont_traffic_table.rowCount()):
+                    row_data = [self.ont_traffic_table.item(row, col).text() 
+                            for col in range(self.ont_traffic_table.columnCount())]
+                    writer.writerow(row_data)
+            
+            QMessageBox.information(self, "Exportação Concluída", 
+                                f"Dados exportados com sucesso para:\n{filename}")
+            logging.info(f"Dados de tráfego ONT exportados para {filename}")
+            
+        except Exception as e:
+            logging.error(f"Erro ao exportar dados de tráfego ONT: {e}")
+            QMessageBox.critical(self, "Erro de Exportação", 
+                            f"Não foi possível exportar os dados:\n{str(e)}")
+
+    def update_ont_traffic_ont_id_filter(self):
+        """Atualiza o filtro de ONT ID com base na OLT e F/S/P selecionados para a aba de tráfego ONT."""
+        selected_olt = self.ont_traffic_olt_filter.currentText()
+        selected_fsp = self.ont_traffic_fsp_filter.currentText()
+        
+        # Bloqueia sinais
+        self.ont_traffic_ont_id_filter.blockSignals(True)
+        self.ont_traffic_ont_id_filter.clear()
+        self.ont_traffic_ont_id_filter.addItem("Todas as ONTs")
+        
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            try:
+                # Extrai o IP da OLT
+                olt_ip = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                
+                if selected_fsp and selected_fsp != "Todas as PONs":
+                    # Busca ONT IDs distintos para essa OLT e F/S/P
+                    query = "SELECT DISTINCT ont_id FROM ont_traffic_data WHERE olt_ip = %s AND fsp = %s ORDER BY ont_id"
+                    self.cursor.execute(query, (olt_ip, selected_fsp))
+                    ont_ids = [row[0] for row in self.cursor.fetchall()]
+                    
+                    for ont_id in ont_ids:
+                        self.ont_traffic_ont_id_filter.addItem(str(ont_id))
+                    
+                    # Habilita o filtro de ONT ID
+                    self.ont_traffic_ont_id_filter.setEnabled(True)
+                    
+                    logging.info(f"ONT IDs carregados para {olt_ip}, F/S/P {selected_fsp}: {ont_ids}")
+                else:
+                    # Se "Todas as PONs" for selecionado, busca todos os ONT IDs da OLT
+                    query = "SELECT DISTINCT ont_id FROM ont_traffic_data WHERE olt_ip = %s ORDER BY ont_id"
+                    self.cursor.execute(query, (olt_ip,))
+                    ont_ids = [row[0] for row in self.cursor.fetchall()]
+                    
+                    for ont_id in ont_ids:
+                        self.ont_traffic_ont_id_filter.addItem(str(ont_id))
+                    
+                    self.ont_traffic_ont_id_filter.setEnabled(True)
+                    
+                    logging.info(f"ONT IDs carregados para {olt_ip} (todas as PONs): {ont_ids}")
+            except Exception as e:
+                logging.error(f"Erro ao carregar ONT IDs para filtro de tráfego ONT: {e}")
+                if self.conn:
+                    self.conn.rollback()
+        else:
+            # Desabilita o filtro de ONT ID se nenhuma OLT for selecionada
+            self.ont_traffic_ont_id_filter.setEnabled(False)
+            logging.info("Nenhuma OLT selecionada, filtro de ONT ID desabilitado")
+        
+        self.ont_traffic_ont_id_filter.blockSignals(False)
         
         # Carrega os dados após atualizar os filtros
         self.load_ont_traffic_data()
@@ -3965,6 +4178,7 @@ class OLTDatabaseGUI(QMainWindow):
             # Obter os filtros selecionados
             selected_olt = self.ont_traffic_olt_filter.currentText()
             selected_fsp = self.ont_traffic_fsp_filter.currentText()
+            selected_ont_id = self.ont_traffic_ont_id_filter.currentText()
             
             # Construir a consulta SQL com base nos filtros
             query = """
@@ -3988,6 +4202,16 @@ class OLTDatabaseGUI(QMainWindow):
                 query += " AND fsp = %s"
                 params.append(selected_fsp)
                 logging.info(f"Filtrando por F/S/P: {selected_fsp}")
+            
+            # Aplicar filtro de ONT ID se selecionado
+            if selected_ont_id and selected_ont_id != "Todas as ONTs":
+                try:
+                    ont_id_num = int(selected_ont_id)
+                    query += " AND ont_id = %s"
+                    params.append(ont_id_num)
+                    logging.info(f"Filtrando por ONT ID: {ont_id_num}")
+                except ValueError:
+                    logging.warning(f"ONT ID inválido: {selected_ont_id}")
             
             query += " ORDER BY collection_time DESC LIMIT 5000"
             
@@ -4020,9 +4244,21 @@ class OLTDatabaseGUI(QMainWindow):
             
             logging.info(f"Tabela de tráfego ONT atualizada com {len(results)} registros.")
             
+            # Atualiza o contador de registros com estilo normal
+            if hasattr(self, 'ont_traffic_record_count'):
+                self.ont_traffic_record_count.setText(f"Status: {len(results)} registros carregados")
+                self.ont_traffic_record_count.setStyleSheet("color: green; font-weight: bold;")
+            
         except Exception as e:
             logging.error(f"Erro ao carregar dados de tráfego por ONT: {str(e)}", exc_info=True)
-            QMessageBox.critical(self, "Erro", f"Erro ao carregar dados de tráfego por ONT: {str(e)}")
+            
+            # Atualiza o contador para mostrar erro com estilo vermelho e negrito
+            if hasattr(self, 'ont_traffic_record_count'):
+                self.ont_traffic_record_count.setText("Status: Erro ao carregar dados")
+                self.ont_traffic_record_count.setStyleSheet("color: red; font-weight: bold;")
+            
+            if conn:
+                conn.rollback()
         finally:
             if conn:
                 conn.close()
@@ -4030,6 +4266,45 @@ class OLTDatabaseGUI(QMainWindow):
             if hasattr(self, 'traffic_loading_label'):
                 self.traffic_loading_label.setVisible(False)
             self._loading_ont_traffic = False  # Libera o flag
+
+    def export_ont_traffic_to_csv(self):
+        """Exporta os dados da tabela de tráfego ONT para um arquivo CSV"""
+        if self.ont_traffic_table.rowCount() == 0:
+            QMessageBox.information(self, "Nada para Exportar", "A tabela de tráfego ONT está vazia.")
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Tráfego ONT", 
+            f"ont_traffic_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "Arquivos CSV (*.csv);;Todos os Arquivos (*)"
+        )
+        
+        if not filename:
+            return
+        
+        try:
+            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile, delimiter=';')
+                
+                # Escreve cabeçalho
+                headers = [self.ont_traffic_table.horizontalHeaderItem(col).text() 
+                        for col in range(self.ont_traffic_table.columnCount())]
+                writer.writerow(headers)
+                
+                # Escreve dados
+                for row in range(self.ont_traffic_table.rowCount()):
+                    row_data = [self.ont_traffic_table.item(row, col).text() 
+                            for col in range(self.ont_traffic_table.columnCount())]
+                    writer.writerow(row_data)
+            
+            QMessageBox.information(self, "Exportação Concluída", 
+                                f"Dados exportados com sucesso para:\n{filename}")
+            logging.info(f"Dados de tráfego ONT exportados para {filename}")
+            
+        except Exception as e:
+            logging.error(f"Erro ao exportar dados de tráfego ONT: {e}")
+            QMessageBox.critical(self, "Erro de Exportação", 
+                            f"Não foi possível exportar os dados:\n{str(e)}")
 
     def update_ont_traffic_display(self):
         """Atualiza a exibição de tráfego de ONT se a aba estiver ativa."""
@@ -4115,6 +4390,19 @@ class OLTDatabaseGUI(QMainWindow):
         self.ont_stats_table.setSortingEnabled(True)
         self.ont_stats_table.setEditTriggers(QTableWidget.NoEditTriggers)
         layout.addWidget(self.ont_stats_table)
+        
+        # --- RODAPÉ COM CONTADOR DE REGISTROS ---
+        footer_panel = QWidget()
+        footer_layout = QHBoxLayout(footer_panel)
+        footer_layout.setContentsMargins(0, 5, 0, 0)
+        
+        # Adiciona o contador de registros
+        self.ont_stats_record_count = QLabel("Status: 0 registros")
+        self.ont_stats_record_count.setStyleSheet("color: green; font-weight: bold;")
+        footer_layout.addWidget(self.ont_stats_record_count)
+        footer_layout.addStretch()
+        
+        layout.addWidget(footer_panel)
         
         # --- TIMER PARA ATUALIZAÇÃO AUTOMÁTICA ---
         self.ont_stats_timer = QTimer(self)
@@ -4339,15 +4627,25 @@ class OLTDatabaseGUI(QMainWindow):
                         self.ont_stats_table.item(row_idx, col).setBackground(QColor("#FFCDD2")) # Vermelho claro
             
             self.ont_stats_table.resizeColumnsToContents()
+            
+            # Atualiza o contador de registros com estilo normal
+            if hasattr(self, 'ont_stats_record_count'):
+                self.ont_stats_record_count.setText(f"Status: {len(results)} registros carregados")
+                self.ont_stats_record_count.setStyleSheet("color: green; font-weight: bold;")
+            
             logging.info(f"{len(results)} registros de estatísticas de ONT carregados.")
             
         except Exception as e:
             logging.error(f"Erro ao carregar estatísticas de pacotes de ONT: {e}", exc_info=True)
             if self.conn: 
                 self.conn.rollback() # Limpa a transação em caso de erro
+            
+            # Atualiza o contador para mostrar erro com estilo vermelho e negrito
+            if hasattr(self, 'ont_stats_record_count'):
+                self.ont_stats_record_count.setText("Status: Erro ao carregar dados")
+                self.ont_stats_record_count.setStyleSheet("color: red; font-weight: bold;")
         finally:
             self.ont_stats_table.setSortingEnabled(True)
-
 
     def export_ont_stats_to_csv(self):
         """Exporta os dados da tabela de estatísticas de ONT para um arquivo CSV"""
@@ -4862,7 +5160,7 @@ class OLTDatabaseGUI(QMainWindow):
             
             # Atualiza status
             if hasattr(self, 'ont_eth_status_label'):
-                self.ont_eth_status_label.setText(f"Status: {self.ont_eth_table.rowCount()} registros")
+                self.ont_eth_status_label.setText(f"Status: {self.ont_eth_table.rowCount()} registros carregados")
                 self.ont_eth_status_label.setStyleSheet("color: green; font-weight: bold;")
                 
         except Exception as e:
