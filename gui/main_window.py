@@ -3736,51 +3736,87 @@ class OLTDatabaseGUI(QMainWindow):
             self.load_pon_traffic_data()
 
     def setup_pon_stats_tab(self):
-        """Configura a interface da aba 'Estatísticas da PON' com layout ultra compacto e categorização."""
+        """Configura a interface da aba 'Estatísticas da PON' com uma única tabela completa."""
         layout = QVBoxLayout(self.pon_stats_tab)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # Painel de controle ultra compacto
+        # Painel de controle com filtros
         control_panel = QWidget()
-        control_panel.setMaximumHeight(25)
+        control_panel.setMaximumHeight(45)
         control_layout = QHBoxLayout(control_panel)
         control_layout.setContentsMargins(5, 2, 5, 2)
         control_layout.setSpacing(5)
         
-        # Filtros
+        # Filtro de OLT
         self.pon_stats_olt_filter = QComboBox()
-        self.pon_stats_olt_filter.setMaximumWidth(120)
+        self.pon_stats_olt_filter.setMaximumWidth(100)
         self.pon_stats_olt_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         if self.pon_stats_olt_filter not in self.olt_filters_to_update:
             self.olt_filters_to_update.append(self.pon_stats_olt_filter)
         
+        # Filtro de F/S/P
         self.pon_stats_fsp_filter = QComboBox()
         self.pon_stats_fsp_filter.addItem("Todas as PONs")
         self.pon_stats_fsp_filter.setEnabled(False)
-        self.pon_stats_fsp_filter.setMaximumWidth(100)
+        self.pon_stats_fsp_filter.setMaximumWidth(80)
         self.pon_stats_fsp_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         
+        # Filtro de Direção (RX/TX/Todos)
+        self.pon_stats_direction_filter = QComboBox()
+        self.pon_stats_direction_filter.addItem("Todos")
+        self.pon_stats_direction_filter.addItems(["RX", "TX"])
+        self.pon_stats_direction_filter.setMaximumWidth(60)
+        
+        # Filtro de Métrica
+        self.pon_stats_metric_filter = QComboBox()
+        self.pon_stats_metric_filter.addItem("Todas as Métricas")
+        self.pon_stats_metric_filter.setEnabled(False)
+        self.pon_stats_metric_filter.setMaximumWidth(150)
+        self.pon_stats_metric_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        
+        # Filtro de Categoria
+        self.pon_stats_category_filter = QComboBox()
+        self.pon_stats_category_filter.addItem("Todas as Categorias")
+        self.pon_stats_category_filter.addItems(["Normal ✅", "Atenção ⚠️", "Crítico 🚨"])
+        self.pon_stats_category_filter.setMaximumWidth(120)
+        self.pon_stats_category_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        
         # Conecta sinais
-        self.pon_stats_olt_filter.currentTextChanged.connect(self.update_pon_stats_fsp_filter)
+        self.pon_stats_olt_filter.currentTextChanged.connect(self.update_pon_stats_filters)
         self.pon_stats_fsp_filter.currentTextChanged.connect(self.load_pon_stats_data)
+        self.pon_stats_direction_filter.currentTextChanged.connect(self.load_pon_stats_data)
+        self.pon_stats_metric_filter.currentTextChanged.connect(self.load_pon_stats_data)
+        self.pon_stats_category_filter.currentTextChanged.connect(self.load_pon_stats_data)
         
         # Labels mínimos
         olt_label = QLabel("OLT:")
         olt_label.setStyleSheet("font-size: 9px; padding: 0px;")
         fsp_label = QLabel("F/S/P:")
         fsp_label.setStyleSheet("font-size: 9px; padding: 0px;")
+        dir_label = QLabel("Dir.:")
+        dir_label.setStyleSheet("font-size: 9px; padding: 0px;")
+        metric_label = QLabel("Métrica:")
+        metric_label.setStyleSheet("font-size: 9px; padding: 0px;")
+        cat_label = QLabel("Cat.:")
+        cat_label.setStyleSheet("font-size: 9px; padding: 0px;")
         
         # Adiciona elementos
         control_layout.addWidget(olt_label)
         control_layout.addWidget(self.pon_stats_olt_filter)
         control_layout.addWidget(fsp_label)
         control_layout.addWidget(self.pon_stats_fsp_filter)
+        control_layout.addWidget(dir_label)
+        control_layout.addWidget(self.pon_stats_direction_filter)
+        control_layout.addWidget(metric_label)
+        control_layout.addWidget(self.pon_stats_metric_filter)
+        control_layout.addWidget(cat_label)
+        control_layout.addWidget(self.pon_stats_category_filter)
         control_layout.addStretch()
         
         # Botão de legenda
         legend_btn = QPushButton("Legenda")
-        legend_btn.setMaximumWidth(60)
+        legend_btn.setMaximumWidth(50)
         legend_btn.setStyleSheet("font-size: 8px; padding: 1px; background-color: #e1f5fe;")
         legend_btn.clicked.connect(self.show_pon_stats_legend)
         control_layout.addWidget(legend_btn)
@@ -3793,53 +3829,136 @@ class OLTDatabaseGUI(QMainWindow):
         
         layout.addWidget(control_panel)
         
-        # Splitter para as tabelas
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        splitter.setHandleWidth(1)
+        # Tabela única com todas as estatísticas
+        self.pon_stats_table = QTableWidget()
+        self.pon_stats_table.setColumnCount(7)  # F/S/P, Hora, Direção, Métrica, Valor, %, Cat.
+        self.pon_stats_table.setHorizontalHeaderLabels(["F/S/P", "Hora", "Dir.", "Métrica", "Valor", "%", "Cat."])
+        self.pon_stats_table.horizontalHeader().setMinimumHeight(20)
+        self.pon_stats_table.verticalHeader().setDefaultSectionSize(18)
         
-        # Configuração comum para ambos os grupos
-        def setup_table_group(title, table):
-            group = QGroupBox(title)
-            layout_group = QVBoxLayout(group)
-            layout_group.setContentsMargins(2, 15, 2, 2)
-            layout_group.setSpacing(0)
-            table.setColumnCount(5)  # Adicionada coluna de categoria
-            table.setHorizontalHeaderLabels(["F/S/P", "Hora", "Métrica", "Valor", "Cat."])
-            table.horizontalHeader().setMinimumHeight(20)
-            table.verticalHeader().setDefaultSectionSize(18)
-            # Ajuste de largura das colunas
-            table.setColumnWidth(0, 60)   # F/S/P
-            table.setColumnWidth(1, 70)   # Hora
-            table.setColumnWidth(2, 180)  # Métrica
-            table.setColumnWidth(3, 80)   # Valor
-            table.setColumnWidth(4, 30)   # Categoria
-            layout_group.addWidget(table)
-            return group
+        # Ajuste de largura das colunas
+        self.pon_stats_table.setColumnWidth(0, 60)   # F/S/P
+        self.pon_stats_table.setColumnWidth(1, 70)   # Hora
+        self.pon_stats_table.setColumnWidth(2, 35)   # Direção
+        self.pon_stats_table.setColumnWidth(3, 220)  # Métrica
+        self.pon_stats_table.setColumnWidth(4, 100)  # Valor
+        self.pon_stats_table.setColumnWidth(5, 50)   # Porcentagem
+        self.pon_stats_table.setColumnWidth(6, 30)   # Categoria
         
-        # Tabela de Recebimento (RX)
-        self.pon_stats_rx_table = QTableWidget()
-        rx_group = setup_table_group("Estatísticas de Recebimento (RX)", self.pon_stats_rx_table)
-        splitter.addWidget(rx_group)
-        
-        # Tabela de Envio (TX)
-        self.pon_stats_tx_table = QTableWidget()
-        tx_group = setup_table_group("Estatísticas de Envio (TX)", self.pon_stats_tx_table)
-        splitter.addWidget(tx_group)
-        
-        splitter.setSizes([500, 500])
-        layout.addWidget(splitter)
+        layout.addWidget(self.pon_stats_table)
         
         # Timer
         self.pon_stats_timer = QTimer(self)
         self.pon_stats_timer.setInterval(60000)
         self.pon_stats_timer.timeout.connect(self.load_pon_stats_data)
 
+    def update_pon_stats_filters(self):
+        """Atualiza os filtros de F/S/P e Métrica com base na OLT selecionada."""
+        selected_olt = self.pon_stats_olt_filter.currentText()
+        
+        # Bloqueia sinais para evitar chamadas recursivas
+        self.pon_stats_fsp_filter.blockSignals(True)
+        self.pon_stats_fsp_filter.clear()
+        self.pon_stats_fsp_filter.addItem("Todas as PONs")
+        self.pon_stats_fsp_filter.setEnabled(False)
+        
+        self.pon_stats_metric_filter.blockSignals(True)
+        self.pon_stats_metric_filter.clear()
+        self.pon_stats_metric_filter.addItem("Todas as Métricas")
+        self.pon_stats_metric_filter.setEnabled(False)
+        
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            try:
+                # Extrai o identificador da OLT
+                olt_identifier = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                
+                # Busca F/S/P distintos para essa OLT
+                query_fsp = "SELECT DISTINCT fsp FROM pon_statistics_packets WHERE olt_identifier = %s ORDER BY fsp;"
+                self.cursor.execute(query_fsp, (olt_identifier,))
+                fsps = [row[0] for row in self.cursor.fetchall()]
+                
+                for fsp in fsps:
+                    self.pon_stats_fsp_filter.addItem(fsp)
+                
+                # Busca métricas distintas para essa OLT
+                query_metrics = """
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'pon_statistics_packets' 
+                    AND (column_name LIKE 'rx_%' OR column_name LIKE 'tx_%')
+                    ORDER BY column_name;
+                """
+                self.cursor.execute(query_metrics)
+                metrics = [row[0] for row in self.cursor.fetchall()]
+                
+                # Mapeamento de nomes amigáveis para as métricas
+                metric_names = {
+                    # Métricas RX
+                    'rx_frames': 'Quadros recebidos (total)',
+                    'rx_bytes': 'Bytes recebidos (total)',
+                    'rx_unicast_frames': 'Quadros unicast recebidos',
+                    'rx_multicast_frames': 'Quadros multicast recebidos',
+                    'rx_broadcast_frames': 'Quadros broadcast recebidos',
+                    'rx_64_byte_frames': 'Quadros de 64 bytes recebidos',
+                    'rx_65_127_byte_frames': 'Quadros de 65-127 bytes recebidos',
+                    'rx_128_255_byte_frames': 'Quadros de 128-255 bytes recebidos',
+                    'rx_256_511_byte_frames': 'Quadros de 256-511 bytes recebidos',
+                    'rx_512_1023_byte_frames': 'Quadros de 512-1023 bytes recebidos',
+                    'rx_1024_1518_byte_frames': 'Quadros de 1024-1518 bytes recebidos',
+                    'rx_over_1518_byte_frames': 'Quadros maiores que 1518 bytes recebidos',
+                    'rx_undersize_discarded_frames': 'Quadros menores que 64 bytes descartados',
+                    'rx_oversize_discarded_frames': 'Quadros maiores que permitido descartados',
+                    'rx_crc_error_frames': 'Quadros com erro de CRC recebidos',
+                    'rx_discarded_frames': 'Quadros descartados recebidos',
+                    'rx_error_frames': 'Quadros com erros (total) recebidos',
+                    # Métricas TX
+                    'tx_frames': 'Quadros enviados (total)',
+                    'tx_bytes': 'Bytes enviados (total)',
+                    'tx_unicast_frames': 'Quadros unicast enviados',
+                    'tx_multicast_frames': 'Quadros multicast enviados',
+                    'tx_broadcast_frames': 'Quadros broadcast enviados',
+                    'tx_64_byte_frames': 'Quadros de 64 bytes enviados',
+                    'tx_65_127_byte_frames': 'Quadros de 65-127 bytes enviados',
+                    'tx_128_255_byte_frames': 'Quadros de 128-255 bytes enviados',
+                    'tx_256_511_byte_frames': 'Quadros de 256-511 bytes enviados',
+                    'tx_512_1023_byte_frames': 'Quadros de 512-1023 bytes enviados',
+                    'tx_1024_1518_byte_frames': 'Quadros de 1024-1518 bytes enviados',
+                    'tx_over_1518_byte_frames': 'Quadros maiores que 1518 bytes enviados',
+                    'tx_multicast_bytes': 'Bytes multicast enviados',
+                    'tx_buffer_overflow_frames': 'Quadros descartados por overflow de buffer'
+                }
+                
+                # Adiciona métricas formatadas
+                for metric in metrics:
+                    formatted_name = metric_names.get(metric, metric.replace('_', ' ').title())
+                    self.pon_stats_metric_filter.addItem(formatted_name, metric)
+                
+                # Habilita os filtros
+                self.pon_stats_fsp_filter.setEnabled(True)
+                self.pon_stats_metric_filter.setEnabled(True)
+                
+                logging.info(f"F/S/P carregados para {olt_identifier}: {fsps}")
+                logging.info(f"Métricas carregadas para {olt_identifier}: {len(metrics)}")
+                
+            except Exception as e:
+                logging.error(f"Erro ao carregar filtros para estatísticas PON: {e}")
+                if self.conn:
+                    self.conn.rollback()
+        else:
+            logging.info("Nenhuma OLT selecionada, filtros desabilitados")
+        
+        self.pon_stats_fsp_filter.blockSignals(False)
+        self.pon_stats_metric_filter.blockSignals(False)
+        
+        # Carrega os dados após atualizar os filtros
+        self.load_pon_stats_data()
+
+
     def show_pon_stats_legend(self):
-        """Exibe uma janela com a legenda de categorias dos contadores PON"""
+        """Exibe uma janela com a legenda atualizada de categorias dos contadores PON."""
         dialog = QDialog(self)
-        dialog.setWindowTitle("Legenda - Categorias de Contadores PON")
-        dialog.setMinimumSize(700, 500)
+        dialog.setWindowTitle("Legenda - Estatísticas PON")
+        dialog.setMinimumSize(800, 600)
         dialog.setModal(True)
         
         layout = QVBoxLayout(dialog)
@@ -3848,7 +3967,33 @@ class OLTDatabaseGUI(QMainWindow):
         tab_widget = QTabWidget()
         layout.addWidget(tab_widget)
         
-        # Aba 1: Contadores Normais (Verde)
+        # Aba 1: Visão Geral
+        overview_tab = QWidget()
+        overview_layout = QVBoxLayout(overview_tab)
+        
+        overview_title = QLabel("<h2>📊 Visão Geral das Estatísticas PON</h2>")
+        overview_layout.addWidget(overview_title)
+        
+        overview_info = QLabel("""
+        <p>Esta aba mostra todas as estatísticas da porta PON em uma única tabela, seguindo o mesmo padrão do comando 
+        <code>display statistics port ethernet</code> dos equipamentos Huawei OLT.</p>
+        
+        <h3>Colunas da Tabela:</h3>
+        <ul>
+            <li><b>F/S/P:</b> Frame/Slot/Porta - identificação da porta PON</li>
+            <li><b>Hora:</b> Timestamp da coleta dos dados</li>
+            <li><b>Dir.:</b> Direção do tráfego (RX = Recebido, TX = Enviado)</li>
+            <li><b>Métrica:</b> Nome amigável do contador</li>
+            <li><b>Valor:</b> Valor absoluto do contador</li>
+            <li><b>%:</b> Porcentagem em relação ao total (quando aplicável)</li>
+            <li><b>Cat.:</b> Categoria do contador (✅ Normal, ⚠️ Atenção, 🚨 Crítico)</li>
+        </ul>
+        """)
+        overview_layout.addWidget(overview_info)
+        
+        tab_widget.addTab(overview_tab, "Visão Geral")
+        
+        # Aba 2: Contadores Normais (Verde)
         normal_tab = QWidget()
         normal_layout = QVBoxLayout(normal_tab)
         
@@ -3865,13 +4010,17 @@ class OLTDatabaseGUI(QMainWindow):
             <li><b>Frames por faixa de tamanho</b> → apenas estatística, esperado</li>
         </ul>
         <br>
-        <p><b>Monitoramento:</b> Apenas variações súbitas ou tráfego muito fora do padrão (ex.: broadcast disparado)</p>
+        <p><b>Regras de coloração:</b></p>
+        <ul>
+            <li><span style='color: #2e7d32;'>Verde:</span> Valores normais, mesmo que altos</li>
+            <li><span style='color: #f57c00;'>Amarelo:</span> Broadcast > 1000 frames ou Multicast > 5000 frames</li>
+        </ul>
         """)
         normal_layout.addWidget(normal_info)
         
         tab_widget.addTab(normal_tab, "Contadores Normais")
         
-        # Aba 2: Contadores de Atenção (Amarelo)
+        # Aba 3: Contadores de Atenção (Amarelo)
         warning_tab = QWidget()
         warning_layout = QVBoxLayout(warning_tab)
         
@@ -3881,18 +4030,22 @@ class OLTDatabaseGUI(QMainWindow):
         warning_info = QLabel("""
         <p><b>Se começarem a subir, já é observância (Warning):</b></p>
         <ul>
-            <li><b>Broadcast Frames</b> → não deve ser gigante; se ficar alto, pode causar lentidão</li>
-            <li><b>Multicast Frames</b> → depende do uso; se a rede não tem IPTV, deveria ser quase zero</li>
-            <li><b>Over 1518 Byte Frames</b> → quadros maiores que o MTU normal; se aparecer sem motivo (jumbo frames configurados), é suspeito</li>
+            <li><b>Over 1518 Byte Frames</b> → quadros maiores que o MTU normal</li>
+            <li><b>Broadcast Frames > 1000</b> → pode causar lentidão</li>
+            <li><b>Multicast Frames > 5000</b> → se não há IPTV, deveria ser quase zero</li>
         </ul>
         <br>
-        <p><b>Ação:</b> Investigar causa do aumento anormal</p>
+        <p><b>Regras de coloração:</b></p>
+        <ul>
+            <li><span style='color: #c8e6c9;'>Verde:</span> Valores dentro do limite (Broadcast ≤ 1000, Multicast ≤ 5000)</li>
+            <li><span style='color: #f57c00;'>Amarelo:</span> Valores acima do limite</li>
+        </ul>
         """)
         warning_layout.addWidget(warning_info)
         
         tab_widget.addTab(warning_tab, "Contadores de Atenção")
         
-        # Aba 3: Contadores Críticos (Vermelho)
+        # Aba 4: Contadores Críticos (Vermelho)
         critical_tab = QWidget()
         critical_layout = QVBoxLayout(critical_tab)
         
@@ -3902,12 +4055,18 @@ class OLTDatabaseGUI(QMainWindow):
         critical_info = QLabel("""
         <p><b>Esses apontam problemas reais de rede ou hardware. Qualquer número > 0 já merece atenção:</b></p>
         <ul>
-            <li><b>Undersize Discarded Frames</b> → pacote abaixo do tamanho mínimo (erro físico, colisão)</li>
-            <li><b>Oversize Discarded Frames</b> → pacote acima do permitido (erro, má config de MTU)</li>
-            <li><b>Crc Error Frames</b> → erro de integridade → quase sempre cabo/conector ruim</li>
-            <li><b>Error Frames</b> → pacotes corrompidos → idem</li>
-            <li><b>Discarded Frames (genérico)</b> → perda de pacotes dentro da ONT (buffer cheio, congestionamento)</li>
-            <li><b>Buffer Overflow Frames (no TX)</b> → indica que a ONT não conseguiu processar o tráfego (tráfego excessivo, gargalo)</li>
+            <li><b>Undersize Discarded Frames</b> → pacote abaixo do tamanho mínimo</li>
+            <li><b>Oversize Discarded Frames</b> → pacote acima do permitido</li>
+            <li><b>Crc Error Frames</b> → erro de integridade</li>
+            <li><b>Error Frames</b> → pacotes corrompidos</li>
+            <li><b>Discarded Frames (genérico)</b> → perda de pacotes</li>
+            <li><b>Buffer Overflow Frames</b> → congestionamento de buffer</li>
+        </ul>
+        <br>
+        <p><b>Regras de coloração:</b></p>
+        <ul>
+            <li><span style='color: #c8e6c9;'>Verde:</span> Valor = 0 (normal)</li>
+            <li><span style='color: #c62828;'>Vermelho:</span> Valor > 0 (crítico)</li>
         </ul>
         <br>
         <p><b>Se for poucos e isolados:</b> pode ser normal (picos)</p>
@@ -3917,7 +4076,7 @@ class OLTDatabaseGUI(QMainWindow):
         
         tab_widget.addTab(critical_tab, "Contadores Críticos")
         
-        # Aba 4: Exemplos Práticos
+        # Aba 5: Exemplos Práticos
         examples_tab = QWidget()
         examples_layout = QVBoxLayout(examples_tab)
         
@@ -3925,37 +4084,133 @@ class OLTDatabaseGUI(QMainWindow):
         examples_layout.addWidget(examples_title)
         
         examples_info = QLabel("""
-        <p><b>Análise da sua captura:</b></p>
-        <table border='1' cellpadding='5' style='border-collapse: collapse;'>
+        <p><b>Análise de exemplos baseada no comando real:</b></p>
+        <table border='1' cellpadding='5' style='border-collapse: collapse; width: 100%;'>
             <tr style='background-color: #c8e6c9;'>
-                <td><b>Frames, Bytes, Unicast</b></td>
-                <td>tudo ok, altos porque é tráfego normal</td>
+                <td><b>Received frames: 24.075.989.140</b></td>
+                <td>✅ Normal - tráfego esperado</td>
             </tr>
             <tr style='background-color: #c8e6c9;'>
-                <td><b>Broadcast</b></td>
-                <td>baixo (exemplo: 58, 1816) → está ótimo</td>
+                <td><b>Received bytes: 7.093.872.660.861</b></td>
+                <td>✅ Normal - tráfego esperado</td>
+            </tr>
+            <tr style='background-color: #c8e6c9;'>
+                <td><b>Received unicast frames: 24.075.946.528 (99%)</b></td>
+                <td>✅ Normal - tráfego unicast dominante</td>
+            </tr>
+            <tr style='background-color: #c8e6c9;'>
+                <td><b>Received broadcast frames: 34.626 (0%)</b></td>
+                <td>✅ Normal - abaixo do limite de 1000</td>
+            </tr>
+            <tr style='background-color: #fff9c4;'>
+                <td><b>Received over 1518-byte frames: 143.310.953 (0%)</b></td>
+                <td>⚠️ Atenção - quadros acima do MTU padrão</td>
             </tr>
             <tr style='background-color: #ffcdd2;'>
-                <td><b>Buffer Overflow Frames (TX)</b></td>
-                <td>valor 2.497.590.394 em uma porta → ⚠️ não é bom</td>
+                <td><b>Received CRC error frames: 7.664</b></td>
+                <td>🚨 Crítico - qualquer valor > 0 indica problemas</td>
+            </tr>
+            <tr style='background-color: #ffcdd2;'>
+                <td><b>Sent buffer overflow frames: 931.296</b></td>
+                <td>🚨 Crítico - buffer da ONT saturado</td>
             </tr>
             <tr style='background-color: #c8e6c9;'>
-                <td><b>Discarded / Error / CRC / Oversize / Undersize</b></td>
-                <td>todos zerados → perfeito 👍</td>
+                <td><b>Sent 1024-1518-byte frames: 79.093.096.744 (92%)</b></td>
+                <td>✅ Normal - maioria dos pacotes em tamanho padrão</td>
             </tr>
         </table>
         <br>
-        <p><b>Investigação necessária para Buffer Overflow:</b></p>
+        <p><b>Investigação necessária para valores críticos:</b></p>
         <ul>
-            <li>Verificar se a ONT está saturada</li>
-            <li>Verificar configuração da porta</li>
-            <li>Verificar se há gargalo no caminho</li>
-            <li>Verificar se o tráfego está dentro do esperado para o plano contratado</li>
+            <li><b>Buffer Overflow:</b> verificar se a ONT está saturada, gargalo na rede, configuração da porta</li>
+            <li><b>CRC Error:</b> verificar cabos, conectores, interferências, qualidade do sinal óptico</li>
+            <li><b>Discarded Frames:</b> verificar congestionamento, buffer, processamento da ONT</li>
         </ul>
         """)
         examples_layout.addWidget(examples_info)
         
         tab_widget.addTab(examples_tab, "Exemplos Práticos")
+        
+        # Aba 6: Mapeamento Completo
+        mapping_tab = QWidget()
+        mapping_layout = QVBoxLayout(mapping_tab)
+        
+        mapping_title = QLabel("<h2>🗺️ Mapeamento Completo das Métricas</h2>")
+        mapping_layout.addWidget(mapping_title)
+        
+        mapping_info = QLabel("""
+        <table border='1' cellpadding='3' style='border-collapse: collapse; width: 100%; font-size: 11px;'>
+            <tr style='background-color: #e3f2fd;'>
+                <th><b>Campo BD</b></th>
+                <th><b>Nome Amigável</b></th>
+                <th><b>Categoria</b></th>
+                <th><b>Explicação</b></th>
+            </tr>
+            <tr>
+                <td>rx_frames</td>
+                <td>Quadros recebidos (total)</td>
+                <td>✅ Normal</td>
+                <td>Total de pacotes recebidos</td>
+            </tr>
+            <tr>
+                <td>rx_bytes</td>
+                <td>Bytes recebidos (total)</td>
+                <td>✅ Normal</td>
+                <td>Total de dados recebidos</td>
+            </tr>
+            <tr>
+                <td>rx_unicast_frames</td>
+                <td>Quadros unicast recebidos</td>
+                <td>✅ Normal</td>
+                <td>Pacotes para um único destino</td>
+            </tr>
+            <tr>
+                <td>rx_multicast_frames</td>
+                <td>Quadros multicast recebidos</td>
+                <td>⚠️ Atenção</td>
+                <td>Pacotes para múltiplos destinos</td>
+            </tr>
+            <tr>
+                <td>rx_broadcast_frames</td>
+                <td>Quadros broadcast recebidos</td>
+                <td>⚠️ Atenção</td>
+                <td>Pacotes para todos na rede</td>
+            </tr>
+            <tr>
+                <td>rx_crc_error_frames</td>
+                <td>Quadros com erro de CRC recebidos</td>
+                <td>🚨 Crítico</td>
+                <td>Erros de integridade dos dados</td>
+            </tr>
+            <tr>
+                <td>rx_discarded_frames</td>
+                <td>Quadros descartados recebidos</td>
+                <td>🚨 Crítico</td>
+                <td>Pacotes descartados pela OLT</td>
+            </tr>
+            <tr>
+                <td>tx_frames</td>
+                <td>Quadros enviados (total)</td>
+                <td>✅ Normal</td>
+                <td>Total de pacotes enviados</td>
+            </tr>
+            <tr>
+                <td>tx_bytes</td>
+                <td>Bytes enviados (total)</td>
+                <td>✅ Normal</td>
+                <td>Total de dados enviados</td>
+            </tr>
+            <tr>
+                <td>tx_buffer_overflow_frames</td>
+                <td>Quadros descartados por overflow de buffer</td>
+                <td>🚨 Crítico</td>
+                <td>Saturação do buffer de envio</td>
+            </tr>
+        </table>
+        """)
+        mapping_layout.addWidget(mapping_info)
+        
+        tab_widget.addTab(mapping_tab, "Mapeamento Completo")
         
         # Botão de fechar
         close_button = QPushButton("Fechar")
@@ -3964,7 +4219,6 @@ class OLTDatabaseGUI(QMainWindow):
         
         # Exibir o diálogo
         dialog.exec_()
-
 
     def update_pon_stats_fsp_filter(self):
         """Atualiza o filtro de F/S/P com base na OLT selecionada para a aba de estatísticas PON."""
@@ -4008,138 +4262,225 @@ class OLTDatabaseGUI(QMainWindow):
 
 
     def load_pon_stats_data(self):
-        """Carrega os dados de estatísticas de pacotes com categorização e cores."""
+        """Carrega os dados de estatísticas de pacotes em uma única tabela completa."""
         logging.info("Carregando estatísticas de pacotes da PON.")
-        self.pon_stats_rx_table.setRowCount(0)
-        self.pon_stats_tx_table.setRowCount(0)
+        self.pon_stats_table.setRowCount(0)
         
+        # Obter valores dos filtros
         selected_olt = self.pon_stats_olt_filter.currentText()
         selected_fsp = self.pon_stats_fsp_filter.currentText()
-        params = []
-        where_clause = ""
+        selected_direction = self.pon_stats_direction_filter.currentText()
+        selected_metric = self.pon_stats_metric_filter.currentText()
+        selected_category = self.pon_stats_category_filter.currentText()
         
+        # Obter o nome original da métrica
+        metric_name = None
+        if selected_metric != "Todas as Métricas":
+            index = self.pon_stats_metric_filter.currentIndex()
+            if index > 0:
+                metric_name = self.pon_stats_metric_filter.itemData(index)
+        
+        # Mapear categoria selecionada
+        category_map = {
+            "Todas as Categorias": None,
+            "Normal ✅": "normal",
+            "Atenção ⚠️": "warning",
+            "Crítico 🚨": "critical"
+        }
+        filter_category = category_map.get(selected_category)
+        
+        params = []
+        where_conditions = []
+        
+        # Filtro de OLT
         if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
             olt_identifier = selected_olt.split()[-1]
-            where_clause = "WHERE olt_identifier = %s"
+            where_conditions.append("olt_identifier = %s")
             params.append(olt_identifier)
-            
+        
+        # Filtro de F/S/P
         if selected_fsp != "Todas as PONs":
-            if where_clause:
-                where_clause += " AND fsp = %s"
-            else:
-                where_clause = "WHERE fsp = %s"
+            where_conditions.append("fsp = %s")
             params.append(selected_fsp)
-            
+        
+        # Construir cláusula WHERE
+        where_clause = ""
+        if where_conditions:
+            where_clause = "WHERE " + " AND ".join(where_conditions)
+        
         query = f"SELECT * FROM pon_statistics_packets {where_clause} ORDER BY collection_time DESC LIMIT 500;"
+        
         try:
             self.cursor.execute(query, tuple(params))
             results = self.cursor.fetchall()
             
             col_map = {desc[0]: i for i, desc in enumerate(self.cursor.description)}
             
-            # Definir categorias para cada métrica
-            def get_metric_category(metric_name):
+            # Mapeamento de nomes amigáveis
+            metric_names = {
+                # Métricas RX
+                'rx_frames': 'Quadros recebidos (total)',
+                'rx_bytes': 'Bytes recebidos (total)',
+                'rx_unicast_frames': 'Quadros unicast recebidos',
+                'rx_multicast_frames': 'Quadros multicast recebidos',
+                'rx_broadcast_frames': 'Quadros broadcast recebidos',
+                'rx_64_byte_frames': 'Quadros de 64 bytes recebidos',
+                'rx_65_127_byte_frames': 'Quadros de 65-127 bytes recebidos',
+                'rx_128_255_byte_frames': 'Quadros de 128-255 bytes recebidos',
+                'rx_256_511_byte_frames': 'Quadros de 256-511 bytes recebidos',
+                'rx_512_1023_byte_frames': 'Quadros de 512-1023 bytes recebidos',
+                'rx_1024_1518_byte_frames': 'Quadros de 1024-1518 bytes recebidos',
+                'rx_over_1518_byte_frames': 'Quadros maiores que 1518 bytes recebidos',
+                'rx_undersize_discarded_frames': 'Quadros menores que 64 bytes descartados',
+                'rx_oversize_discarded_frames': 'Quadros maiores que permitido descartados',
+                'rx_crc_error_frames': 'Quadros com erro de CRC recebidos',
+                'rx_discarded_frames': 'Quadros descartados recebidos',
+                'rx_error_frames': 'Quadros com erros (total) recebidos',
+                # Métricas TX
+                'tx_frames': 'Quadros enviados (total)',
+                'tx_bytes': 'Bytes enviados (total)',
+                'tx_unicast_frames': 'Quadros unicast enviados',
+                'tx_multicast_frames': 'Quadros multicast enviados',
+                'tx_broadcast_frames': 'Quadros broadcast enviados',
+                'tx_64_byte_frames': 'Quadros de 64 bytes enviados',
+                'tx_65_127_byte_frames': 'Quadros de 65-127 bytes enviados',
+                'tx_128_255_byte_frames': 'Quadros de 128-255 bytes enviados',
+                'tx_256_511_byte_frames': 'Quadros de 256-511 bytes enviados',
+                'tx_512_1023_byte_frames': 'Quadros de 512-1023 bytes enviados',
+                'tx_1024_1518_byte_frames': 'Quadros de 1024-1518 bytes enviados',
+                'tx_over_1518_byte_frames': 'Quadros maiores que 1518 bytes enviados',
+                'tx_multicast_bytes': 'Bytes multicast enviados',
+                'tx_buffer_overflow_frames': 'Quadros descartados por overflow de buffer'
+            }
+            
+            # Definir categorias com base no nome E valor da métrica
+            def get_metric_category(metric_name, value):
+                if value is None:
+                    value = 0
+                    
                 metric_lower = metric_name.lower()
                 
-                # Contadores normais (verde)
-                if any(x in metric_lower for x in ['frames', 'bytes', 'unicast', 'multicast', 'broadcast', '64_bytes', '65_127_bytes', '128_255_bytes', '256_511_bytes', '512_1023_bytes', '1024_1518_bytes']):
+                # 🚨 Contadores críticos - QUALQUER valor > 0 já é crítico
+                if any(x in metric_lower for x in [
+                    'discarded', 'error', 'crc', 'undersize', 'oversize', 'buffer_overflow'
+                ]):
+                    return "critical" if value > 0 else "normal"
+                
+                # ⚠️ Contadores de atenção - valores acima do esperado
+                elif 'over_1518_byte' in metric_lower:
+                    return "warning" if value > 0 else "normal"
+                
+                # ⚠️ Broadcast - atenção se for muito alto (limite: 1000 frames)
+                elif 'broadcast' in metric_lower:
+                    return "warning" if value > 1000 else "normal"
+                
+                # ⚠️ Multicast - atenção se for muito alto e não for rede com IPTV
+                elif 'multicast' in metric_lower and 'bytes' not in metric_lower:
+                    return "warning" if value > 5000 else "normal"
+                
+                # ✅ Contadores normais - crescem naturalmente
+                else:
                     return "normal"
-                
-                # Contadores de atenção (amarelo)
-                elif any(x in metric_lower for x in ['over_1518_bytes']):
-                    return "warning"
-                
-                # Contadores críticos (vermelho)
-                elif any(x in metric_lower for x in ['discarded', 'error', 'crc', 'undersize', 'oversize', 'buffer_overflow']):
-                    return "critical"
-                
-                return "unknown"
             
-            # Obter métricas RX e TX
-            rx_metrics = [k for k in col_map if k.startswith('rx_')]
-            tx_metrics = [k for k in col_map if k.startswith('tx_')]
+            # Obter todas as métricas
+            all_metrics = [k for k in col_map if k.startswith('rx_') or k.startswith('tx_')]
             
-            self.pon_stats_rx_table.setRowCount(len(results) * len(rx_metrics))
-            self.pon_stats_tx_table.setRowCount(len(results) * len(tx_metrics))
+            # Filtrar métricas se necessário
+            if metric_name:
+                all_metrics = [metric_name] if metric_name in all_metrics else []
             
-            rx_row, tx_row = 0, 0
+            # Filtrar por direção se necessário
+            if selected_direction != "Todos":
+                prefix = selected_direction.lower() + '_'
+                all_metrics = [m for m in all_metrics if m.startswith(prefix)]
+            
+            # Preparar lista para dados filtrados
+            table_data = []
+            
             for record in results:
                 fsp = record[col_map['fsp']]
                 timestamp = record[col_map['collection_time']].strftime('%H:%M:%S')
                 
-                # Processar métricas RX
-                for metric in rx_metrics:
+                # Processar todas as métricas
+                for metric in all_metrics:
                     value = record[col_map[metric]]
-                    category = get_metric_category(metric)
+                    category = get_metric_category(metric, value)
                     
-                    # Criar itens
-                    items = [
-                        QTableWidgetItem(fsp),
-                        QTableWidgetItem(timestamp),
-                        QTableWidgetItem(metric.replace('rx_', '').replace('_', ' ').title()),
-                        QTableWidgetItem(f"{value:,}" if value is not None else "0"),
-                        QTableWidgetItem("✅" if category == "normal" else "⚠️" if category == "warning" else "🚨")
-                    ]
+                    # Aplicar filtro de categoria se necessário
+                    if filter_category and category != filter_category:
+                        continue
                     
-                    # Aplicar cores baseado na categoria
-                    color = None
-                    if category == "normal":
-                        color = QColor('#c8e6c9')  # Verde claro
-                    elif category == "warning":
-                        color = QColor('#fff9c4')  # Amarelo claro
-                    elif category == "critical":
-                        color = QColor('#ffcdd2')  # Vermelho claro
+                    # Determinar direção
+                    direction = "RX" if metric.startswith('rx_') else "TX"
                     
-                    for item in items:
-                        if color:
-                            item.setBackground(color)
-                        self.pon_stats_rx_table.setItem(rx_row, items.index(item), item)
+                    # Obter nome amigável
+                    friendly_name = metric_names.get(metric, metric.replace('_', ' ').title())
                     
-                    rx_row += 1
+                    # Calcular porcentagem para métricas que têm total
+                    percentage = ""
+                    if value is not None and value > 0:
+                        if metric in ['rx_unicast_frames', 'rx_multicast_frames', 'rx_broadcast_frames']:
+                            total = record[col_map['rx_frames']] or 1
+                            percentage = f"{(value/total*100):.0f}%"
+                        elif metric in ['tx_unicast_frames', 'tx_multicast_frames', 'tx_broadcast_frames']:
+                            total = record[col_map['tx_frames']] or 1
+                            percentage = f"{(value/total*100):.0f}%"
+                        elif any(x in metric for x in ['64_byte', '65_127_byte', '128_255_byte', '256_511_byte', '512_1023_byte', '1024_1518_byte', 'over_1518_byte']):
+                            if metric.startswith('rx_'):
+                                total = record[col_map['rx_frames']] or 1
+                            else:
+                                total = record[col_map['tx_frames']] or 1
+                            percentage = f"{(value/total*100):.0f}%"
+                    
+                    table_data.append((fsp, timestamp, direction, friendly_name, value, percentage, category))
+            
+            # Preencher tabela com dados filtrados
+            self.pon_stats_table.setRowCount(len(table_data))
+            
+            for row_idx, (fsp, timestamp, direction, metric, value, percentage, category) in enumerate(table_data):
+                items = [
+                    QTableWidgetItem(fsp),
+                    QTableWidgetItem(timestamp),
+                    QTableWidgetItem(direction),
+                    QTableWidgetItem(metric),
+                    QTableWidgetItem(f"{value:,}" if value is not None else "0"),
+                    QTableWidgetItem(percentage),
+                    QTableWidgetItem("✅" if category == "normal" else "⚠️" if category == "warning" else "🚨")
+                ]
                 
-                # Processar métricas TX
-                for metric in tx_metrics:
-                    value = record[col_map[metric]]
-                    category = get_metric_category(metric)
-                    
-                    # Criar itens
-                    items = [
-                        QTableWidgetItem(fsp),
-                        QTableWidgetItem(timestamp),
-                        QTableWidgetItem(metric.replace('tx_', '').replace('_', ' ').title()),
-                        QTableWidgetItem(f"{value:,}" if value is not None else "0"),
-                        QTableWidgetItem("✅" if category == "normal" else "⚠️" if category == "warning" else "🚨")
-                    ]
-                    
-                    # Aplicar cores baseado na categoria
-                    color = None
-                    if category == "normal":
-                        color = QColor('#c8e6c9')  # Verde claro
-                    elif category == "warning":
-                        color = QColor('#fff9c4')  # Amarelo claro
-                    elif category == "critical":
-                        color = QColor('#ffcdd2')  # Vermelho claro
-                    
-                    for item in items:
-                        if color:
-                            item.setBackground(color)
-                        self.pon_stats_tx_table.setItem(tx_row, items.index(item), item)
-                    
-                    tx_row += 1
+                # Aplicar cores
+                color = None
+                if category == "normal":
+                    color = QColor('#c8e6c9')
+                elif category == "warning":
+                    color = QColor('#fff9c4')
+                elif category == "critical":
+                    color = QColor('#ffcdd2')
+                
+                for col_idx, item in enumerate(items):
+                    if color:
+                        item.setBackground(color)
+                    self.pon_stats_table.setItem(row_idx, col_idx, item)
             
             # Ajustar colunas
-            self.pon_stats_rx_table.resizeColumnsToContents()
-            self.pon_stats_tx_table.resizeColumnsToContents()
+            self.pon_stats_table.resizeColumnsToContents()
             
             # Atualizar status
-            total_records = len(results)
-            self.pon_stats_status_label.setText(f"{total_records} regs")
+            self.pon_stats_status_label.setText(f"{len(table_data)} regs")
             self.pon_stats_status_label.setStyleSheet("color: green; font-weight: bold; font-size: 8px;")
+            
+            # Log de estatísticas para depuração
+            critical_count = sum(1 for _, _, _, _, _, _, cat in table_data if cat == "critical")
+            warning_count = sum(1 for _, _, _, _, _, _, cat in table_data if cat == "warning")
+            normal_count = sum(1 for _, _, _, _, _, _, cat in table_data if cat == "normal")
+            
+            logging.info(f"Estatísticas de categorização - Normal: {normal_count}, Atenção: {warning_count}, Crítico: {critical_count}")
             
         except Exception as e:
             logging.error(f"Erro ao carregar estatísticas de pacotes: {e}", exc_info=True)
             self.pon_stats_status_label.setText("Erro")
             self.pon_stats_status_label.setStyleSheet("color: red; font-weight: bold; font-size: 8px;")
+
 
     def update_pon_stats_display(self):
         """Atualiza a exibição de estatísticas de pacotes se a aba estiver ativa."""
