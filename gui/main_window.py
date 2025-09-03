@@ -4327,8 +4327,14 @@ class OLTDatabaseGUI(QMainWindow):
         export_btn = QPushButton("Exportar CSV")
         export_btn.clicked.connect(self.export_uplink_ddm_to_csv)
         
+        # Botão de legenda
+        legend_btn = QPushButton("Legenda de Cores")
+        legend_btn.clicked.connect(self.show_ddm_legend)
+        legend_btn.setStyleSheet("background-color: #e1f5fe; font-weight: bold;")
+        
         control_layout.addWidget(refresh_btn)
         control_layout.addWidget(export_btn)
+        control_layout.addWidget(legend_btn)
         control_layout.addStretch()
         layout.addWidget(control_panel)
         
@@ -4362,6 +4368,198 @@ class OLTDatabaseGUI(QMainWindow):
         logging.info("Configuração da aba Uplink DDM concluída. Carregando dados iniciais...")
         QTimer.singleShot(500, self.load_uplink_ddm_data)
 
+    def show_ddm_legend(self):
+        """Exibe uma janela com a legenda de cores para os valores DDM"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Legenda de Cores - Valores DDM")
+        dialog.setMinimumSize(800, 600)
+        dialog.setModal(True)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Criar um widget com abas para organizar as informações
+        tab_widget = QTabWidget()
+        layout.addWidget(tab_widget)
+        
+        # Aba 1: Temperatura
+        temp_tab = QWidget()
+        temp_layout = QVBoxLayout(temp_tab)
+        
+        temp_title = QLabel("<h2>Temperatura do Transceiver (°C)</h2>")
+        temp_layout.addWidget(temp_title)
+        
+        temp_info = QLabel("""
+        <p><b>Faixa típica de operação (comercial):</b> 0 a 70 °C</p>
+        <p><b>Módulos "industrial":</b> -40 a 85 °C</p>
+        <br>
+        <p><b>Classificação prática (comercial):</b></p>
+        <ul>
+            <li><span style='background-color: #c8e6c9; padding: 2px 5px; border-radius: 3px;'>OK:</span> 10–55 °C</li>
+            <li><span style='background-color: #fff9c4; padding: 2px 5px; border-radius: 3px;'>Observância:</span> 55–65 °C (verificar ventilação/poeira/fluxo de ar)</li>
+            <li><span style='background-color: #ffcdd2; padding: 2px 5px; border-radius: 3px;'>Crítico:</span> ≥ 70 °C (ou ≤ 0 °C) — agir imediatamente</li>
+        </ul>
+        <br>
+        <p><i>Baseado nos ratings de operação dos módulos 10G SR/LR comuns.</i></p>
+        """)
+        temp_layout.addWidget(temp_info)
+        
+        tab_widget.addTab(temp_tab, "Temperatura")
+        
+        # Aba 2: Tensão
+        voltage_tab = QWidget()
+        voltage_layout = QVBoxLayout(voltage_tab)
+        
+        voltage_title = QLabel("<h2>Tensão de Alimentação do Módulo (V)</h2>")
+        voltage_layout.addWidget(voltage_title)
+        
+        voltage_info = QLabel("""
+        <p><b>Nominal:</b> 3,3 V</p>
+        <p><b>Faixa usual aceitável (DOM):</b> 3,135–3,465 V</p>
+        <p><b>Alguns datasheets admitem:</b> 3,0–3,6 V</p>
+        <br>
+        <p><b>Classificação prática:</b></p>
+        <ul>
+            <li><span style='background-color: #c8e6c9; padding: 2px 5px; border-radius: 3px;'>OK:</span> 3,20–3,45 V</li>
+            <li><span style='background-color: #fff9c4; padding: 2px 5px; border-radius: 3px;'>Observância:</span> 3,10–3,19 V ou 3,46–3,50 V</li>
+            <li><span style='background-color: #ffcdd2; padding: 2px 5px; border-radius: 3px;'>Crítico:</span> &lt; 3,10 V (típico "low alarm") ou &gt; 3,50–3,60 V (típico "high alarm")</li>
+        </ul>
+        <br>
+        <p><i>Use sempre os thresholds do próprio módulo exibidos no display transceiver ... verbose.</i></p>
+        """)
+        voltage_layout.addWidget(voltage_info)
+        
+        tab_widget.addTab(voltage_tab, "Tensão")
+        
+        # Aba 3: Corrente de Bias
+        bias_tab = QWidget()
+        bias_layout = QVBoxLayout(bias_tab)
+        
+        bias_title = QLabel("<h2>Corrente de Bias (mA)</h2>")
+        bias_layout.addWidget(bias_title)
+        
+        bias_info = QLabel("""
+        <p><b>Varia por tipo de laser/módulo</b> (VCSEL/DFB etc.) e sobe aos poucos com a idade do laser</p>
+        <p><b>O que importa são os limiares DOM do módulo e a tendência</b></p>
+        <br>
+        <p><b>Classificação prática:</b></p>
+        <ul>
+            <li><span style='background-color: #c8e6c9; padding: 2px 5px; border-radius: 3px;'>OK:</span> valor estável, longe do High Warn/Alarm do módulo</li>
+            <li><span style='background-color: #fff9c4; padding: 2px 5px; border-radius: 3px;'>Observância:</span> tendência de subida contínua (ex.: +20–30% vs. baseline histórico)</li>
+            <li><span style='background-color: #ffcdd2; padding: 2px 5px; border-radius: 3px;'>Crítico:</span> atingiu High Alarm de bias (risco de degradação de laser; planeje troca)</li>
+        </ul>
+        <br>
+        <p><i>O que importa é a tendência; subida contínua = laser envelhecendo. Planeje substituição quando chegar a High Warn do DOM.</i></p>
+        """)
+        bias_layout.addWidget(bias_info)
+        
+        tab_widget.addTab(bias_tab, "Corrente de Bias")
+        
+        # Aba 4: Potência Óptica
+        power_tab = QWidget()
+        power_layout = QVBoxLayout(power_tab)
+        
+        power_title = QLabel("<h2>Potência Óptica TX/RX (dBm)</h2>")
+        power_layout.addWidget(power_title)
+        
+        power_info = QLabel("""
+        <p><b>Faixas típicas por tipo de link:</b></p>
+        
+        <h3>(A) GICF – 1 GbE SFP 1310 nm 10 km</h3>
+        <ul>
+            <li><b>TX:</b> −9,5 a −3 dBm (datasheet comum de SFP 10 km)</li>
+            <li><b>RX (sensibilidade):</b> ≤ −20 dBm; Overload: por volta de −3 dBm</li>
+            <li><b>OK (RX):</b> entre −18 e −5 dBm (boa margem)</li>
+            <li><b>Observância (RX):</b> próximo de −20 dBm (margem pequena) ou próximo de −3 dBm (risco de saturar)</li>
+            <li><b>Crítico (RX):</b> &lt; sensibilidade (link instável) ou ≥ overload (saturação/erros)</li>
+        </ul>
+        
+        <h3>(B) X2CS – 10 GbE SFP+ LR (1310 nm ~10 km)</h3>
+        <ul>
+            <li><b>TX típico:</b> −8,2 a +0,5 dBm</li>
+            <li><b>RX (sensibilidade):</b> ~−14,4 dBm; Overload: ~+0,5 dBm</li>
+            <li><b>OK (RX):</b> −12 a −2 dBm</li>
+            <li><b>Observância (RX):</b> ≤ −13,5 dBm (margem curta) ou ≥ 0 dBm (risco de overload)</li>
+            <li><b>Crítico (RX):</b> &lt; −14,4 dBm ou ≥ +0,5 dBm</li>
+        </ul>
+        
+        <h3>(C) X2CS – 10 GbE SFP+ SR (850 nm MMF)</h3>
+        <ul>
+            <li><b>TX típico:</b> −7,3 a −1,2 dBm (varia por fabricante; muitos listam −7,3 a −1)</li>
+            <li><b>RX (faixa):</b> ≈ −9,9 a −1,0 dBm (sensibilidade/overload)</li>
+            <li><b>OK (RX):</b> −8 a −2 dBm</li>
+            <li><b>Observância (RX):</b> muito próximo de −9,9 dBm (pouca margem) ou de −1 dBm (overload)</li>
+            <li><b>Crítico (RX):</b> &lt; −9,9 dBm (abaixo da sensibilidade) ou ≥ −1 dBm (overload)</li>
+        </ul>
+        
+        <br>
+        <p><i>Observação: a placa H801X2CS pode usar SFP+ ou XFP/variações conforme a OLT e versão; os limiares DOM exatos são do módulo, então sempre confira no ... verbose da porta em questão.</i></p>
+        """)
+        power_layout.addWidget(power_info)
+        
+        tab_widget.addTab(power_tab, "Potência Óptica")
+        
+        # Aba 5: Regras de bolso
+        rules_tab = QWidget()
+        rules_layout = QVBoxLayout(rules_tab)
+        
+        rules_title = QLabel("<h2>Regras de Bolso (ajudam no dia a dia)</h2>")
+        rules_layout.addWidget(rules_title)
+        
+        rules_info = QLabel("""
+        <ul>
+            <li><b>Temperatura:</b> mantenha &lt; 60 °C; acima disso investigue refrigeração/poeira/fluxo de ar</li>
+            <li><b>Tensão:</b> espere ~3,3 V; &lt; 3,1 ou &gt; 3,5–3,6 V costuma gerar alarms</li>
+            <li><b>Bias:</b> o que importa é a tendência; subida contínua = laser envelhecendo. Planeje substituição quando chegar a High Warn do DOM</li>
+            <li><b>RX:</b> mantenha dentro de sensibilidade…overload do módulo. Se muito alto, use atenuador; se baixo, verifique limpeza dos conectores, perdas, curva de orçamento óptico</li>
+            <li><b>TX fora da faixa:</b> se TX &lt; mínimo, verifique bias e sujeira/conexões; se TX &gt; máximo, pode indicar configuração/medição anômala ou módulo com APC/controle descalibrado</li>
+        </ul>
+        """)
+        rules_layout.addWidget(rules_info)
+        
+        tab_widget.addTab(rules_tab, "Regras de Bolso")
+        
+        # Aba 6: Referência Rápida
+        ref_tab = QWidget()
+        ref_layout = QVBoxLayout(ref_tab)
+        
+        ref_title = QLabel("<h2>Exemplos de Referência Rápida (comparativo)</h2>")
+        ref_layout.addWidget(ref_title)
+        
+        ref_table = QTableWidget()
+        ref_table.setColumnCount(4)
+        ref_table.setHorizontalHeaderLabels(["Tipo de link", "TX típico (dBm)", "RX sensib./overload (dBm)", "Fonte"])
+        ref_table.setRowCount(3)
+        
+        # Linha 1: 1G 1310 nm
+        ref_table.setItem(0, 0, QTableWidgetItem("1G 1310 nm 10 km (GICF)"))
+        ref_table.setItem(0, 1, QTableWidgetItem("−9,5 … −3"))
+        ref_table.setItem(0, 2, QTableWidgetItem("sens. ≤ −20 / overload ≈ −3"))
+        ref_table.setItem(0, 3, QTableWidgetItem(""))
+        
+        # Linha 2: 10G LR 1310 nm
+        ref_table.setItem(1, 0, QTableWidgetItem("10G LR 1310 nm 10 km (X2CS)"))
+        ref_table.setItem(1, 1, QTableWidgetItem("−8,2 … +0,5"))
+        ref_table.setItem(1, 2, QTableWidgetItem("sens. ≈ −14,4 / overload ≈ +0,5"))
+        ref_table.setItem(1, 3, QTableWidgetItem("EDGE Optical Solutions"))
+        
+        # Linha 3: 10G SR 850 nm
+        ref_table.setItem(2, 0, QTableWidgetItem("10G SR 850 nm MMF (X2CS)"))
+        ref_table.setItem(2, 1, QTableWidgetItem("−7,3 … −1,2"))
+        ref_table.setItem(2, 2, QTableWidgetItem("faixa ≈ −9,9 … −1,0"))
+        ref_table.setItem(2, 3, QTableWidgetItem("Router-Switch.com"))
+        
+        ref_table.resizeColumnsToContents()
+        ref_layout.addWidget(ref_table)
+        
+        tab_widget.addTab(ref_tab, "Referência Rápida")
+        
+        # Botão de fechar
+        close_button = QPushButton("Fechar")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+        
+        # Exibir o diálogo
+        dialog.exec_()
 
     def load_ddm_olt_list(self):
         """Carrega a lista de OLTs disponíveis na tabela DDM"""
@@ -4627,6 +4825,51 @@ class OLTDatabaseGUI(QMainWindow):
                             item = QTableWidgetItem(f"{value:.2f}" if value is not None else "N/A")
                         else:
                             item = QTableWidgetItem(str(value) if value is not None else "N/A")
+                        
+                        # Aplica cores de acordo com os critérios
+                        if col_idx == 4 and value is not None:  # Temperatura
+                            if value < 10 or value > 65:  # Crítico
+                                item.setBackground(QColor('#ffcdd2'))
+                            elif value >= 55 or value <= 0:  # Observação
+                                item.setBackground(QColor('#fff9c4'))
+                            else:  # OK
+                                item.setBackground(QColor('#c8e6c9'))
+                        
+                        elif col_idx == 5 and value is not None:  # Tensão
+                            if value < 3.10 or value > 3.50:  # Crítico
+                                item.setBackground(QColor('#ffcdd2'))
+                            elif (value >= 3.10 and value < 3.20) or (value > 3.45 and value <= 3.50):  # Observação
+                                item.setBackground(QColor('#fff9c4'))
+                            else:  # OK
+                                item.setBackground(QColor('#c8e6c9'))
+                        
+                        elif col_idx == 6 and value is not None:  # Corrente de Bias
+                            # Para bias, precisaríamos de histórico para determinar tendência
+                            # Por enquanto, vamos usar um valor fixo como exemplo
+                            if value > 20:  # Exemplo de valor crítico (ajustar conforme necessário)
+                                item.setBackground(QColor('#ffcdd2'))
+                            elif value > 15:  # Exemplo de valor de observação (ajustar conforme necessário)
+                                item.setBackground(QColor('#fff9c4'))
+                            else:  # OK
+                                item.setBackground(QColor('#c8e6c9'))
+                        
+                        elif col_idx == 7 and value is not None:  # Potência TX
+                            # Valores típicos para TX: -9.5 a -3 dBm (1G), -8.2 a +0.5 dBm (10G)
+                            if value < -10.0 or value > 1.0:  # Crítico
+                                item.setBackground(QColor('#ffcdd2'))
+                            elif value < -8.0 or value > 0.0:  # Observação
+                                item.setBackground(QColor('#fff9c4'))
+                            else:  # OK
+                                item.setBackground(QColor('#c8e6c9'))
+                        
+                        elif col_idx == 8 and value is not None:  # Potência RX
+                            # Valores típicos para RX: -18 a -5 dBm (1G), -12 a -2 dBm (10G)
+                            if value < -20.0 or value > -1.0:  # Crítico
+                                item.setBackground(QColor('#ffcdd2'))
+                            elif value < -15.0 or value > -3.0:  # Observação
+                                item.setBackground(QColor('#fff9c4'))
+                            else:  # OK
+                                item.setBackground(QColor('#c8e6c9'))
                         
                         # Destacar linhas com status diferente de normal
                         if col_idx == 9 and value and str(value).lower() != 'normal':
