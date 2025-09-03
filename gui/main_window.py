@@ -388,6 +388,7 @@ class OLTDatabaseGUI(QMainWindow):
         # --- FIM DA MODIFICAÇÃO ---
 
         # Lógica para a aba de Uplink DDM
+        # Em handle_tab_change, na parte da aba Uplink DDM
         if current_tab == self.uplink_ddm_tab:
             logging.info("Aba 'Uplink DDM' ativada. Iniciando timer.")
             QTimer.singleShot(100, self.load_uplink_ddm_data)
@@ -432,7 +433,61 @@ class OLTDatabaseGUI(QMainWindow):
         self.long_offline_onts_table.setSortingEnabled(True)
         self.long_offline_onts_table.setEditTriggers(QTableWidget.NoEditTriggers)
         layout.addWidget(self.long_offline_onts_table)
+
+    def update_ddm_status(self, message, is_error=False):
+        """Atualiza o label de status na aba DDM"""
+        if hasattr(self, 'ddm_status_label'):
+            self.ddm_status_label.setText(f"Status: {message}")
+            if is_error:
+                self.ddm_status_label.setStyleSheet("color: red; font-weight: bold;")
+            else:
+                self.ddm_status_label.setStyleSheet("color: green; font-weight: bold;")
+
+
+    def check_ddm_table(self):
+        """Verifica se a tabela uplink_ddm_data existe e contém dados"""
+        try:
+            if not self.conn or self.conn.closed:
+                logging.warning("Conexão com o banco fechada, tentando reconectar...")
+                self.connect_to_db()
+                if not self.conn or self.conn.closed:
+                    raise Exception("Não foi possível estabelecer conexão com o banco de dados")
             
+            cursor = self.conn.cursor()
+            
+            # Verifica se a tabela existe
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'uplink_ddm_data'
+                )
+            """)
+            table_exists = cursor.fetchone()[0]
+            
+            if not table_exists:
+                logging.error("A tabela uplink_ddm_data não existe no banco de dados!")
+                return False
+            
+            # Verifica quantos registros existem
+            cursor.execute("SELECT COUNT(*) FROM uplink_ddm_data")
+            total_count = cursor.fetchone()[0]
+            
+            logging.info(f"Tabela uplink_ddm_data existe com {total_count} registros.")
+            
+            if total_count == 0:
+                return False
+            
+            # Mostra alguns dados de exemplo
+            cursor.execute("SELECT * FROM uplink_ddm_data LIMIT 1")
+            sample_data = cursor.fetchone()
+            logging.info(f"Exemplo de dados na tabela: {sample_data}")
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Erro ao verificar tabela DDM: {e}", exc_info=True)
+            return False
+
     def setup_logs_tab(self):
         """Configura a aba de logs."""
         layout = QVBoxLayout(self.logs_tab)
@@ -4228,34 +4283,52 @@ class OLTDatabaseGUI(QMainWindow):
         if self.tab_widget.currentWidget() == self.ont_eth_tab:
             self.load_ont_eth_data()
 
-    # Adicione o método setup_uplink_ddm_tab
     def setup_uplink_ddm_tab(self):
         """Configura a interface da aba 'Uplink DDM'"""
         layout = QVBoxLayout(self.uplink_ddm_tab)
-
+        
         # Painel de controle
         control_panel = QWidget()
         control_layout = QHBoxLayout(control_panel)
-
+        
         self.uplink_ddm_olt_filter_label = QLabel("Filtrar por OLT:")
         self.uplink_ddm_olt_filter = QComboBox()
         if self.uplink_ddm_olt_filter not in self.olt_filters_to_update:
             self.olt_filters_to_update.append(self.uplink_ddm_olt_filter)
         
+        # Adiciona opção "Todas"
+        self.uplink_ddm_olt_filter.addItem("Todas as OLTs")
+        
+        # Carrega as OLTs disponíveis
+        try:
+            self.cursor.execute("SELECT DISTINCT olt_ip FROM uplink_ddm_data ORDER BY olt_ip")
+            olts = [row[0] for row in self.cursor.fetchall()]
+            for olt in olts:
+                self.uplink_ddm_olt_filter.addItem(f"OLT {olt}")
+            logging.info(f"OLTs carregadas para filtro DDM: {olts}")
+        except Exception as e:
+            logging.error(f"Erro ao carregar OLTs para filtro DDM: {e}")
+            self.uplink_ddm_olt_filter.addItem("Erro ao carregar OLTs")
+        
         self.uplink_ddm_olt_filter.currentTextChanged.connect(self.load_uplink_ddm_data)
-
+        
         export_btn = QPushButton("Exportar CSV")
         export_btn.clicked.connect(self.export_uplink_ddm_to_csv)
-
+        
+        # Adiciona um botão de atualização manual
+        refresh_btn = QPushButton("Atualizar")
+        refresh_btn.clicked.connect(self.load_uplink_ddm_data)
+        
         control_layout.addWidget(self.uplink_ddm_olt_filter_label)
         control_layout.addWidget(self.uplink_ddm_olt_filter)
-        control_layout.addStretch()
+        control_layout.addWidget(refresh_btn)
         control_layout.addWidget(export_btn)
+        control_layout.addStretch()
         layout.addWidget(control_panel)
-
+        
         # Tabela de dados DDM
         self.uplink_ddm_table = QTableWidget()
-        self.uplink_ddm_table.setColumnCount(10)
+        self.uplink_ddm_table.setColumnCount(11)  # 11 colunas incluindo data/hora
         self.uplink_ddm_table.setHorizontalHeaderLabels([
             "OLT", "Placa", "Slot", "Porta", 
             "Temperatura (°C)", "Tensão (V)", 
@@ -4264,69 +4337,184 @@ class OLTDatabaseGUI(QMainWindow):
         ])
         self.uplink_ddm_table.setSortingEnabled(True)
         self.uplink_ddm_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.uplink_ddm_table.setAlternatingRowColors(True)  # Melhora a visualização
         layout.addWidget(self.uplink_ddm_table)
-
+        
         # Timer para atualização periódica
         self.uplink_ddm_timer = QTimer(self)
         self.uplink_ddm_timer.setInterval(300000)  # 5 minutos
-        self.uplink_ddm_timer.timeout.connect(self.load_uplink_ddm_data)
+        
+        # Adiciona um label de status
+        self.ddm_status_label = QLabel("Status: Pronto")
+        self.ddm_status_label.setStyleSheet("color: green; font-weight: bold;")
+        layout.addWidget(self.ddm_status_label)
+        
+        # Carrega os dados iniciais
+        logging.info("Configuração da aba Uplink DDM concluída. Carregando dados iniciais...")
+        QTimer.singleShot(500, self.load_uplink_ddm_data)
 
     def load_uplink_ddm_data(self):
         """Carrega os dados DDM do banco de dados e exibe na tabela"""
         logging.info("Método load_uplink_ddm_data chamado para atualizar a tabela DDM.")
         
         selected_olt = self.uplink_ddm_olt_filter.currentText()
-        logging.info(f"OLT selecionada para filtro: {selected_olt}")
+        logging.info(f"OLT selecionada para filtro: '{selected_olt}'")
+        
+        # Atualiza status de carregamento
+        self.update_ddm_status("Carregando dados...")
         
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
+            # Verifica se a conexão está ativa
+            if not self.conn or self.conn.closed:
+                logging.warning("Conexão com o banco fechada, tentando reconectar...")
+                self.connect_to_db()
+                if not self.conn or self.conn.closed:
+                    raise Exception("Não foi possível estabelecer conexão com o banco de dados")
             
-            query = """
+            # Usa a conexão existente
+            cursor = self.conn.cursor()
+            
+            # Verifica se a tabela existe antes de executar a consulta
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'uplink_ddm_data'
+                )
+            """)
+            table_exists = cursor.fetchone()[0]
+            
+            if not table_exists:
+                logging.error("A tabela uplink_ddm_data não existe no banco de dados!")
+                self.update_ddm_status("Tabela não encontrada", True)
+                QMessageBox.warning(self, "Tabela Ausente", 
+                                "A tabela uplink_ddm_data não existe no banco de dados.\n"
+                                "Verifique se a coleta de dados DDM está ativada.")
+                return
+            
+            # Constrói a consulta SQL de forma mais segura
+            base_query = """
                 SELECT olt_ip, placa, slot, port, 
                     temperature_c, supply_voltage_v, tx_bias_current_ma,
                     tx_power_dbm, rx_power_dbm, status, collection_time
                 FROM uplink_ddm_data
             """
             
+            # Inicializa parâmetros e condições
             params = []
-            if selected_olt and selected_olt != "Todas":
-                query += " WHERE olt_ip = %s"
-                params.append(selected_olt)
+            conditions = []
+            
+            # Adiciona filtro de OLT se selecionado e não for "Todas as OLTs"
+            if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+                # Extrai o IP da OLT do formato "OLT X.X.X.X"
+                olt_ip = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                # Verifica se o IP é válido (formato IPv4 básico)
+                if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', olt_ip):
+                    conditions.append("olt_ip = %s")
+                    params.append(olt_ip)
+                    logging.info(f"Adicionando filtro para OLT: {olt_ip}")
+                else:
+                    logging.warning(f"IP de OLT inválido: {olt_ip}. Ignorando filtro.")
+            
+            # Constrói a consulta final
+            query = base_query
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
             
             query += " ORDER BY collection_time DESC LIMIT 1000"
             
+            logging.info(f"Executando consulta: {query.replace('\n', ' ').strip()}")
+            logging.info(f"Parâmetros: {params}")
+            
+            # Executa a consulta
             cursor.execute(query, params)
             records = cursor.fetchall()
             
-            logging.info(f"Encontrados {len(records)} registros DDM no banco de dados.")
+            logging.info(f"Consulta executada com sucesso. Encontrados {len(records)} registros DDM.")
             
-            self.uplink_ddm_table.setRowCount(len(records))
+            # Se não encontrou registros, verifica se há dados na tabela
+            if len(records) == 0:
+                logging.warning("Nenhum registro encontrado na tabela uplink_ddm_data.")
+                # Verifica quantos registros totais existem
+                cursor.execute("SELECT COUNT(*) FROM uplink_ddm_data")
+                total_count = cursor.fetchone()[0]
+                logging.info(f"Total de registros na tabela uplink_ddm_data: {total_count}")
+                
+                if total_count == 0:
+                    self.update_ddm_status("Tabela vazia", True)
+                    QMessageBox.information(self, "Sem Dados", 
+                                        "A tabela uplink_ddm_data existe mas não contém registros.\n"
+                                        "Verifique se a coleta de dados DDM está funcionando.")
+                    return
             
+            # Limpa a tabela antes de preencher
+            self.uplink_ddm_table.setRowCount(0)
+            self.uplink_ddm_table.setSortingEnabled(False)
+            
+            # Preenche a tabela com os dados
             for row_idx, record in enumerate(records):
+                self.uplink_ddm_table.insertRow(row_idx)
+                
                 for col_idx, value in enumerate(record):
-                    if col_idx == 10:  # Data/hora
-                        item = QTableWidgetItem(value.strftime('%d/%m/%Y %H:%M:%S') if value else "N/A")
-                    elif col_idx >= 4 and col_idx <= 8:  # Valores numéricos
-                        item = QTableWidgetItem(f"{value:.2f}" if value is not None else "N/A")
-                    else:
-                        item = QTableWidgetItem(str(value) if value is not None else "N/A")
-                    
-                    # Destacar linhas com status diferente de normal
-                    if col_idx == 9 and value and value != 'normal':
-                        item.setBackground(QColor('#ffdddd'))
-                    
-                    self.uplink_ddm_table.setItem(row_idx, col_idx, item)
+                    item = None
+                    try:
+                        if col_idx == 10:  # Data/hora
+                            item = QTableWidgetItem(value.strftime('%d/%m/%Y %H:%M:%S') if value else "N/A")
+                        elif col_idx >= 4 and col_idx <= 8:  # Valores numéricos
+                            item = QTableWidgetItem(f"{value:.2f}" if value is not None else "N/A")
+                        else:
+                            item = QTableWidgetItem(str(value) if value is not None else "N/A")
+                        
+                        # Destacar linhas com status diferente de normal
+                        if col_idx == 9 and value and str(value).lower() != 'normal':
+                            item.setBackground(QColor('#ffdddd'))
+                        
+                        self.uplink_ddm_table.setItem(row_idx, col_idx, item)
+                    except Exception as cell_error:
+                        logging.error(f"Erro ao processar célula {row_idx},{col_idx}: {cell_error}")
+                        # Insere um item de erro
+                        error_item = QTableWidgetItem("ERRO")
+                        error_item.setBackground(QColor('#ff0000'))
+                        self.uplink_ddm_table.setItem(row_idx, col_idx, error_item)
+                
+                # Força a atualização da interface a cada 100 linhas para não travar
+                if row_idx % 100 == 0:
+                    QApplication.processEvents()
             
+            self.uplink_ddm_table.setSortingEnabled(True)
             self.uplink_ddm_table.resizeColumnsToContents()
-            logging.info("Tabela DDM atualizada com sucesso.")
             
+            # Ajusta a largura da coluna de data/hora
+            self.uplink_ddm_table.setColumnWidth(10, 150)  # Coluna de data/hora
+            
+            logging.info(f"Tabela DDM atualizada com {len(records)} registros.")
+            self.update_ddm_status(f"{len(records)} registros carregados")
+            
+        except psycopg2.Error as db_error:
+            logging.error(f"Erro de banco de dados ao carregar dados DDM: {db_error}", exc_info=True)
+            self.update_ddm_status(f"Erro no banco: {db_error}", True)
+            QMessageBox.critical(self, "Erro de Banco de Dados", 
+                            f"Erro ao acessar o banco de dados:\n{str(db_error)}")
+            
+            # Tenta reconectar em caso de erro de banco
+            try:
+                if self.conn:
+                    self.conn.close()
+                self.connect_to_db()
+            except Exception as reconnect_error:
+                logging.error(f"Falha ao reconectar ao banco: {reconnect_error}")
+                
         except Exception as e:
-            logging.error(f"Erro ao carregar dados DDM: {e}")
-            QMessageBox.critical(self, "Erro", f"Erro ao carregar dados DDM: {str(e)}")
-        finally:
-            if conn:
-                conn.close()
+            logging.error(f"Erro inesperado ao carregar dados DDM: {str(e)}", exc_info=True)
+            self.update_ddm_status(f"Erro: {str(e)}", True)
+            QMessageBox.critical(self, "Erro", f"Erro ao carregar dados DDM:\n{str(e)}")
+            
+            # Em caso de erro geral, tenta reconectar
+            try:
+                if self.conn:
+                    self.conn.close()
+                self.connect_to_db()
+            except Exception as reconnect_error:
+                logging.error(f"Falha ao reconectar ao banco: {reconnect_error}")
 
     def export_uplink_ddm_to_csv(self):
         """Exporta os dados da tabela DDM para um arquivo CSV"""
