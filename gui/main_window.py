@@ -3736,50 +3736,133 @@ class OLTDatabaseGUI(QMainWindow):
             self.load_pon_traffic_data()
 
     def setup_pon_stats_tab(self):
-        """Configura a interface da aba 'Estatísticas da PON'."""
+        """Configura a interface da aba 'Estatísticas da PON' com layout ultra compacto."""
         layout = QVBoxLayout(self.pon_stats_tab)
-
-        # Painel de controle
+        layout.setContentsMargins(0, 0, 0, 0)  # Sem margens
+        layout.setSpacing(0)  # Sem espaçamento
+        
+        # Painel de controle ultra compacto - sem bordas visíveis
         control_panel = QWidget()
+        control_panel.setMaximumHeight(25)  # Altura máxima reduzida
         control_layout = QHBoxLayout(control_panel)
+        control_layout.setContentsMargins(5, 2, 5, 2)  # Apenas margens horizontais
+        control_layout.setSpacing(5)
+        
+        # Filtro de OLT
         self.pon_stats_olt_filter = QComboBox()
+        self.pon_stats_olt_filter.setMaximumWidth(120)
+        self.pon_stats_olt_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         if self.pon_stats_olt_filter not in self.olt_filters_to_update:
             self.olt_filters_to_update.append(self.pon_stats_olt_filter)
-        self.pon_stats_olt_filter.currentTextChanged.connect(self.load_pon_stats_data)
-
-        control_layout.addWidget(QLabel("Filtrar por OLT:"))
+        
+        # Filtro de F/S/P
+        self.pon_stats_fsp_filter = QComboBox()
+        self.pon_stats_fsp_filter.addItem("Todas as PONs")
+        self.pon_stats_fsp_filter.setEnabled(False)
+        self.pon_stats_fsp_filter.setMaximumWidth(100)
+        self.pon_stats_fsp_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        
+        # Conecta os sinais
+        self.pon_stats_olt_filter.currentTextChanged.connect(self.update_pon_stats_fsp_filter)
+        self.pon_stats_fsp_filter.currentTextChanged.connect(self.load_pon_stats_data)
+        
+        # Labels mínimos
+        olt_label = QLabel("OLT:")
+        olt_label.setStyleSheet("font-size: 9px; padding: 0px;")
+        fsp_label = QLabel("F/S/P:")
+        fsp_label.setStyleSheet("font-size: 9px; padding: 0px;")
+        
+        # Adiciona elementos ao layout
+        control_layout.addWidget(olt_label)
         control_layout.addWidget(self.pon_stats_olt_filter)
+        control_layout.addWidget(fsp_label)
+        control_layout.addWidget(self.pon_stats_fsp_filter)
         control_layout.addStretch()
+        
+        # Status ultra compacto
+        self.pon_stats_status_label = QLabel("0 regs")
+        self.pon_stats_status_label.setStyleSheet("color: green; font-weight: bold; font-size: 8px;")
+        self.pon_stats_status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        control_layout.addWidget(self.pon_stats_status_label)
+        
         layout.addWidget(control_panel)
-
-        # Usaremos duas tabelas lado a lado para melhor visualização
+        
+        # Splitter para as tabelas
         splitter = QSplitter(Qt.Horizontal)
-
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(1)  # Handle mais fino
+        
+        # Configuração comum para ambos os grupos
+        def setup_table_group(title, table):
+            group = QGroupBox(title)
+            layout_group = QVBoxLayout(group)
+            layout_group.setContentsMargins(2, 15, 2, 2)  # Apenas margem superior para o título
+            layout_group.setSpacing(0)
+            table.setColumnCount(4)
+            table.setHorizontalHeaderLabels(["F/S/P", "Hora", "Métrica", "Valor"])
+            table.horizontalHeader().setMinimumHeight(20)  # Cabeçalho mais baixo
+            table.verticalHeader().setDefaultSectionSize(18)  # Linhas mais baixas
+            layout_group.addWidget(table)
+            return group
+        
         # Tabela de Recebimento (RX)
-        rx_group = QGroupBox("Estatísticas de Recebimento (RX)")
-        rx_layout = QVBoxLayout(rx_group)
         self.pon_stats_rx_table = QTableWidget()
-        self.pon_stats_rx_table.setColumnCount(4)
-        self.pon_stats_rx_table.setHorizontalHeaderLabels(["F/S/P", "Hora", "Métrica", "Valor"])
-        rx_layout.addWidget(self.pon_stats_rx_table)
+        rx_group = setup_table_group("Estatísticas de Recebimento (RX)", self.pon_stats_rx_table)
         splitter.addWidget(rx_group)
-
+        
         # Tabela de Envio (TX)
-        tx_group = QGroupBox("Estatísticas de Envio (TX)")
-        tx_layout = QVBoxLayout(tx_group)
         self.pon_stats_tx_table = QTableWidget()
-        self.pon_stats_tx_table.setColumnCount(4)
-        self.pon_stats_tx_table.setHorizontalHeaderLabels(["F/S/P", "Hora", "Métrica", "Valor"])
-        tx_layout.addWidget(self.pon_stats_tx_table)
+        tx_group = setup_table_group("Estatísticas de Envio (TX)", self.pon_stats_tx_table)
         splitter.addWidget(tx_group)
-
+        
+        splitter.setSizes([500, 500])
         layout.addWidget(splitter)
-
+        
+        # Timer
         self.pon_stats_timer = QTimer(self)
         self.pon_stats_timer.setInterval(60000)
         self.pon_stats_timer.timeout.connect(self.load_pon_stats_data)
 
-# Em gui/main_window.py, substitua a sua função load_pon_stats_data por esta:
+    def update_pon_stats_fsp_filter(self):
+        """Atualiza o filtro de F/S/P com base na OLT selecionada para a aba de estatísticas PON."""
+        selected_olt = self.pon_stats_olt_filter.currentText()
+        
+        # Bloqueia sinais para evitar chamadas recursivas
+        self.pon_stats_fsp_filter.blockSignals(True)
+        self.pon_stats_fsp_filter.clear()
+        self.pon_stats_fsp_filter.addItem("Todas as PONs")
+        
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            try:
+                # Extrai o identificador da OLT
+                olt_identifier = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                
+                # Busca F/S/P distintos para essa OLT na tabela de estatísticas
+                query = "SELECT DISTINCT fsp FROM pon_statistics_packets WHERE olt_identifier = %s ORDER BY fsp;"
+                self.cursor.execute(query, (olt_identifier,))
+                fsps = [row[0] for row in self.cursor.fetchall()]
+                
+                for fsp in fsps:
+                    self.pon_stats_fsp_filter.addItem(fsp)
+                
+                # Habilita o filtro de F/S/P
+                self.pon_stats_fsp_filter.setEnabled(True)
+                
+                logging.info(f"F/S/P carregados para {olt_identifier}: {fsps}")
+            except Exception as e:
+                logging.error(f"Erro ao carregar F/S/P para o filtro de estatísticas PON: {e}")
+                if self.conn:
+                    self.conn.rollback()
+        else:
+            # Desabilita o filtro de F/S/P se nenhuma OLT for selecionada
+            self.pon_stats_fsp_filter.setEnabled(False)
+            logging.info("Nenhuma OLT selecionada, filtro de F/S/P desabilitado")
+        
+        self.pon_stats_fsp_filter.blockSignals(False)
+        
+        # Carrega os dados após atualizar os filtros
+        self.load_pon_stats_data()
+
 
     def load_pon_stats_data(self):
         """Carrega os dados de estatísticas de pacotes e os exibe nas tabelas."""
@@ -3788,21 +3871,28 @@ class OLTDatabaseGUI(QMainWindow):
         self.pon_stats_tx_table.setRowCount(0)
         
         selected_olt = self.pon_stats_olt_filter.currentText()
+        selected_fsp = self.pon_stats_fsp_filter.currentText()
         params = []
         where_clause = ""
+        
         if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
             olt_identifier = selected_olt.split()[-1]
             where_clause = "WHERE olt_identifier = %s"
             params.append(olt_identifier)
             
+        if selected_fsp != "Todas as PONs":
+            if where_clause:
+                where_clause += " AND fsp = %s"
+            else:
+                where_clause = "WHERE fsp = %s"
+            params.append(selected_fsp)
+            
         query = f"SELECT * FROM pon_statistics_packets {where_clause} ORDER BY collection_time DESC LIMIT 500;"
-
         try:
             self.cursor.execute(query, tuple(params))
             results = self.cursor.fetchall()
             
-            # --- INÍCIO DA CORREÇÃO ---
-            # Adiciona a função enumerate() para obter o índice (i) e o item (desc) corretamente.
+            # --- CORREÇÃO: Adiciona a função enumerate() para obter o índice (i) e o item (desc) corretamente.
             col_map = {desc[0]: i for i, desc in enumerate(self.cursor.description)}
             # --- FIM DA CORREÇÃO ---
             
@@ -3832,12 +3922,21 @@ class OLTDatabaseGUI(QMainWindow):
                     self.pon_stats_tx_table.setItem(tx_row, 2, QTableWidgetItem(metric.replace('tx_', '').replace('_', ' ').title()))
                     self.pon_stats_tx_table.setItem(tx_row, 3, QTableWidgetItem(f"{value:,}" if value is not None else "0"))
                     tx_row += 1
-
+            
             self.pon_stats_rx_table.resizeColumnsToContents()
             self.pon_stats_tx_table.resizeColumnsToContents()
-
+            
+            # Atualiza o status com a contagem de registros
+            total_records = len(results)
+            self.pon_stats_status_label.setText(f"Status: {total_records} registros carregados")
+            self.pon_stats_status_label.setStyleSheet("color: green; font-weight: bold;")
+            
         except Exception as e:
             logging.error(f"Erro ao carregar estatísticas de pacotes: {e}", exc_info=True)
+            
+            # Atualiza o status para mostrar erro
+            self.pon_stats_status_label.setText("Status: Erro ao carregar dados")
+            self.pon_stats_status_label.setStyleSheet("color: red; font-weight: bold;")
 
     def update_pon_stats_display(self):
         """Atualiza a exibição de estatísticas de pacotes se a aba estiver ativa."""
@@ -4312,8 +4411,8 @@ class OLTDatabaseGUI(QMainWindow):
             
             # Atualiza o contador de registros com estilo normal
             if hasattr(self, 'ont_traffic_record_count'):
-                self.ont_traffic_record_count.setText(f"Status: {len(results)} registros")
-                self.ont_traffic_record_count.setStyleSheet("color: #666; font-size: 10px;")
+                self.ont_traffic_record_count.setText(f"Status: {len(results)} registros carregados")
+                self.ont_traffic_record_count.setStyleSheet("color: green; font-weight: bold;")
             
         except Exception as e:
             logging.error(f"Erro ao carregar dados de tráfego por ONT: {str(e)}", exc_info=True)
