@@ -136,9 +136,8 @@ class OLTDatabaseGUI(QMainWindow):
         db_signals.pon_port_state_updated.connect(self.update_pon_port_state_display)
         db_signals.pon_stats_packets_updated.connect(self.update_pon_stats_display)
         db_signals.ont_traffic_data_updated.connect(self.update_ont_traffic_display)
-        db_signals.pon_port_state_updated.connect(self.update_pon_port_state_display)
         db_signals.ont_eth_stats_updated.connect(self.update_ont_eth_display) # Conecta o novo sinal
-        db_signals.uplink_ddm_updated.connect(self.load_uplink_ddm_data)
+
         # Conectar o sinal para atualizar a aba DDM
         try:
             db_signals.data_updated.connect(self.load_uplink_ddm_data)
@@ -224,6 +223,12 @@ class OLTDatabaseGUI(QMainWindow):
         self.caixa_stats_tab = QWidget()
         self.tab_widget.addTab(self.caixa_stats_tab, "Estatísticas por Caixa")
         self.setup_caixa_stats_tab()
+
+            
+        # Configura timers existentes
+        self.caixa_stats_update_timer = QTimer(self)
+        self.caixa_stats_update_timer.setInterval(30000)
+        self.caixa_stats_update_timer.timeout.connect(self.load_caixa_stats_data)
         
         self.long_offline_tab = QWidget()
         self.tab_widget.addTab(self.long_offline_tab, "Longo Tempo Offline")
@@ -1100,55 +1105,234 @@ class OLTDatabaseGUI(QMainWindow):
         self.active_ont_olt_shell.send(command + "\n")
 
     def setup_caixa_stats_tab(self):
-        """Configura a interface da aba 'Estatísticas por Caixa' com uma visualização em tabela."""
+        """Configura a interface da aba 'Estatísticas por Caixa' com filtros."""
         layout = QVBoxLayout(self.caixa_stats_tab)
-
-        # -- Painel de Controle (Filtro) --
+        layout.setContentsMargins(5, 5, 5, 5)
+        
+        # -- Painel de Controle (Filtros e Ações) --
         control_panel = QWidget()
-        control_layout = QHBoxLayout(control_panel)
-
-        self.caixa_olt_filter_label = QLabel("Filtrar por OLT:")
+        control_layout = QVBoxLayout(control_panel)
+        control_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Primeira linha de filtros: OLT e Tipo de Caixa
+        filters_row1 = QWidget()
+        filters_row1_layout = QHBoxLayout(filters_row1)
+        filters_row1_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.caixa_olt_filter_label = QLabel("OLT:")
         self.caixa_olt_filter = QComboBox()
         if self.caixa_olt_filter not in self.olt_filters_to_update:
             self.olt_filters_to_update.append(self.caixa_olt_filter)
-        
         self.caixa_olt_filter.currentTextChanged.connect(self.load_caixa_stats_data)
-
-        control_layout.addWidget(self.caixa_olt_filter_label)
-        control_layout.addWidget(self.caixa_olt_filter)
-        control_layout.addStretch()
+        
+        self.caixa_tipo_filter_label = QLabel("Tipo:")
+        self.caixa_tipo_filter = QComboBox()
+        self.caixa_tipo_filter.addItem("Todos")
+        self.caixa_tipo_filter.addItem("Primária")
+        self.caixa_tipo_filter.addItem("Secundária")
+        self.caixa_tipo_filter.currentTextChanged.connect(self.update_caixa_quantidade_filter)
+        filters_row1_layout.addWidget(self.caixa_olt_filter_label)
+        filters_row1_layout.addWidget(self.caixa_olt_filter)
+        filters_row1_layout.addWidget(self.caixa_tipo_filter_label)
+        filters_row1_layout.addWidget(self.caixa_tipo_filter)
+        filters_row1_layout.addStretch()
+        
+        control_layout.addWidget(filters_row1)
+        
+        # Segunda linha de filtros: Status das Caixas
+        filters_row2 = QWidget()
+        filters_row2_layout = QHBoxLayout(filters_row2)
+        filters_row2_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Filtro de Status (Normal, Observação, Crítico)
+        filters_row2_layout.addWidget(QLabel("Status:"))
+        self.caixa_status_filter = QComboBox()
+        self.caixa_status_filter.addItem("Todos")
+        self.caixa_status_filter.addItem("Normal")
+        self.caixa_status_filter.addItem("Observação")
+        self.caixa_status_filter.addItem("Crítico")
+        self.caixa_status_filter.currentTextChanged.connect(self.load_caixa_stats_data)
+        filters_row2_layout.addWidget(self.caixa_status_filter)
+        
+        # Filtro de Percentual Offline
+        filters_row2_layout.addWidget(QLabel("% Offline:"))
+        self.caixa_offline_filter = QComboBox()
+        self.caixa_offline_filter.addItem("Todos")
+        self.caixa_offline_filter.addItem("0% (Todas Online)")
+        self.caixa_offline_filter.addItem("1-25%")
+        self.caixa_offline_filter.addItem("26-50%")
+        self.caixa_offline_filter.addItem("51-75%")
+        self.caixa_offline_filter.addItem("76-99%")
+        self.caixa_offline_filter.addItem("100% (Todas Offline)")
+        self.caixa_offline_filter.currentTextChanged.connect(self.load_caixa_stats_data)
+        filters_row2_layout.addWidget(self.caixa_offline_filter)
+        
+        # Filtro de Quantidade de ONTs
+        filters_row2_layout.addWidget(QLabel("Qtd. ONTs:"))
+        self.caixa_quantidade_filter = QComboBox()
+        self.caixa_quantidade_filter.addItem("Todos")
+        # Opções iniciais (serão atualizadas baseado no tipo)
+        self.caixa_quantidade_filter.addItem("0-16")
+        self.caixa_quantidade_filter.addItem("17-32")
+        self.caixa_quantidade_filter.addItem("33-64")
+        self.caixa_quantidade_filter.addItem("65-96")
+        self.caixa_quantidade_filter.addItem("97-128")
+        self.caixa_quantidade_filter.currentTextChanged.connect(self.load_caixa_stats_data)
+        filters_row2_layout.addWidget(self.caixa_quantidade_filter)
+        
+        filters_row2_layout.addStretch()
+        control_layout.addWidget(filters_row2)
+        
+        # Terceira linha: Botões de ação
+        actions_row = QWidget()
+        actions_layout = QHBoxLayout(actions_row)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Botão de atualização manual
+        refresh_btn = QPushButton("Atualizar")
+        refresh_btn.setMaximumWidth(80)
+        refresh_btn.clicked.connect(self.load_caixa_stats_data)
+        
+        # Botão de limpar filtros
+        clear_filters_btn = QPushButton("Limpar Filtros")
+        clear_filters_btn.setMaximumWidth(100)
+        clear_filters_btn.clicked.connect(self.clear_caixa_stats_filters)
+        
+        # Botão de exportar
+        export_btn = QPushButton("Exportar CSV")
+        export_btn.setMaximumWidth(100)
+        export_btn.clicked.connect(self.export_caixa_stats_to_csv)
+        
+        actions_layout.addWidget(refresh_btn)
+        actions_layout.addWidget(clear_filters_btn)
+        actions_layout.addStretch()
+        actions_layout.addWidget(export_btn)
+        
+        control_layout.addWidget(actions_row)
         layout.addWidget(control_panel)
-
+        
         # -- Tabela de Estatísticas --
         self.caixa_stats_table = QTableWidget()
         self.caixa_stats_table.setColumnCount(5)
-        self.caixa_stats_table.setHorizontalHeaderLabels(["Tipo", "Nome da Caixa", "Total de ONTs", "ONTs Offline", "% Offline"])
+        self.caixa_stats_table.setHorizontalHeaderLabels([
+            "Tipo", "Nome da Caixa", "Total de ONTs", "ONTs Offline", "% Offline"
+        ])
         self.caixa_stats_table.setSortingEnabled(True)
         self.caixa_stats_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.caixa_stats_table.setAlternatingRowColors(True)
+        
+        # Ajuste de largura das colunas
+        self.caixa_stats_table.setColumnWidth(0, 80)   # Tipo
+        self.caixa_stats_table.setColumnWidth(1, 150)  # Nome da Caixa
+        self.caixa_stats_table.setColumnWidth(2, 100)  # Total de ONTs
+        self.caixa_stats_table.setColumnWidth(3, 100)  # ONTs Offline
+        self.caixa_stats_table.setColumnWidth(4, 80)   # % Offline
+        
         layout.addWidget(self.caixa_stats_table)
+        
+        # -- Status Label --
+        status_panel = QWidget()
+        status_layout = QHBoxLayout(status_panel)
+        status_layout.setContentsMargins(0, 5, 0, 0)
+        
+        self.caixa_stats_status_label = QLabel("Status: Pronto")
+        self.caixa_stats_status_label.setStyleSheet("color: green; font-weight: bold;")
+        status_layout.addWidget(self.caixa_stats_status_label)
+        status_layout.addStretch()
+        
+        layout.addWidget(status_panel)
+        
+        # Timer para atualização automática
+        self.caixa_stats_update_timer = QTimer(self)
+        self.caixa_stats_update_timer.setInterval(30000)  # 30 segundos
+        self.caixa_stats_update_timer.timeout.connect(self.load_caixa_stats_data)
 
+    def clear_caixa_stats_filters(self):
+        """Limpa todos os filtros da aba Estatísticas por Caixa."""
+        # Reseta o filtro de OLT
+        self.caixa_olt_filter.setCurrentIndex(0)
+        
+        # Reseta os outros filtros
+        self.caixa_tipo_filter.setCurrentIndex(0)
+        self.caixa_status_filter.setCurrentIndex(0)
+        self.caixa_offline_filter.setCurrentIndex(0)
+        self.caixa_quantidade_filter.setCurrentIndex(0)
+        
+        # Recarrega os dados
+        self.load_caixa_stats_data()
 
-
+    def update_caixa_quantidade_filter(self):
+        """Atualiza as opções do filtro de quantidade baseado no tipo de caixa selecionado."""
+        selected_tipo = self.caixa_tipo_filter.currentText()
+        
+        # Salva a seleção atual para restaurar depois
+        current_selection = self.caixa_quantidade_filter.currentText()
+        
+        # Bloqueia sinais para evitar chamadas recursivas
+        self.caixa_quantidade_filter.blockSignals(True)
+        self.caixa_quantidade_filter.clear()
+        self.caixa_quantidade_filter.addItem("Todos")
+        
+        if selected_tipo == "Todos" or selected_tipo == "Primária":
+            # Opções para caixas primárias (até 128 ONTs)
+            self.caixa_quantidade_filter.addItem("0-16")
+            self.caixa_quantidade_filter.addItem("17-32")
+            self.caixa_quantidade_filter.addItem("33-64")
+            self.caixa_quantidade_filter.addItem("65-96")
+            self.caixa_quantidade_filter.addItem("97-128")
+        elif selected_tipo == "Secundária":
+            # Opções para caixas secundárias (até 16 ONTs)
+            self.caixa_quantidade_filter.addItem("0-4")
+            self.caixa_quantidade_filter.addItem("5-8")
+            self.caixa_quantidade_filter.addItem("9-12")
+            self.caixa_quantidade_filter.addItem("13-16")
+        
+        # Restaura a seleção anterior se possível
+        index = self.caixa_quantidade_filter.findText(current_selection)
+        if index != -1:
+            self.caixa_quantidade_filter.setCurrentIndex(index)
+        else:
+            self.caixa_quantidade_filter.setCurrentIndex(0)
+        
+        # Libera os sinais
+        self.caixa_quantidade_filter.blockSignals(False)
+        
+        # Recarrega os dados
+        self.load_caixa_stats_data()
 
     def load_caixa_stats_data(self):
         """Carrega os dados das caixas e os exibe em uma tabela, destacando caixas com problemas."""
         logging.info("Carregando estatísticas por caixa para visualização em tabela.")
         
+        # Atualiza status
+        if hasattr(self, 'caixa_stats_status_label'):
+            self.caixa_stats_status_label.setText("Status: Carregando...")
+            self.caixa_stats_status_label.setStyleSheet("color: orange; font-weight: bold;")
+        
         self.caixa_stats_table.setSortingEnabled(False)
         self.caixa_stats_table.setRowCount(0)
-
+        
+        # Obtém os valores dos filtros
         selected_olt = self.caixa_olt_filter.currentText()
+        selected_tipo = self.caixa_tipo_filter.currentText()
+        selected_status = self.caixa_status_filter.currentText()
+        selected_offline = self.caixa_offline_filter.currentText()
+        selected_quantidade = self.caixa_quantidade_filter.currentText()
+        
         params = []
-        olt_condition = ""
+        conditions = []
+        
+        # Filtro de OLT
         if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
             try:
                 olt_identifier = selected_olt.split()[-1]
-                olt_condition = "AND lo.olt_identifier = %s"
+                conditions.append("lo.olt_identifier = %s")
                 params.append(olt_identifier)
             except IndexError:
                 logging.warning(f"Formato de OLT inesperado no filtro: {selected_olt}")
-
-        query = f"""
+        
+        # Constrói a consulta SQL base
+        query = """
             WITH latest_onts AS (
                 SELECT
                     olt_identifier, serial_number, primaria, secundaria, status,
@@ -1172,7 +1356,14 @@ class OLTDatabaseGUI(QMainWindow):
                 ( (c.caixa_tipo = 'Primária' AND lo.primaria = c.caixa_nome) OR
                 (c.caixa_tipo = 'Secundária' AND lo.secundaria = c.caixa_nome) )
             )
-            WHERE lo.rn = 1 {olt_condition}
+            WHERE lo.rn = 1
+        """
+        
+        # Adiciona as condições WHERE
+        if conditions:
+            query += " AND " + " AND ".join(conditions)
+        
+        query += """
             GROUP BY c.caixa_tipo, c.caixa_nome
             ORDER BY
                 CASE
@@ -1184,15 +1375,96 @@ class OLTDatabaseGUI(QMainWindow):
         """
         
         try:
-            self.cursor.execute(query, tuple(params))
-            results = self.cursor.fetchall()
+            self.cursor.execute(query, tuple(params) if params else None)
+            all_results = self.cursor.fetchall()
             
-            self.caixa_stats_table.setRowCount(len(results))
+            # Filtra os resultados com base nos filtros selecionados
+            filtered_results = []
             
-            for row_idx, (caixa_tipo, caixa_nome, total_onts, onts_offline) in enumerate(results):
-                onts_offline = onts_offline or 0
+            for row_idx, (caixa_tipo, caixa_nome, total_onts, onts_offline) in enumerate(all_results):
+                # Calcula o percentual offline
                 percent_offline = (onts_offline / total_onts * 100) if total_onts > 0 else 0
-
+                
+                # Verifica cada filtro
+                include_row = True
+                
+                # Filtro de Tipo
+                if include_row and selected_tipo != "Todos":
+                    if selected_tipo == "Primária" and caixa_tipo != "Primária":
+                        include_row = False
+                    elif selected_tipo == "Secundária" and caixa_tipo != "Secundária":
+                        include_row = False
+                
+                # Filtro de Status
+                if include_row and selected_status != "Todos":
+                    if selected_status == "Normal" and onts_offline == 0:
+                        pass  # OK, inclui
+                    elif selected_status == "Observação" and not (0 < onts_offline < total_onts):
+                        include_row = False
+                    elif selected_status == "Crítico" and onts_offline != total_onts:
+                        include_row = False
+                    elif selected_status == "Normal" and onts_offline > 0:
+                        include_row = False
+                
+                # Filtro de Percentual Offline
+                if include_row and selected_offline != "Todos":
+                    if selected_offline == "0% (Todas Online)" and percent_offline > 0:
+                        include_row = False
+                    elif selected_offline == "1-25%" and not (1 <= percent_offline <= 25):
+                        include_row = False
+                    elif selected_offline == "26-50%" and not (26 <= percent_offline <= 50):
+                        include_row = False
+                    elif selected_offline == "51-75%" and not (51 <= percent_offline <= 75):
+                        include_row = False
+                    elif selected_offline == "76-99%" and not (76 <= percent_offline <= 99):
+                        include_row = False
+                    elif selected_offline == "100% (Todas Offline)" and percent_offline < 100:
+                        include_row = False
+                
+                # Filtro de Quantidade de ONTs (baseado no tipo de caixa)
+                if include_row and selected_quantidade != "Todos":
+                    if selected_tipo == "Todos" or selected_tipo == "Primária":
+                        # Faixas para caixas primárias
+                        if selected_quantidade == "0-16" and not (0 <= total_onts <= 16):
+                            include_row = False
+                        elif selected_quantidade == "17-32" and not (17 <= total_onts <= 32):
+                            include_row = False
+                        elif selected_quantidade == "33-64" and not (33 <= total_onts <= 64):
+                            include_row = False
+                        elif selected_quantidade == "65-96" and not (65 <= total_onts <= 96):
+                            include_row = False
+                        elif selected_quantidade == "97-128" and not (97 <= total_onts <= 128):
+                            include_row = False
+                    elif selected_tipo == "Secundária":
+                        # Faixas para caixas secundárias
+                        if selected_quantidade == "0-4" and not (0 <= total_onts <= 4):
+                            include_row = False
+                        elif selected_quantidade == "5-8" and not (5 <= total_onts <= 8):
+                            include_row = False
+                        elif selected_quantidade == "9-12" and not (9 <= total_onts <= 12):
+                            include_row = False
+                        elif selected_quantidade == "13-16" and not (13 <= total_onts <= 16):
+                            include_row = False
+                    else:
+                        # Se "Todos" estiver selecionado, mas o tipo for específico, usa as faixas correspondentes
+                        if caixa_tipo == "Secundária":
+                            if selected_quantidade == "0-16" and not (0 <= total_onts <= 16):
+                                include_row = False
+                            elif selected_quantidade == "17-32" and total_onts > 16:
+                                include_row = False
+                            elif selected_quantidade == "33-64" and total_onts > 16:
+                                include_row = False
+                            elif selected_quantidade == "65-96" and total_onts > 16:
+                                include_row = False
+                            elif selected_quantidade == "97-128" and total_onts > 16:
+                                include_row = False
+                
+                if include_row:
+                    filtered_results.append((caixa_tipo, caixa_nome, total_onts, onts_offline, percent_offline))
+            
+            self.caixa_stats_table.setRowCount(len(filtered_results))
+            
+            for row_idx, (caixa_tipo, caixa_nome, total_onts, onts_offline, percent_offline) in enumerate(filtered_results):
                 items = [
                     QTableWidgetItem(caixa_tipo),
                     QTableWidgetItem(caixa_nome),
@@ -1201,30 +1473,87 @@ class OLTDatabaseGUI(QMainWindow):
                     QTableWidgetItem(f"{percent_offline:.1f}%")
                 ]
                 
+                # Aplica cores com base no status
                 color = None
                 if onts_offline > 0:
                     if total_onts == onts_offline:
-                        color = QColor("#E53935") # Vermelho para 100% offline
+                        color = QColor("#E53935")  # Vermelho para 100% offline
                     else:
-                        color = QColor("#FFC107") # Amarelo para parcialmente offline
-
+                        color = QColor("#FFC107")  # Amarelo para parcialmente offline
+                else:
+                    color = QColor("#43A047")  # Verde para todas online
+                
                 for col_idx, item in enumerate(items):
                     if color:
                         item.setBackground(color)
                     self.caixa_stats_table.setItem(row_idx, col_idx, item)
-
+            
             self.caixa_stats_table.resizeColumnsToContents()
             self.caixa_stats_table.setSortingEnabled(True)
-            logging.info(f"{len(results)} registros de estatísticas de caixa carregados.")
-
+            logging.info(f"{len(filtered_results)} registros de estatísticas de caixa carregados (filtrados de {len(all_results)} totais).")
+            
+            # Atualiza status
+            if hasattr(self, 'caixa_stats_status_label'):
+                self.caixa_stats_status_label.setText(f"Status: {len(filtered_results)} registros carregados")
+                self.caixa_stats_status_label.setStyleSheet("color: green; font-weight: bold;")
+            
         except psycopg2.Error as e:
             self.conn.rollback() # Desfaz a transação em caso de erro
             QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível carregar as estatísticas:\n{e}")
             logging.error(f"Erro ao carregar estatísticas por caixa: {e}", exc_info=True)
+            
+            # Atualiza status de erro
+            if hasattr(self, 'caixa_stats_status_label'):
+                self.caixa_stats_status_label.setText("Status: Erro ao carregar")
+                self.caixa_stats_status_label.setStyleSheet("color: red; font-weight: bold;")
+                
         except Exception as e:
             QMessageBox.critical(self, "Erro ao Carregar Estatísticas", f"Não foi possível carregar os dados das caixas: {str(e)}")
             logging.error(f"Erro ao carregar estatísticas por caixa: {e}", exc_info=True)
+            
+            # Atualiza status de erro
+            if hasattr(self, 'caixa_stats_status_label'):
+                self.caixa_stats_status_label.setText("Status: Erro ao carregar")
+                self.caixa_stats_status_label.setStyleSheet("color: red; font-weight: bold;")
     
+    def export_caixa_stats_to_csv(self):
+        """Exporta os dados da tabela de estatísticas de caixa para um arquivo CSV."""
+        if self.caixa_stats_table.rowCount() == 0:
+            QMessageBox.information(self, "Nada para Exportar", "A tabela de estatísticas de caixa está vazia.")
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Estatísticas de Caixa", 
+            f"estatisticas_caixa_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "Arquivos CSV (*.csv);;Todos os Arquivos (*)"
+        )
+        
+        if not filename:
+            return
+        
+        try:
+            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile, delimiter=';')
+                
+                # Escreve cabeçalho
+                headers = [self.caixa_stats_table.horizontalHeaderItem(col).text() 
+                        for col in range(self.caixa_stats_table.columnCount())]
+                writer.writerow(headers)
+                
+                # Escreve dados
+                for row in range(self.caixa_stats_table.rowCount()):
+                    row_data = [self.caixa_stats_table.item(row, col).text() 
+                            for col in range(self.caixa_stats_table.columnCount())]
+                    writer.writerow(row_data)
+            
+            QMessageBox.information(self, "Exportação Concluída", 
+                                f"Dados exportados com sucesso para:\n{filename}")
+            logging.info(f"Estatísticas de caixa exportadas para {filename}")
+            
+        except Exception as e:
+            logging.error(f"Erro ao exportar estatísticas de caixa: {e}")
+            QMessageBox.critical(self, "Erro de Exportação", 
+                            f"Não foi possível exportar os dados:\n{str(e)}")
 
     def load_long_offline_data(self):
         """Carrega os dados das ONTs com mais de 30 dias de inatividade."""
@@ -3641,71 +3970,465 @@ class OLTDatabaseGUI(QMainWindow):
         self.load_pon_traffic_data()
 
     def setup_pon_state_tab(self):
-        """Configura a interface da aba 'Estado PON'."""
+        """Configura a interface da aba 'Estado PON' com filtros avançados."""
         layout = QVBoxLayout(self.pon_state_tab)
-
-        # -- Painel de Controle (Filtro e Ações) --
+        layout.setContentsMargins(5, 5, 5, 5)
+        
+        # -- Painel de Controle (Filtros e Ações) --
         control_panel = QWidget()
-        control_layout = QHBoxLayout(control_panel)
-
-        self.pon_state_olt_filter_label = QLabel("Filtrar por OLT:")
+        control_layout = QVBoxLayout(control_panel)
+        control_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Primeira linha de filtros: OLT e F/S/P
+        filters_row1 = QWidget()
+        filters_row1_layout = QHBoxLayout(filters_row1)
+        filters_row1_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.pon_state_olt_filter_label = QLabel("OLT:")
         self.pon_state_olt_filter = QComboBox()
         if self.pon_state_olt_filter not in self.olt_filters_to_update:
             self.olt_filters_to_update.append(self.pon_state_olt_filter)
-
-        self.pon_state_olt_filter.currentTextChanged.connect(self.load_pon_state_data)
-
+        self.pon_state_olt_filter.currentTextChanged.connect(self.update_pon_state_fsp_filter)
+        
+        self.pon_state_fsp_filter_label = QLabel("F/S/P:")
+        self.pon_state_fsp_filter = QComboBox()
+        self.pon_state_fsp_filter.addItem("Todas as PONs")
+        self.pon_state_fsp_filter.setEnabled(False)
+        self.pon_state_fsp_filter.currentTextChanged.connect(self.load_pon_state_data)
+        
+        filters_row1_layout.addWidget(self.pon_state_olt_filter_label)
+        filters_row1_layout.addWidget(self.pon_state_olt_filter)
+        filters_row1_layout.addWidget(self.pon_state_fsp_filter_label)
+        filters_row1_layout.addWidget(self.pon_state_fsp_filter)
+        filters_row1_layout.addStretch()
+        
+        control_layout.addWidget(filters_row1)
+        
+        # Segunda linha de filtros: Status dos parâmetros
+        filters_row2 = QWidget()
+        filters_row2_layout = QHBoxLayout(filters_row2)
+        filters_row2_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Filtro de Estado Porta
+        filters_row2_layout.addWidget(QLabel("Estado Porta:"))
+        self.pon_state_port_state_filter = QComboBox()
+        self.pon_state_port_state_filter.addItem("Todos")
+        self.pon_state_port_state_filter.addItem("OK")
+        self.pon_state_port_state_filter.addItem("Observação")
+        self.pon_state_port_state_filter.addItem("Crítico")
+        self.pon_state_port_state_filter.currentTextChanged.connect(self.load_pon_state_data)
+        filters_row2_layout.addWidget(self.pon_state_port_state_filter)
+        
+        # Filtro de Detecção Sinal
+        filters_row2_layout.addWidget(QLabel("Detecção Sinal:"))
+        self.pon_state_signal_filter = QComboBox()
+        self.pon_state_signal_filter.addItem("Todos")
+        self.pon_state_signal_filter.addItem("OK")
+        self.pon_state_signal_filter.addItem("Observação")
+        self.pon_state_signal_filter.addItem("Crítico")
+        self.pon_state_signal_filter.currentTextChanged.connect(self.load_pon_state_data)
+        filters_row2_layout.addWidget(self.pon_state_signal_filter)
+        
+        # Filtro de Temperatura
+        filters_row2_layout.addWidget(QLabel("Temperatura:"))
+        self.pon_state_temp_filter = QComboBox()
+        self.pon_state_temp_filter.addItem("Todos")
+        self.pon_state_temp_filter.addItem("OK")
+        self.pon_state_temp_filter.addItem("Observação")
+        self.pon_state_temp_filter.addItem("Crítico")
+        self.pon_state_temp_filter.currentTextChanged.connect(self.load_pon_state_data)
+        filters_row2_layout.addWidget(self.pon_state_temp_filter)
+        
+        # Filtro de Corrente TX
+        filters_row2_layout.addWidget(QLabel("Corrente TX:"))
+        self.pon_state_bias_filter = QComboBox()
+        self.pon_state_bias_filter.addItem("Todos")
+        self.pon_state_bias_filter.addItem("OK")
+        self.pon_state_bias_filter.addItem("Observação")
+        self.pon_state_bias_filter.addItem("Crítico")
+        self.pon_state_bias_filter.currentTextChanged.connect(self.load_pon_state_data)
+        filters_row2_layout.addWidget(self.pon_state_bias_filter)
+        
+        # Filtro de Potência TX
+        filters_row2_layout.addWidget(QLabel("Potência TX:"))
+        self.pon_state_tx_power_filter = QComboBox()
+        self.pon_state_tx_power_filter.addItem("Todos")
+        self.pon_state_tx_power_filter.addItem("OK")
+        self.pon_state_tx_power_filter.addItem("Observação")
+        self.pon_state_tx_power_filter.addItem("Crítico")
+        self.pon_state_tx_power_filter.currentTextChanged.connect(self.load_pon_state_data)
+        filters_row2_layout.addWidget(self.pon_state_tx_power_filter)
+        
+        filters_row2_layout.addStretch()
+        control_layout.addWidget(filters_row2)
+        
+        # Terceira linha: Botões de ação
+        actions_row = QWidget()
+        actions_layout = QHBoxLayout(actions_row)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Botão de atualização manual
+        refresh_btn = QPushButton("Atualizar")
+        refresh_btn.setMaximumWidth(80)
+        refresh_btn.clicked.connect(self.load_pon_state_data)
+        
+        # Botão de limpar filtros
+        clear_filters_btn = QPushButton("Limpar Filtros")
+        clear_filters_btn.setMaximumWidth(100)
+        clear_filters_btn.clicked.connect(self.clear_pon_state_filters)
+        
+        # Botão de legenda
+        legend_btn = QPushButton("Legenda")
+        legend_btn.setMaximumWidth(80)
+        legend_btn.setStyleSheet("background-color: #e1f5fe; font-weight: bold;")
+        legend_btn.clicked.connect(self.show_pon_state_legend)
+        
+        # Botão de exportar
         export_btn = QPushButton("Exportar CSV")
+        export_btn.setMaximumWidth(100)
         export_btn.clicked.connect(self.export_pon_state_to_csv)
-
-        control_layout.addWidget(self.pon_state_olt_filter_label)
-        control_layout.addWidget(self.pon_state_olt_filter)
-        control_layout.addStretch()
-        control_layout.addWidget(export_btn)
+        
+        actions_layout.addWidget(refresh_btn)
+        actions_layout.addWidget(clear_filters_btn)
+        actions_layout.addWidget(legend_btn)
+        actions_layout.addStretch()
+        actions_layout.addWidget(export_btn)
+        
+        control_layout.addWidget(actions_row)
         layout.addWidget(control_panel)
-
+        
         # -- Tabela de Estado da Porta PON --
         self.pon_state_table = QTableWidget()
-        # --- INÍCIO DA MODIFICAÇÃO ---
-        self.pon_state_table.setColumnCount(18) # Aumentado para 18
+        self.pon_state_table.setColumnCount(18)
         self.pon_state_table.setHorizontalHeaderLabels([
             "OLT", "F/S/P", "Hora da Coleta", "Estado Porta", "Estado Admin", "Causa Queda", "Última Subida", "Última Queda",
             "Detecção Sinal", "Banda Disp. (Kbps)", "Banda Garantida Disp.", "ONT Rogue", "Status Módulo",
             "Estado Laser", "Falha TX", "Temperatura (°C)", "Corrente TX (mA)", "Potência TX (dBm)"
         ])
+        
+        # Configurações da tabela
         self.pon_state_table.setSortingEnabled(True)
         self.pon_state_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.pon_state_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.pon_state_table.setAlternatingRowColors(True)
+        self.pon_state_table.horizontalHeader().setStretchLastSection(True)
+        
+        # Ajuste de largura das colunas
+        column_widths = [60, 70, 140, 80, 80, 120, 140, 140, 100, 120, 140, 80, 80, 80, 80, 80, 80, 100]
+        for i, width in enumerate(column_widths):
+            self.pon_state_table.setColumnWidth(i, width)
+        
         layout.addWidget(self.pon_state_table)
-
+        
+        # -- Status Label --
+        status_panel = QWidget()
+        status_layout = QHBoxLayout(status_panel)
+        status_layout.setContentsMargins(0, 5, 0, 0)
+        
+        self.pon_state_status_label = QLabel("Status: Pronto")
+        self.pon_state_status_label.setStyleSheet("color: green; font-weight: bold;")
+        status_layout.addWidget(self.pon_state_status_label)
+        status_layout.addStretch()
+        
+        layout.addWidget(status_panel)
+        
         # Timer para atualização automática
         self.pon_state_timer = QTimer(self)
         self.pon_state_timer.setInterval(60000)  # 60 segundos
         self.pon_state_timer.timeout.connect(self.load_pon_state_data)
 
+    def update_pon_state_fsp_filter(self):
+        """Atualiza o filtro de F/S/P com base na OLT selecionada."""
+        selected_olt = self.pon_state_olt_filter.currentText()
+        
+        # Bloqueia sinais para evitar chamadas recursivas
+        self.pon_state_fsp_filter.blockSignals(True)
+        self.pon_state_fsp_filter.clear()
+        self.pon_state_fsp_filter.addItem("Todas as PONs")
+        
+        if selected_olt and selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
+            try:
+                # Extrai o identificador da OLT
+                olt_identifier = selected_olt.split()[-1] if "OLT" in selected_olt else selected_olt
+                
+                # Busca F/S/P distintos para essa OLT
+                query = "SELECT DISTINCT fsp FROM pon_port_state WHERE olt_identifier = %s ORDER BY fsp"
+                self.cursor.execute(query, (olt_identifier,))
+                fsps = [row[0] for row in self.cursor.fetchall()]
+                
+                for fsp in fsps:
+                    self.pon_state_fsp_filter.addItem(fsp)
+                
+                # Habilita o filtro de F/S/P
+                self.pon_state_fsp_filter.setEnabled(True)
+                
+                logging.info(f"F/S/P carregados para {olt_identifier}: {fsps}")
+            except Exception as e:
+                logging.error(f"Erro ao carregar F/S/P para filtro de estado PON: {e}")
+                if self.conn:
+                    self.conn.rollback()
+        else:
+            # Desabilita o filtro de F/S/P se nenhuma OLT for selecionada
+            self.pon_state_fsp_filter.setEnabled(False)
+            logging.info("Nenhuma OLT selecionada, filtro de F/S/P desabilitado")
+        
+        self.pon_state_fsp_filter.blockSignals(False)
+        
+        # Carrega os dados após atualizar os filtros
+        self.load_pon_state_data()
+
+    def clear_pon_state_filters(self):
+        """Limpa todos os filtros da aba Estado PON."""
+        # Reseta o filtro de OLT
+        self.pon_state_olt_filter.setCurrentIndex(0)
+        
+        # Reseta os outros filtros
+        self.pon_state_port_state_filter.setCurrentIndex(0)
+        self.pon_state_signal_filter.setCurrentIndex(0)
+        self.pon_state_temp_filter.setCurrentIndex(0)
+        self.pon_state_bias_filter.setCurrentIndex(0)
+        self.pon_state_tx_power_filter.setCurrentIndex(0)
+        
+        # Recarrega os dados
+        self.load_pon_state_data()
+
+    def show_pon_state_legend(self):
+        """Exibe uma janela com a legenda detalhada dos parâmetros da aba Estado PON."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Legenda - Estado PON")
+        dialog.setMinimumSize(900, 700)
+        dialog.setModal(True)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Criar um widget com abas para organizar as informações
+        tab_widget = QTabWidget()
+        layout.addWidget(tab_widget)
+        
+        # Aba 1: Tabela de Classificação
+        classification_tab = QWidget()
+        classification_layout = QVBoxLayout(classification_tab)
+        
+        classification_title = QLabel("<h2>📊 Tabela de Classificação: Status OK / Observação / Crítico</h2>")
+        classification_layout.addWidget(classification_title)
+        
+        # Criar tabela de classificação
+        classification_table = QTableWidget()
+        classification_table.setColumnCount(4)
+        classification_table.setHorizontalHeaderLabels([
+            "Parâmetro", 
+            "OK – Faixa Ideal", 
+            "Observação – Aviso", 
+            "Crítico – Alerta Imediato"
+        ])
+        classification_table.setRowCount(9)
+        
+        # Preenche a tabela de classificação com os dados fornecidos
+        classification_data = [
+            ("Temperatura (°C)", "–40 a +70 °C", "+70 a +85 °C", "> +85 °C ou < –40 °C"),
+            ("RX Power (dBm)", "–16,99 a 0,00 dBm", "–35 a –16,99 ou 0 a +1 dBm", "< –35 dBm ou > +1 dBm"),
+            ("TX Power (dBm)", "–6,99 a –2,22 dBm", "–9,30 a –6,99 ou –2,22 a +1 dBm", "< –9,30 dBm ou > +1 dBm"),
+            ("TX Bias Current (mA)", "2 a 9 mA", "9 a 70 mA ou < 2 mA", "> 70 mA"),
+            ("Tensão de Alimentação (V)", "2,95 a 3,64 V", "2,95-2,97 ou 3,63-3,64 V", "< 2,95 V ou > 3,64 V"),
+            ("Banda Disponível (%)", "> 20 % disponível", "10 %–20 %", "< 10 % ou saturada"),
+            ("Signal Detect", "Normal", "—", "Failed / None (sem sinal)"),
+            ("Laser State / TX Fault", "Normal", "—", "Failed / Fault"),
+            ("Illegal Rogue ONT", "Inexistent", "—", "Detectado")
+        ]
+        
+        for row, (param, ok_range, obs_range, crit_range) in enumerate(classification_data):
+            classification_table.setItem(row, 0, QTableWidgetItem(param))
+            classification_table.setItem(row, 1, QTableWidgetItem(ok_range))
+            classification_table.setItem(row, 2, QTableWidgetItem(obs_range))
+            classification_table.setItem(row, 3, QTableWidgetItem(crit_range))
+            
+            # Aplica cores às células de acordo com o status
+            ok_item = classification_table.item(row, 1)
+            obs_item = classification_table.item(row, 2)
+            crit_item = classification_table.item(row, 3)
+            
+            if ok_item:
+                ok_item.setBackground(QColor("#C8E6C9"))  # Verde claro
+            if obs_item and obs_item.text() != "—":
+                obs_item.setBackground(QColor("#FFF9C4"))  # Amarelo claro
+            if crit_item and crit_item.text() != "—":
+                crit_item.setBackground(QColor("#FFCDD2"))  # Vermelho claro
+        
+        classification_table.resizeColumnsToContents()
+        classification_table.setAlternatingRowColors(True)
+        classification_layout.addWidget(classification_table)
+        
+        # Adiciona fontes de referência
+        references_label = QLabel("""
+        <p><b>Fontes:</b></p>
+        <ul>
+            <li><a href="https://www.reddit.com/r/Ubiquiti/comments/1c35fby/sfp_port_temperatures_reaching_89cinstalled_a_fan/">Reddit - SFP port temperatures</a></li>
+            <li><a href="https://support.huawei.com/enterprise/en/doc/EDOC1100278610/9d6be57f/gpon-optical-modules">Suporte Huawei - GPON Optical Modules</a></li>
+            <li><a href="https://support.huawei.com/enterprise/en/doc/EDOC1000178167/94ef2802/displaying-optical-module-information">Suporte Huawei - Displaying Optical Module Information</a></li>
+        </ul>
+        """)
+        references_label.setOpenExternalLinks(True)
+        references_label.setWordWrap(True)
+        classification_layout.addWidget(references_label)
+        
+        tab_widget.addTab(classification_tab, "Tabela de Classificação")
+        
+        # Aba 2: Legenda Explicativa
+        legend_tab = QWidget()
+        legend_layout = QVBoxLayout(legend_tab)
+        
+        legend_title = QLabel("<h2>📖 Legenda Explicativa</h2>")
+        legend_layout.addWidget(legend_title)
+        
+        legend_content = QLabel("""
+        <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px;">
+            <h3 style="color: #2E7D32;">✅ OK (Verde)</h3>
+            <p>Valores dentro da faixa saudável — funcionamento confiável e sem necessidade de ação imediata.</p>
+            
+            <h3 style="color: #F57C00;">⚠️ Observação (Amarelo)</h3>
+            <p>Fora da faixa ideal, mas ainda operacional. Requer monitoramento contínuo e possível ação preventiva.</p>
+            
+            <h3 style="color: #C62828;">🚨 Crítico (Vermelho)</h3>
+            <p>Fora dos limites seguros — indica falha iminente ou já ocorrendo. Exige investigação imediata, como inspeção do módulo, limpeza, troca ou reconfiguração de thresholds.</p>
+        </div>
+        
+        <h3>Interpretação das Cores na Tabela:</h3>
+        <p>As células da tabela são coloridas individualmente de acordo com a classificação de cada parâmetro:</p>
+        <ul>
+            <li><span style="background-color: #C8E6C9; padding: 2px 5px; border-radius: 3px;">Verde</span>: Parâmetro dentro da faixa ideal</li>
+            <li><span style="background-color: #FFF9C4; padding: 2px 5px; border-radius: 3px;">Amarelo</span>: Parâmetro em faixa de observação</li>
+            <li><span style="background-color: #FFCDD2; padding: 2px 5px; border-radius: 3px;">Vermelho</span>: Parâmetro em estado crítico</li>
+        </ul>
+        """)
+        legend_content.setWordWrap(True)
+        legend_layout.addWidget(legend_content)
+        
+        tab_widget.addTab(legend_tab, "Legenda Explicativa")
+        
+        # Aba 3: Ações Recomendadas
+        actions_tab = QWidget()
+        actions_layout = QVBoxLayout(actions_tab)
+        
+        actions_title = QLabel("<h2>🔧 Ações Recomendadas por Status</h2>")
+        actions_layout.addWidget(actions_title)
+        
+        actions_content = QLabel("""
+        <h3>Status OK (Verde):</h3>
+        <ul>
+            <li>Monitoramento normal</li>
+            <li>Nenhuma ação necessária</li>
+            <li>Manter registro histórico para tendências</li>
+        </ul>
+        
+        <h3>Status Observação (Amarelo):</h3>
+        <ul>
+            <li>Aumentar frequência de monitoramento</li>
+            <li>Verificar tendências históricas</li>
+            <li>Planejar ação preventiva</li>
+            <li>Documentar para acompanhamento</li>
+        </ul>
+        
+        <h3>Status Crítico (Vermelho):</h3>
+        <ul>
+            <li>Ação imediata requerida</li>
+            <li>Notificar equipe responsável</li>
+            <li>Investigar causa raiz</li>
+            <li>Implementar correção</li>
+            <li>Documentar incidente</li>
+        </ul>
+        
+        <h3>Ações Específicas por Parâmetro:</h3>
+        <table border='1' cellpadding='5' style='border-collapse: collapse; width: 100%; margin-top: 10px;'>
+            <tr style='background-color: #f5f5f5;'>
+                <th>Parâmetro</th>
+                <th>Ação para Observação</th>
+                <th>Ação para Crítico</th>
+            </tr>
+            <tr>
+                <td>Temperatura</td>
+                <td>Verificar ventilação, limpar filtros</td>
+                <td>Substituir módulo, verificar ambiente</td>
+            </tr>
+            <tr>
+                <td>RX/TX Power</td>
+                <td>Verificar conectores, atenuadores</td>
+                <td>Testar com outro módulo, medir perdas</td>
+            </tr>
+            <tr>
+                <td>TX Bias Current</td>
+                <td>Monitorar tendência de aumento</td>
+                <td>Substituir módulo (laser desgastado)</td>
+            </tr>
+            <tr>
+                <td>Tensão</td>
+                <td>Verificar fonte de alimentação</td>
+                <td>Substituir fonte ou módulo</td>
+            </tr>
+            <tr>
+                <td>Banda Disponível</td>
+                <td>Planejar expansão de capacidade</td>
+                <td>Balancear carga, adicionar novas portas</td>
+            </tr>
+        </table>
+        """)
+        actions_content.setWordWrap(True)
+        actions_layout.addWidget(actions_content)
+        
+        tab_widget.addTab(actions_tab, "Ações Recomendadas")
+        
+        # Botão de fechar
+        close_button = QPushButton("Fechar")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+        
+        # Exibir o diálogo
+        dialog.exec_()
+
     def load_pon_state_data(self):
         """Carrega os dados de estado da porta PON e os exibe na tabela."""
+        if not self.isVisible() or self.tab_widget.currentWidget() != self.pon_state_tab:
+            return
+            
         logging.info("Carregando dados de estado da porta PON.")
+        
+        # Atualiza status
+        if hasattr(self, 'pon_state_status_label'):
+            self.pon_state_status_label.setText("Status: Carregando...")
+            self.pon_state_status_label.setStyleSheet("color: orange; font-weight: bold;")
         
         self.pon_state_table.setSortingEnabled(False)
         self.pon_state_table.setRowCount(0)
+        
+        # Obtém os valores dos filtros
         selected_olt = self.pon_state_olt_filter.currentText()
+        selected_fsp = self.pon_state_fsp_filter.currentText()
+        
+        # Obtém os filtros de status
+        port_state_filter = self.pon_state_port_state_filter.currentText()
+        signal_filter = self.pon_state_signal_filter.currentText()
+        temp_filter = self.pon_state_temp_filter.currentText()
+        bias_filter = self.pon_state_bias_filter.currentText()
+        tx_power_filter = self.pon_state_tx_power_filter.currentText()
+        
         params = []
-        olt_condition = ""
+        conditions = []
+        
+        # Filtro de OLT
         if selected_olt != "Todas as OLTs" and "Erro" not in selected_olt:
             try:
-                # --- INÍCIO DA CORREÇÃO ---
-                # A string é "OLT 96", então pegamos o identificador
-                olt_identifier = selected_olt.split()[-1] 
-                # A consulta deve filtrar pela coluna 'olt_identifier'
-                olt_condition = "WHERE pps.olt_identifier = %s" 
+                olt_identifier = selected_olt.split()[-1]
+                conditions.append("pps.olt_identifier = %s")
                 params.append(olt_identifier)
-                # --- FIM DA CORREÇÃO ---
             except IndexError:
                 logging.warning(f"Formato de OLT inesperado no filtro: {selected_olt}")
-
-        query = f"""
+        
+        # Filtro de F/S/P
+        if selected_fsp != "Todas as PONs":
+            conditions.append("pps.fsp = %s")
+            params.append(selected_fsp)
+        
+        # Constrói a consulta SQL base
+        base_query = """
             SELECT pps.*
             FROM pon_port_state pps
             INNER JOIN (
@@ -3713,75 +4436,269 @@ class OLTDatabaseGUI(QMainWindow):
                 FROM pon_port_state
                 GROUP BY olt_identifier, fsp
             ) latest ON pps.olt_identifier = latest.olt_identifier AND pps.fsp = latest.fsp AND pps.collection_time = latest.max_time
-            {olt_condition}
-            ORDER BY pps.olt_ip, pps.fsp
         """
+        
+        # Adiciona as condições WHERE
+        if conditions:
+            base_query += " WHERE " + " AND ".join(conditions)
+        
+        query = base_query + " ORDER BY pps.olt_ip, pps.fsp"
         
         try:
             self.cursor.execute(query, tuple(params))
-            results = self.cursor.fetchall()
+            all_results = self.cursor.fetchall()
             
-            self.pon_state_table.setRowCount(len(results))
-            
-
+            # Filtra os resultados com base nos filtros de status
+            filtered_results = []
             col_map = {desc[0]: i for i, desc in enumerate(self.cursor.description)}
-
-            for row_idx, row in enumerate(results):
-                # --- INÍCIO DA MODIFICAÇÃO ---
+            
+            for row in all_results:
+                # Verifica cada filtro de status
+                include_row = True
+                
+                # Filtro de Estado Porta
+                if port_state_filter != "Todos":
+                    port_state = str(row[col_map['port_state']]).lower()
+                    if port_state_filter == "OK" and port_state != "online":
+                        include_row = False
+                    elif port_state_filter == "Crítico" and port_state == "online":
+                        include_row = False
+                
+                # Filtro de Detecção Sinal
+                if include_row and signal_filter != "Todos":
+                    signal_detect = str(row[col_map['signal_detect']]).lower()
+                    if signal_filter == "OK" and signal_detect != "normal":
+                        include_row = False
+                    elif signal_filter == "Crítico" and signal_detect == "normal":
+                        include_row = False
+                
+                # Filtro de Temperatura
+                if include_row and temp_filter != "Todos":
+                    temp_value = row[col_map['temperature_c']]
+                    if temp_value is not None:
+                        if temp_filter == "OK" and not (-40 <= temp_value <= 70):
+                            include_row = False
+                        elif temp_filter == "Observação" and not (70 < temp_value <= 85):
+                            include_row = False
+                        elif temp_filter == "Crítico" and not (temp_value > 85 or temp_value < -40):
+                            include_row = False
+                
+                # Filtro de Corrente TX
+                if include_row and bias_filter != "Todos":
+                    bias_value = row[col_map['tx_bias_current_ma']]
+                    if bias_value is not None:
+                        if bias_filter == "OK" and not (2 <= bias_value <= 9):
+                            include_row = False
+                        elif bias_filter == "Observação" and not (9 < bias_value <= 70 or bias_value < 2):
+                            include_row = False
+                        elif bias_filter == "Crítico" and not (bias_value > 70):
+                            include_row = False
+                
+                # Filtro de Potência TX
+                if include_row and tx_power_filter != "Todos":
+                    tx_power_value = row[col_map['tx_power_dbm']]
+                    if tx_power_value is not None:
+                        if tx_power_filter == "OK" and not (-6.99 <= tx_power_value <= -2.22):
+                            include_row = False
+                        elif tx_power_filter == "Observação" and not (-9.30 <= tx_power_value < -6.99 or -2.22 < tx_power_value <= 1):
+                            include_row = False
+                        elif tx_power_filter == "Crítico" and not (tx_power_value < -9.30 or tx_power_value > 1):
+                            include_row = False
+                
+                if include_row:
+                    filtered_results.append(row)
+            
+            self.pon_state_table.setRowCount(len(filtered_results))
+            
+            for row_idx, row in enumerate(filtered_results):
                 collection_time = row[col_map['collection_time']].strftime('%d/%m/%Y %H:%M:%S') if row[col_map['collection_time']] else "-"
-
-                # Formata os novos campos
-                guaranteed_bw = row[col_map['left_guaranteed_bandwidth_kbps']]
-                formatted_guaranteed_bw = f"{guaranteed_bw:,}" if guaranteed_bw is not None else "-"
-                admin_state = str(row[col_map['admin_state']]) if row[col_map['admin_state']] is not None else "-"
-
+                
+                # Função auxiliar para formatar valores numéricos
+                def format_numeric(value, decimal_places=1):
+                    if value is None:
+                        return "-"
+                    try:
+                        # Tenta converter para float se não for já
+                        if not isinstance(value, (int, float)):
+                            value = float(value)
+                        return f"{value:.{decimal_places}f}"
+                    except (ValueError, TypeError):
+                        return str(value)
+                
+                # Função auxiliar para formatar números grandes com separadores
+                def format_large_number(value):
+                    if value is None:
+                        return "-"
+                    try:
+                        # Tenta converter para int se não for já
+                        if not isinstance(value, int):
+                            value = int(float(value))
+                        return f"{value:,}"
+                    except (ValueError, TypeError):
+                        return str(value)
+                
                 items = [
                     QTableWidgetItem(str(row[col_map['olt_ip']])),
                     QTableWidgetItem(str(row[col_map['fsp']])),
                     QTableWidgetItem(collection_time),
                     QTableWidgetItem(str(row[col_map['port_state']])),
-                    QTableWidgetItem(admin_state), # Nova coluna
+                    QTableWidgetItem(str(row[col_map['admin_state']])),
                     QTableWidgetItem(str(row[col_map['last_down_cause']]) if row[col_map['last_down_cause']] is not None else "-"),
                     QTableWidgetItem(row[col_map['last_up_time']].strftime('%d/%m/%Y %H:%M') if row[col_map['last_up_time']] is not None else "-"),
                     QTableWidgetItem(row[col_map['last_down_time']].strftime('%d/%m/%Y %H:%M') if row[col_map['last_down_time']] is not None else "-"),
                     QTableWidgetItem(str(row[col_map['signal_detect']])),
-                    QTableWidgetItem(f"{row[col_map['available_bandwidth_kbps']]:,}" if row[col_map['available_bandwidth_kbps']] is not None else "-"),
-                    QTableWidgetItem(formatted_guaranteed_bw), # Nova coluna
+                    QTableWidgetItem(format_large_number(row[col_map['available_bandwidth_kbps']])),
+                    QTableWidgetItem(format_large_number(row[col_map['left_guaranteed_bandwidth_kbps']])),
                     QTableWidgetItem(str(row[col_map['illegal_rogue_ont']])),
                     QTableWidgetItem(str(row[col_map['optical_module_status']])),
                     QTableWidgetItem(str(row[col_map['laser_state']])),
                     QTableWidgetItem(str(row[col_map['tx_fault']])),
-                    QTableWidgetItem(f"{row[col_map['temperature_c']]:.1f}" if row[col_map['temperature_c']] is not None else "-"),
-                    QTableWidgetItem(f"{row[col_map['tx_bias_current_ma']]:.1f}" if row[col_map['tx_bias_current_ma']] is not None else "-"),
-                    QTableWidgetItem(f"{row[col_map['tx_power_dbm']]:.2f}" if row[col_map['tx_power_dbm']] is not None else "-")
+                    QTableWidgetItem(format_numeric(row[col_map['temperature_c']])),
+                    QTableWidgetItem(format_numeric(row[col_map['tx_bias_current_ma']])),
+                    QTableWidgetItem(format_numeric(row[col_map['tx_power_dbm']], 2))
                 ]
-
-                # Destacar linhas com problemas
-                has_problem = (row[col_map['port_state']] != "Online" or 
-                            row[col_map['signal_detect']] != "Normal" or
-                            row[col_map['tx_fault']] != "Normal" or
-                            (row[col_map['temperature_c']] is not None and not (0 < row[col_map['temperature_c']] < 70)))
-
-                if has_problem:
-                    for item in items:
-                        item.setBackground(QColor("#FFCDD2")) # Vermelho claro
-
+                
+                # Adiciona os itens à tabela
                 for col_idx, item in enumerate(items):
                     self.pon_state_table.setItem(row_idx, col_idx, item)
-
-                if admin_state.lower() != 'on':
-                    items[4].setBackground(QColor("#FFCDD2")) # Coluna "Estado Admin"
-
-
+                
+                # Aplica cores às células específicas com base nos valores
+                self._apply_cell_colors(row_idx, row, col_map)
+            
             self.pon_state_table.resizeColumnsToContents()
             self.pon_state_table.setSortingEnabled(True)
-            logging.info(f"{len(results)} registros de estado PON carregados.")
-
+            logging.info(f"{len(filtered_results)} registros de estado PON carregados (filtrados de {len(all_results)} totais).")
+            
+            # Atualiza status
+            if hasattr(self, 'pon_state_status_label'):
+                self.pon_state_status_label.setText(f"Status: {len(filtered_results)} registros carregados")
+                self.pon_state_status_label.setStyleSheet("color: green; font-weight: bold;")
+            
         except psycopg2.Error as e:
-            if self.conn: self.conn.rollback()
+            if self.conn: 
+                self.conn.rollback()
             QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível carregar os dados de estado PON:\n{e}")
+            
+            # Atualiza status de erro
+            if hasattr(self, 'pon_state_status_label'):
+                self.pon_state_status_label.setText("Status: Erro ao carregar")
+                self.pon_state_status_label.setStyleSheet("color: red; font-weight: bold;")
         except Exception as e:
             QMessageBox.critical(self, "Erro ao Carregar Dados", f"Não foi possível carregar os dados: {str(e)}")
+            
+            # Atualiza status de erro
+            if hasattr(self, 'pon_state_status_label'):
+                self.pon_state_status_label.setText("Status: Erro ao carregar")
+                self.pon_state_status_label.setStyleSheet("color: red; font-weight: bold;")
+
+    def _apply_cell_colors(self, row_idx, row, col_map):
+        """Aplica cores às células específicas com base nos valores dos parâmetros."""
+        
+        # Função auxiliar para converter valor para número com segurança
+        def safe_float(value, default=None):
+            if value is None:
+                return default
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return default
+        
+        # Função auxiliar para determinar a cor com base no valor e parâmetro
+        def get_color_for_value(value, param_type):
+            if value is None:
+                return None
+                
+            if param_type == "temperature":
+                if -40 <= value <= 70:
+                    return QColor("#C8E6C9")  # Verde - OK
+                elif 70 < value <= 85:
+                    return QColor("#FFF9C4")  # Amarelo - Observação
+                else:
+                    return QColor("#FFCDD2")  # Vermelho - Crítico
+                    
+            elif param_type == "tx_bias_current":
+                if 2 <= value <= 9:
+                    return QColor("#C8E6C9")  # Verde - OK
+                elif 9 < value <= 70 or value < 2:
+                    return QColor("#FFF9C4")  # Amarelo - Observação
+                else:
+                    return QColor("#FFCDD2")  # Vermelho - Crítico
+                    
+            elif param_type == "tx_power":
+                if -6.99 <= value <= -2.22:
+                    return QColor("#C8E6C9")  # Verde - OK
+                elif -9.30 <= value < -6.99 or -2.22 < value <= 1:
+                    return QColor("#FFF9C4")  # Amarelo - Observação
+                else:
+                    return QColor("#FFCDD2")  # Vermelho - Crítico
+                    
+            elif param_type == "voltage":
+                if 2.95 <= value <= 3.64:
+                    return QColor("#C8E6C9")  # Verde - OK
+                elif 2.95 <= value <= 2.97 or 3.63 <= value <= 3.64:
+                    return QColor("#FFF9C4")  # Amarelo - Observação
+                else:
+                    return QColor("#FFCDD2")  # Vermelho - Crítico
+                    
+            return None
+        
+        # Aplica cores para cada parâmetro específico
+        # Temperatura (coluna 15)
+        temp_value = safe_float(row[col_map['temperature_c']])
+        if temp_value is not None:
+            color = get_color_for_value(temp_value, "temperature")
+            if color:
+                self.pon_state_table.item(row_idx, 15).setBackground(color)
+        
+        # Corrente TX (coluna 16)
+        bias_value = safe_float(row[col_map['tx_bias_current_ma']])
+        if bias_value is not None:
+            color = get_color_for_value(bias_value, "tx_bias_current")
+            if color:
+                self.pon_state_table.item(row_idx, 16).setBackground(color)
+        
+        # Potência TX (coluna 17)
+        tx_power_value = safe_float(row[col_map['tx_power_dbm']])
+        if tx_power_value is not None:
+            color = get_color_for_value(tx_power_value, "tx_power")
+            if color:
+                self.pon_state_table.item(row_idx, 17).setBackground(color)
+        
+        # Aplica cores para parâmetros de status
+        # Estado Porta (coluna 3)
+        port_state = str(row[col_map['port_state']] or "").lower()
+        if port_state == "online":
+            self.pon_state_table.item(row_idx, 3).setBackground(QColor("#C8E6C9"))  # Verde
+        else:
+            self.pon_state_table.item(row_idx, 3).setBackground(QColor("#FFCDD2"))  # Vermelho
+        
+        # Detecção Sinal (coluna 8)
+        signal_detect = str(row[col_map['signal_detect']] or "").lower()
+        if signal_detect == "normal":
+            self.pon_state_table.item(row_idx, 8).setBackground(QColor("#C8E6C9"))  # Verde
+        else:
+            self.pon_state_table.item(row_idx, 8).setBackground(QColor("#FFCDD2"))  # Vermelho
+        
+        # Estado Laser (coluna 13)
+        laser_state = str(row[col_map['laser_state']] or "").lower()
+        if laser_state == "normal":
+            self.pon_state_table.item(row_idx, 13).setBackground(QColor("#C8E6C9"))  # Verde
+        else:
+            self.pon_state_table.item(row_idx, 13).setBackground(QColor("#FFCDD2"))  # Vermelho
+        
+        # Falha TX (coluna 14)
+        tx_fault = str(row[col_map['tx_fault']] or "").lower()
+        if tx_fault == "normal":
+            self.pon_state_table.item(row_idx, 14).setBackground(QColor("#C8E6C9"))  # Verde
+        else:
+            self.pon_state_table.item(row_idx, 14).setBackground(QColor("#FFCDD2"))  # Vermelho
+        
+        # ONT Rogue (coluna 11)
+        rogue_ont = str(row[col_map['illegal_rogue_ont']] or "").lower()
+        if rogue_ont in ["inexistent", "nonexistent"]:
+            self.pon_state_table.item(row_idx, 11).setBackground(QColor("#C8E6C9"))  # Verde
+        else:
+            self.pon_state_table.item(row_idx, 11).setBackground(QColor("#FFCDD2"))  # Vermelho
 
     def update_pon_port_state_display(self):
         """Atualiza a exibição de dados de estado da PON se a aba estiver ativa."""
@@ -3794,23 +4711,37 @@ class OLTDatabaseGUI(QMainWindow):
         if self.pon_state_table.rowCount() == 0:
             QMessageBox.information(self, "Nada para Exportar", "A tabela de estado PON está vazia.")
             return
-
-        filename, _ = QFileDialog.getSaveFileName(self, "Exportar Estado PON", f"estado_pon_{datetime.now().strftime('%Y%m%d')}.csv", "Arquivos CSV (*.csv)")
-
-        if not filename: return
-
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Estado PON", 
+            f"estado_pon_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "Arquivos CSV (*.csv);;Todos os Arquivos (*)"
+        )
+        
+        if not filename: 
+            return
+        
         try:
             with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile, delimiter=';')
                 headers = [self.pon_state_table.horizontalHeaderItem(col).text() for col in range(self.pon_state_table.columnCount())]
                 writer.writerow(headers)
-
+                
                 for row in range(self.pon_state_table.rowCount()):
                     row_data = [self.pon_state_table.item(row, col).text() for col in range(self.pon_state_table.columnCount())]
                     writer.writerow(row_data)
+            
             QMessageBox.information(self, "Exportação Concluída", f"Dados exportados com sucesso para:\n{filename}")
+            logging.info(f"Dados de estado PON exportados para {filename}")
         except Exception as e:
+            logging.error(f"Erro ao exportar dados de estado PON: {e}")
             QMessageBox.critical(self, "Erro de Exportação", f"Não foi possível exportar os dados:\n{str(e)}")
+
+    def update_pon_port_state_display(self):
+        """Atualiza a exibição de dados de estado da PON se a aba estiver ativa."""
+        if hasattr(self, 'pon_state_tab') and self.tab_widget.currentWidget() == self.pon_state_tab:
+            logging.info("Sinal recebido. Atualizando exibição de estado da porta PON.")
+            self.load_pon_state_data()
 
     def update_pon_traffic_status(self, olt_ip, fsp, status):
         """Atualiza o status da coleta de tráfego PON na GUI."""
