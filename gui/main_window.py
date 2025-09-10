@@ -8135,6 +8135,64 @@ class OLTDatabaseGUI(QMainWindow):
                 logging.debug(f"Timeout expirado. Resposta recebida: {response}")
                 return False, response, None
             
+            # Função auxiliar para enviar comando e tratar paginação
+            def send_command_with_pagination(command, expected_prompt, timeout=30):
+                """
+                Envia um comando e trata a paginação até receber o prompt esperado.
+                """
+                logging.info(f"Enviando comando: {command}")
+                shell.send(f"{command}\n")
+                
+                response = ""
+                start_time = time.time()
+                last_chunk_time = time.time()
+                
+                while time.time() - start_time < timeout:
+                    if shell.recv_ready():
+                        chunk = shell.recv(4096).decode('utf-8', errors='ignore')
+                        response += chunk
+                        last_chunk_time = time.time()  # Atualizar o tempo do último chunk recebido
+                        logging.debug(f"Recebido: {chunk[:100]}...")
+                        
+                        # Tratar paginação
+                        if "---- More" in chunk:
+                            logging.debug("Paginação detectada. Enviando espaço.")
+                            shell.send(" ")
+                            time.sleep(1)
+                            start_time = time.time()  # Resetar timeout
+                            continue
+                        
+                        # Verificar se algum dos prompts esperados está na resposta
+                        if isinstance(expected_prompt, str):
+                            if expected_prompt in response:
+                                logging.debug(f"Prompt encontrado: {expected_prompt}")
+                                # Esperar um pouco mais para garantir que não há mais dados
+                                time.sleep(0.5)
+                                return response
+                        else:
+                            for prompt in expected_prompt:
+                                if prompt in response:
+                                    logging.debug(f"Prompt encontrado: {prompt}")
+                                    # Esperar um pouco mais para garantir que não há mais dados
+                                    time.sleep(0.5)
+                                    return response
+                        
+                        # Se receber um erro, retornar imediatamente
+                        if any(error in response for error in ["Error:", "Failure:", "%", "^"]):
+                            logging.debug(f"Erro detectado: {response}")
+                            return response
+                    
+                    # Se não receber dados há 2 segundos, considerar que a resposta está completa
+                    elif time.time() - last_chunk_time > 2:
+                        logging.debug("Nenhum dado recebido há 2 segundos, considerando resposta completa")
+                        return response
+                    
+                    time.sleep(0.3)
+                
+                # Se chegou aqui, o timeout expirou
+                logging.debug(f"Timeout expirado ao executar comando: {command}")
+                return response
+            
             # Função auxiliar para limpar o buffer
             def clear_buffer():
                 buffer_content = ""
@@ -8234,17 +8292,10 @@ class OLTDatabaseGUI(QMainWindow):
             # Construir o comando com os parâmetros corretos
             wan_cmd = f"display ont wan-info {port} {ont_id}"
             logging.info(f"Comando WAN: {wan_cmd}")
-            clear_buffer()
-            shell.send(f"{wan_cmd}\n")
-            time.sleep(5)
             
-            # Obter resposta
-            response_wan = ""
-            while shell.recv_ready():
-                response_wan += shell.recv(4096).decode('utf-8', errors='ignore')
-                time.sleep(0.2)
-            
-            logging.info(f"Resposta WAN-INFO: {response_wan[:300]}..." if len(response_wan) > 300 else f"Resposta WAN-INFO: {response_wan}")
+            # Enviar o comando com tratamento de paginação
+            response_wan = send_command_with_pagination(wan_cmd, expected_interface_prompt, timeout=30)
+            logging.info(f"Resposta WAN-INFO: {response_wan[:500]}..." if len(response_wan) > 500 else f"Resposta WAN-INFO: {response_wan}")
             mac = extract_service_mac(response_wan)
             logging.info(f"MAC extraído: {mac}")
             
@@ -8263,17 +8314,10 @@ class OLTDatabaseGUI(QMainWindow):
             
             info_cmd = f"display ont info {f_frame} {slot} {port} {ont_id}"
             logging.info(f"Comando INFO: {info_cmd}")
-            clear_buffer()
-            shell.send(f"{info_cmd}\n")
-            time.sleep(7)  # Este comando pode demorar mais
             
-            # Obter resposta
-            response_info = ""
-            while shell.recv_ready():
-                response_info += shell.recv(4096).decode('utf-8', errors='ignore')
-                time.sleep(0.2)
-            
-            logging.info(f"Resposta INFO: {response_info[:300]}..." if len(response_info) > 300 else f"Resposta INFO: {response_info}")
+            # Enviar o comando com tratamento de paginação
+            response_info = send_command_with_pagination(info_cmd, "(config)#", timeout=45)
+            logging.info(f"Resposta INFO: {response_info[:500]}..." if len(response_info) > 500 else f"Resposta INFO: {response_info}")
             ont_details = parse_ont_info_details(response_info)
             logging.info(f"Detalhes da ONT parseados: {ont_details}")
             
@@ -8281,17 +8325,10 @@ class OLTDatabaseGUI(QMainWindow):
             logging.info("Executando comando 3: display ont info summary...")
             summary_cmd = f"display ont info summary {f_frame}/{slot}/{port}"
             logging.info(f"Comando SUMMARY: {summary_cmd}")
-            clear_buffer()
-            shell.send(f"{summary_cmd}\n")
-            time.sleep(7)  # Este comando também pode demorar
             
-            # Obter resposta
-            response_summary = ""
-            while shell.recv_ready():
-                response_summary += shell.recv(4096).decode('utf-8', errors='ignore')
-                time.sleep(0.2)
-            
-            logging.info(f"Resposta SUMMARY: {response_summary[:300]}..." if len(response_summary) > 300 else f"Resposta SUMMARY: {response_summary}")
+            # Enviar o comando com tratamento de paginação
+            response_summary = send_command_with_pagination(summary_cmd, "(config)#", timeout=45)
+            logging.info(f"Resposta SUMMARY: {response_summary[:500]}..." if len(response_summary) > 500 else f"Resposta SUMMARY: {response_summary}")
             ont_info_dict, online_count, total_count = extract_ont_info(response_summary)
             logging.info(f"Info extraído: {len(ont_info_dict)} ONTs, Online: {online_count}, Total: {total_count}")
             
@@ -8316,21 +8353,20 @@ class OLTDatabaseGUI(QMainWindow):
             # Construir o comando com os parâmetros corretos
             traffic_cmd = f"display ont traffic {port} {ont_id}"
             logging.info(f"Comando TRAFFIC: {traffic_cmd}")
-            clear_buffer()
-            shell.send(f"{traffic_cmd}\n")
-            time.sleep(7)  # Este comando pode demorar
             
-            # Obter resposta
-            response_traffic = ""
-            while shell.recv_ready():
-                response_traffic += shell.recv(4096).decode('utf-8', errors='ignore')
-                time.sleep(0.2)
-            
-            logging.info(f"Resposta TRAFFIC: {response_traffic[:300]}..." if len(response_traffic) > 300 else f"Resposta TRAFFIC: {response_traffic}")
+            # Enviar o comando com tratamento de paginação
+            response_traffic = send_command_with_pagination(traffic_cmd, expected_interface_prompt, timeout=30)
+            logging.info(f"Resposta TRAFFIC: {response_traffic[:500]}..." if len(response_traffic) > 500 else f"Resposta TRAFFIC: {response_traffic}")
             traffic_data = parse_ont_traffic(response_traffic)
             logging.info(f"Tráfego parseado: {traffic_data}")
             
             # Comando 5: display statistics ont
+            logging.info("Executando comando 5: display statistics ont...")
+            clear_buffer()
+            interface_cmd = f"interface gpon {f_frame}/{slot}"
+            logging.info(f"Entrando na interface: {interface_cmd}")
+            shell.send(f"{interface_cmd}\n")
+            time.sleep(3)
 
             # Verificar se estamos no modo de interface
             expected_interface_prompt = f"(config-if-gpon-{f_frame}/{slot})#"
@@ -8338,24 +8374,16 @@ class OLTDatabaseGUI(QMainWindow):
             success, response, found_prompt = wait_for_prompt(expected_interface_prompt, timeout=15)
             if not success:
                 if found_prompt == "ERROR":
-                    raise Exception(f"Erro ao entrar no modo de interface {interface_cmd}. Resposta: {response}")
+                    raise Exception(f"Erro ao entrar no modo de interface {interface_cmd} para tráfego. Resposta: {response}")
                 else:
-                    raise Exception(f"Não foi possível entrar no modo de interface {interface_cmd}. Timeout. Resposta: {response}")
-
-            logging.info("Executando comando 5: display statistics ont...")
+                    raise Exception(f"Não foi possível entrar no modo de interface {interface_cmd} para tráfego. Timeout. Resposta: {response}")
+            
             stats_cmd = f"display statistics ont {port} {ont_id}"
             logging.info(f"Comando STATS: {stats_cmd}")
-            clear_buffer()
-            shell.send(f"{stats_cmd}\n")
-            time.sleep(5)
             
-            # Obter resposta
-            response_stats = ""
-            while shell.recv_ready():
-                response_stats += shell.recv(4096).decode('utf-8', errors='ignore')
-                time.sleep(0.2)
-            
-            logging.info(f"Resposta STATS: {response_stats[:300]}..." if len(response_stats) > 300 else f"Resposta STATS: {response_stats}")
+            # Enviar o comando com tratamento de paginação
+            response_stats = send_command_with_pagination(stats_cmd, expected_interface_prompt, timeout=30)
+            logging.info(f"Resposta STATS: {response_stats[:500]}..." if len(response_stats) > 500 else f"Resposta STATS: {response_stats}")
             stats_data = parse_ont_statistics(response_stats)
             logging.info(f"Estatísticas parseadas: {stats_data}")
             
