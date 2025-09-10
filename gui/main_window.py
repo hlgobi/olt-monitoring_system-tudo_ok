@@ -8,6 +8,11 @@ from datetime import datetime, timedelta
 import logging
 import re
 import time
+from olt.processing import send_command_with_pagination
+from olt.parsing import (
+    extract_service_mac, parse_ont_info_details, extract_ont_info, 
+    parse_ont_traffic, parse_ont_statistics
+)
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QTableWidget,
                              QTableWidgetItem, QLabel, QLineEdit,
@@ -25,7 +30,7 @@ from config import DB_CONFIG, get_olt_configs
 from gui.dialogs import CleanupDialog, OntDiagnosticsHistoryDialog
 # --- INÍCIO DA CORREÇÃO ---
 from olt.processing import (run_data_collection, process_ont_eth_worker,
-                            run_temp_monitoring, run_resource_monitoring,
+                            run_temp_monitoring, run_resource_monitoring, send_command_with_pagination,
                             get_active_gpon_slots, parse_board_info as olt_parse_board_info,
                             get_slot_cpu_usage, get_slot_memory_usage, get_resource_status)
 # --- FIM DA CORREÇÃO ---
@@ -33,7 +38,7 @@ from olt.processing import (run_data_collection, process_ont_eth_worker,
 from gui.signals import db_signals
 from db.connection import create_tables, check_db_connection
 from db.operations import (save_ont_data, save_pon_status, save_temp_data,
-                           save_resource_data, save_ont_diagnostic_data)
+                           save_resource_data, save_ont_diagnostic_data, save_ont_traffic_bulk, save_ont_statistics_packets_bulk)
 from olt.communication import connect_to_olt, send_command as send_olt_command
 from utils.helpers import (clean_response, parse_ont_device_info, parse_ont_optic_status, 
                            parse_ont_wan_status, parse_lan_wifi_devices, parse_wifi_neighbors, 
@@ -276,6 +281,11 @@ class OLTDatabaseGUI(QMainWindow):
         self.uplink_ddm_tab = QWidget()
         self.tab_widget.addTab(self.uplink_ddm_tab, "Uplink DDM")
         self.setup_uplink_ddm_tab()
+
+        # No método init_ui, após a criação das outras abas
+        self.ont_details_tab = QWidget()
+        self.tab_widget.addTab(self.ont_details_tab, "Detalhes ONT")
+        self.setup_ont_details_tab()
 
         self.caixa_stats_update_timer = QTimer(self)
         self.caixa_stats_update_timer.setInterval(30000)
@@ -1746,6 +1756,11 @@ class OLTDatabaseGUI(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(5)
         
+        # Criar o botão DETALHAR
+        self.detail_ont_btn = QPushButton("DETALHAR")
+        self.detail_ont_btn.clicked.connect(self.detail_selected_ont)
+        self.detail_ont_btn.setEnabled(False)  # Inicialmente desabilitado
+        
         action_filter_panel = self.create_action_filter_panel()
         self.status_panel = self.create_status_panel()
         self.setup_data_table()  # Garante que a tabela seja configurada corretamente
@@ -1755,6 +1770,74 @@ class OLTDatabaseGUI(QMainWindow):
         main_layout.addWidget(self.table)
         
         layout.addWidget(main_panel)
+        
+        # Adicionar o botão DETALHAR ao painel de ações
+        # Vamos adicionar ao painel de ações se ele existir
+        if hasattr(self, 'action_panel') and self.action_panel.layout():
+            # Adicionar o botão ao layout existente do painel de ações
+            self.action_panel.layout().addWidget(self.detail_ont_btn)
+        else:
+            # Se não houver painel de ações, criar um
+            button_panel = QWidget()
+            button_layout = QHBoxLayout(button_panel)
+            button_layout.addWidget(self.detail_ont_btn)
+            button_layout.addStretch()
+            main_layout.addWidget(button_panel)
+        
+        # Conectar o evento de seleção para habilitar/desabilitar o botão DETALHAR
+        self.table.selectionModel().selectionChanged.connect(self.update_detail_button_state)
+        
+        # CORREÇÃO: Verificar o nome correto do método de exportação
+        # Se o método for export_to_csv em vez de export_data_to_csv
+        if hasattr(self, 'export_btn'):
+            if hasattr(self, 'export_to_csv'):
+                self.export_btn.clicked.connect(self.export_to_csv)
+            elif hasattr(self, 'export_data_to_csv'):
+                self.export_btn.clicked.connect(self.export_data_to_csv)
+            else:
+                # Se nenhum método existir, criar um método básico de exportação
+                self.export_btn.clicked.connect(self.basic_export_to_csv)
+
+    def update_detail_button_state(self):
+        """Habilita ou desabilita o botão DETALHAR baseado na seleção da tabela."""
+        has_selection = len(self.table.selectionModel().selectedRows()) > 0
+        self.detail_ont_btn.setEnabled(has_selection)
+
+    def basic_export_to_csv(self):
+        """Método básico de exportação para CSV caso o original não exista."""
+        import csv
+        from PyQt5.QtWidgets import QFileDialog, QMessageBox
+        from datetime import datetime
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self, 
+            "Exportar para CSV", 
+            f"ont_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "Arquivos CSV (*.csv);;Todos os Arquivos (*)"
+        )
+        
+        if filename:
+            try:
+                with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.writer(csvfile)
+                    
+                    # Escrever cabeçalho
+                    headers = []
+                    for col in range(self.table.columnCount()):
+                        headers.append(self.table.horizontalHeaderItem(col).text())
+                    writer.writerow(headers)
+                    
+                    # Escrever dados
+                    for row in range(self.table.rowCount()):
+                        row_data = []
+                        for col in range(self.table.columnCount()):
+                            item = self.table.item(row, col)
+                            row_data.append(item.text() if item else "")
+                        writer.writerow(row_data)
+                        
+                QMessageBox.information(self, "Exportação Concluída", f"Dados exportados com sucesso para:\n{filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erro de Exportação", f"Não foi possível exportar os dados:\n{str(e)}")
 
     def create_multi_olt_control_panel(self):
         """Cria o painel de controle para seleção de OLTs com checkboxes."""
@@ -2069,33 +2152,84 @@ class OLTDatabaseGUI(QMainWindow):
         anim_group.start()
         
 
-    def setup_data_table(self):
-        """Configura a tabela principal de exibição de dados ONT."""
+    def setup_data_tab(self):
+        """Configura a aba de dados das ONTs."""
+        # Remove qualquer layout existente para evitar duplicação
+        if self.data_tab.layout():
+            # Cria um novo layout temporário para transferir os widgets
+            temp_widget = QWidget()
+            temp_layout = QVBoxLayout(temp_widget)
+            
+            # Transfere todos os widgets do layout antigo para o novo
+            while self.data_tab.layout().count():
+                item = self.data_tab.layout().takeAt(0)
+                if item.widget():
+                    temp_layout.addWidget(item.widget())
+            
+            # Remove o layout antigo
+            QWidget().setLayout(self.data_tab.layout())
+        
+        # Cria o novo layout
+        layout = QVBoxLayout(self.data_tab)
+        layout.setContentsMargins(5, 5, 5, 5)  # Reduz as margens
+        layout.setSpacing(5)  # Reduz o espaçamento entre widgets
+        
+        # Adiciona o painel de seleção de OLTs no topo
+        olt_selection_panel = self.create_multi_olt_control_panel()
+        layout.addWidget(olt_selection_panel)
+        
+        # Cria o painel principal com a tabela e controles
+        main_panel = QWidget()
+        main_layout = QVBoxLayout(main_panel)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(5)
+        
+        # Criar a tabela PRIMEIRO
         self.table = QTableWidget()
-        # FIXED: Set column count to match headers (17 columns)
-        self.table.setColumnCount(17)
         
-        # FIXED: Ensure headers list has 17 elements
-        headers = [
-            "ID", "OLT", "Hora", "F/S/P", "ONT ID", "MAC", "S/N", "CLIENTE", 
-            "RX (dBm)", "TX (dBm)", "Status", "Primária", "Secundária", "Porta Sec.", 
-            "Descrição OLT", "Cod.", "Mudanças"
-        ]
-        self.table.setHorizontalHeaderLabels(headers)
+        # Configurar a tabela
+        self.setup_data_table()  # Agora a tabela já existe
         
-        self.table.setSortingEnabled(True)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setEditTriggers(QTableWidget.AnyKeyPressed | QTableWidget.DoubleClicked)
+        # Criar o botão DETALHAR
+        self.detail_ont_btn = QPushButton("DETALHAR")
+        self.detail_ont_btn.clicked.connect(self.detail_selected_ont)
+        self.detail_ont_btn.setEnabled(False)  # Inicialmente desabilitado
         
-        self.table.doubleClicked.connect(self.show_ont_details)
-        self.table.cellChanged.connect(self._handle_client_name_changed)
-        self.table.selectionModel().selectionChanged.connect(self.on_ont_selection_changed)
+        action_filter_panel = self.create_action_filter_panel()
+        self.status_panel = self.create_status_panel()
         
-        # Ajuste de largura das colunas
-        widths = [50, 60, 140, 70, 60, 120, 130, 200, 80, 80, 80, 100, 120, 70, 200, 70, 70]
-        for i, width in enumerate(widths):
-            self.table.setColumnWidth(i, width)
+        main_layout.addWidget(action_filter_panel)
+        main_layout.addWidget(self.status_panel)
+        main_layout.addWidget(self.table)
+        
+        layout.addWidget(main_panel)
+        
+        # Adicionar o botão DETALHAR ao painel de ações
+        # Vamos adicionar ao painel de ações se ele existir
+        if hasattr(self, 'action_panel') and self.action_panel.layout():
+            # Adicionar o botão ao layout existente do painel de ações
+            self.action_panel.layout().addWidget(self.detail_ont_btn)
+        else:
+            # Se não houver painel de ações, criar um
+            button_panel = QWidget()
+            button_layout = QHBoxLayout(button_panel)
+            button_layout.addWidget(self.detail_ont_btn)
+            button_layout.addStretch()
+            main_layout.addWidget(button_panel)
+        
+        # Conectar o evento de seleção para habilitar/desabilitar o botão DETALHAR
+        self.table.selectionModel().selectionChanged.connect(self.update_detail_button_state)
+        
+        # CORREÇÃO: Verificar o nome correto do método de exportação
+        # Se o método for export_to_csv em vez de export_data_to_csv
+        if hasattr(self, 'export_btn'):
+            if hasattr(self, 'export_to_csv'):
+                self.export_btn.clicked.connect(self.export_to_csv)
+            elif hasattr(self, 'export_data_to_csv'):
+                self.export_btn.clicked.connect(self.export_data_to_csv)
+            else:
+                # Se nenhum método existir, criar um método básico de exportação
+                self.export_btn.clicked.connect(self.basic_export_to_csv)
     
     @pyqtSlot(str, int, float)
     def update_ont_cycle_stats(self, olt_ip, count, duration):
@@ -2104,7 +2238,38 @@ class OLTDatabaseGUI(QMainWindow):
         na área de log da GUI.
         """
         self.log_to_gui(f"[{olt_ip}] Ciclo #{count} finalizado em {duration:.2f}s.")
-    # --- Fim da Modificação ---
+
+    def setup_data_table(self):
+        """Configura a tabela de dados das ONTs."""
+        # Definir as colunas da tabela
+        self.table.setColumnCount(17)  # Total de colunas
+        
+        # Definir os cabeçalhos na ordem correta
+        headers = [
+            "ID", "OLT", "Hora", "F/S/P", "ONT ID", "MAC", "S/N", "CLIENTE", 
+            "RX (dBm)", "TX (dBm)", "Status", "Primária", "Secundária", 
+            "Porta Sec.", "Descrição OLT", "Cod.", "Mudanças"
+        ]
+        
+        self.table.setHorizontalHeaderLabels(headers)
+        
+        # Ajustar o comportamento da tabela
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSortingEnabled(True)
+        
+        # Opcional: ajustar o tamanho das colunas
+        self.table.resizeColumnsToContents()
+        
+        # Opcional: definir larguras mínimas para algumas colunas
+        self.table.setColumnWidth(1, 50)   # OLT
+        self.table.setColumnWidth(3, 80)   # F/S/P
+        self.table.setColumnWidth(4, 60)   # ONT ID
+        self.table.setColumnWidth(5, 120)  # MAC
+        self.table.setColumnWidth(6, 120)  # S/N
+        self.table.setColumnWidth(10, 70)  # Status
+
     def create_status_panel(self):
         """Cria o painel de status simplificado, contendo apenas os resumos."""
         panel = QWidget()
@@ -7538,6 +7703,565 @@ class OLTDatabaseGUI(QMainWindow):
     def update_ont_eth_display(self):
         if self.tab_widget.currentWidget() == self.ont_eth_tab:
             self.load_ont_eth_data()
+
+
+    def setup_ont_details_tab(self):
+        """Configura a aba de detalhes da ONT."""
+        layout = QVBoxLayout(self.ont_details_tab)
+        
+        # Painel de informações da ONT selecionada
+        info_group = QGroupBox("Informações da ONT")
+        info_layout = QFormLayout()
+        
+        self.ont_details_olt_label = QLabel("OLT: Não selecionada")
+        self.ont_details_fsp_label = QLabel("F/S/P: Não selecionado")
+        self.ont_details_id_label = QLabel("ONT ID: Não selecionado")
+        self.ont_details_sn_label = QLabel("Serial: Não selecionado")
+        self.ont_details_status_label = QLabel("Status: Não selecionado")
+        self.ont_details_last_update = QLabel("Última atualização: Nunca")
+        
+        info_layout.addRow(self.ont_details_olt_label)
+        info_layout.addRow(self.ont_details_fsp_label)
+        info_layout.addRow(self.ont_details_id_label)
+        info_layout.addRow(self.ont_details_sn_label)
+        info_layout.addRow(self.ont_details_status_label)
+        info_layout.addRow(self.ont_details_last_update)
+        
+        info_group.setLayout(info_layout)
+        layout.addWidget(info_group)
+        
+        # Botão para atualizar dados
+        self.update_ont_details_btn = QPushButton("Atualizar Dados da ONT")
+        self.update_ont_details_btn.clicked.connect(self.update_ont_details_data)
+        self.update_ont_details_btn.setEnabled(False)
+        layout.addWidget(self.update_ont_details_btn)
+        
+        # Abas para diferentes tipos de dados
+        details_tabs = QTabWidget()
+        
+        # Aba de dados gerais
+        self.ont_general_tab = QWidget()
+        general_layout = QVBoxLayout(self.ont_general_tab)
+        self.ont_general_table = QTableWidget()
+        self.ont_general_table.setColumnCount(2)
+        self.ont_general_table.setHorizontalHeaderLabels(["Propriedade", "Valor"])
+        self.ont_general_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        general_layout.addWidget(self.ont_general_table)
+        details_tabs.addTab(self.ont_general_tab, "Dados Gerais")
+        
+        # Aba de tráfego
+        self.ont_traffic_tab = QWidget()
+        traffic_layout = QVBoxLayout(self.ont_traffic_tab)
+        self.ont_traffic_table = QTableWidget()
+        self.ont_traffic_table.setColumnCount(2)
+        self.ont_traffic_table.setHorizontalHeaderLabels(["Propriedade", "Valor"])
+        self.ont_traffic_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        traffic_layout.addWidget(self.ont_traffic_table)
+        details_tabs.addTab(self.ont_traffic_tab, "Tráfego")
+        
+        # Aba de estatísticas
+        self.ont_stats_tab = QWidget()
+        stats_layout = QVBoxLayout(self.ont_stats_tab)
+        self.ont_stats_table = QTableWidget()
+        self.ont_stats_table.setColumnCount(2)
+        self.ont_stats_table.setHorizontalHeaderLabels(["Propriedade", "Valor"])
+        self.ont_stats_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        stats_layout.addWidget(self.ont_stats_table)
+        details_tabs.addTab(self.ont_stats_tab, "Estatísticas")
+        
+        layout.addWidget(details_tabs)
+        
+        # Armazenar a ONT selecionada
+        self.selected_ont_for_details = None
+
+
+    def detail_selected_ont(self):
+        """Método chamado quando o botão DETALHAR é pressionado na aba Dados ONT."""
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.warning(self, "Nenhuma Seleção", "Por favor, selecione uma ONT na tabela.")
+            return
+            
+        selected_row = selected_rows[0].row()
+        
+        # Obter as informações da ONT selecionada com as colunas corretas
+        # Ordem das colunas (baseado na sua descrição):
+        # 0: ID (sequencial)
+        # 1: OLT (último octeto, ex: 89)
+        # 2: Hora
+        # 3: F/S/P
+        # 4: ONT ID
+        # 5: MAC
+        # 6: S/N
+        # 7: CLIENTE
+        # 8: RX (dBm)
+        # 9: TX (dBm)
+        # 10: Status
+        # 11: Primária
+        # 12: Secundária
+        # 13: Porta Sec.
+        # 14: Descrição OLT
+        # 15: Cod.
+        # 16: Mudanças
+        
+        olt_id_item = self.table.item(selected_row, 1)    # Coluna 1: OLT (último octeto)
+        fsp_item = self.table.item(selected_row, 3)       # Coluna 3: F/S/P
+        ont_id_item = self.table.item(selected_row, 4)    # Coluna 4: ONT ID
+        sn_item = self.table.item(selected_row, 6)        # Coluna 6: S/N
+        
+        if not (olt_id_item and fsp_item and ont_id_item and sn_item):
+            QMessageBox.critical(self, "Dados Incompletos", "Não foi possível obter todas as informações da ONT selecionada.")
+            return
+            
+        olt_id = olt_id_item.text()  # Isso deve ser "89" no seu exemplo
+        fsp = fsp_item.text()
+        ont_id = ont_id_item.text()
+        sn = sn_item.text()
+        
+        # Montar o IP completo da OLT
+        olt_ip = f"10.0.0.{olt_id}"
+        
+        # Armazenar as informações da ONT selecionada
+        self.selected_ont_for_details = {
+            'olt_ip': olt_ip,
+            'fsp': fsp,
+            'ont_id': ont_id,
+            'sn': sn
+        }
+        
+        # Atualizar as labels na aba de detalhes
+        self.ont_details_olt_label.setText(f"OLT: {olt_ip}")
+        self.ont_details_fsp_label.setText(f"F/S/P: {fsp}")
+        self.ont_details_id_label.setText(f"ONT ID: {ont_id}")
+        self.ont_details_sn_label.setText(f"Serial: {sn}")
+        
+        # Habilitar o botão de atualização
+        self.update_ont_details_btn.setEnabled(True)
+        
+        # Mudar para a aba de detalhes
+        self.tab_widget.setCurrentWidget(self.ont_details_tab)
+        
+        # Carregar os dados existentes da ONT
+        self.load_ont_details_from_db()
+
+    def load_ont_details_from_db(self):
+        """Carrega os dados da ONT selecionada a partir do banco de dados."""
+        if not self.selected_ont_for_details:
+            logging.warning("Nenhuma ONT selecionada para carregar detalhes")
+            return
+            
+        olt_ip = self.selected_ont_for_details['olt_ip']
+        fsp = self.selected_ont_for_details['fsp']
+        ont_id = self.selected_ont_for_details['ont_id']
+        sn = self.selected_ont_for_details['sn']
+        
+        logging.info(f"Carregando detalhes da ONT: OLT={olt_ip}, FSP={fsp}, ONT ID={ont_id}, SN={sn}")
+        
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            
+            # Buscar dados gerais mais recentes
+            logging.info("Buscando dados gerais da ONT...")
+            cursor.execute("""
+                SELECT * FROM ont_data 
+                WHERE olt_ip = %s AND fsp = %s AND ont_id = %s AND serial_number = %s
+                ORDER BY collection_time DESC 
+                LIMIT 1
+            """, (olt_ip, fsp, ont_id, sn))
+            general_data = cursor.fetchone()
+            
+            if general_data:
+                logging.info("Dados gerais encontrados")
+                # Obter nomes das colunas
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ont_data' ORDER BY ordinal_position")
+                columns = [row[0] for row in cursor.fetchall()]
+                
+                # Atualizar status e última atualização
+                status_index = columns.index('status') if 'status' in columns else 19
+                collection_time_index = columns.index('collection_time') if 'collection_time' in columns else 33
+                
+                self.ont_details_status_label.setText(f"Status: {general_data[status_index]}")
+                self.ont_details_last_update.setText(f"Última atualização: {general_data[collection_time_index]}")
+                
+                # Preencher tabela de dados gerais
+                self.populate_ont_general_table(general_data, columns)
+            else:
+                logging.warning("Dados gerais não encontrados")
+                self.ont_general_table.setRowCount(0)
+            
+            # Buscar dados de tráfego mais recentes
+            logging.info("Buscando dados de tráfego...")
+            cursor.execute("""
+                SELECT * FROM ont_traffic_data 
+                WHERE olt_ip = %s AND fsp = %s AND ont_id = %s
+                ORDER BY collection_time DESC 
+                LIMIT 1
+            """, (olt_ip, fsp, ont_id))
+            traffic_data = cursor.fetchone()
+            
+            if traffic_data:
+                logging.info("Dados de tráfego encontrados")
+                # Obter nomes das colunas
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ont_traffic_data' ORDER BY ordinal_position")
+                columns = [row[0] for row in cursor.fetchall()]
+                
+                # Preencher tabela de tráfego
+                self.populate_ont_traffic_table(traffic_data, columns)
+            else:
+                logging.warning("Dados de tráfego não encontrados")
+                self.ont_traffic_table.setRowCount(0)
+            
+            # Buscar estatísticas mais recentes
+            logging.info("Buscando dados de estatísticas...")
+            cursor.execute("""
+                SELECT * FROM ont_statistics_packets 
+                WHERE olt_ip = %s AND fsp = %s AND ont_id = %s
+                ORDER BY collection_time DESC 
+                LIMIT 1
+            """, (olt_ip, fsp, ont_id))
+            stats_data = cursor.fetchone()
+            
+            if stats_data:
+                logging.info("Dados de estatísticas encontrados")
+                # Obter nomes das colunas
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ont_statistics_packets' ORDER BY ordinal_position")
+                columns = [row[0] for row in cursor.fetchall()]
+                
+                # Preencher tabela de estatísticas
+                self.populate_ont_stats_table(stats_data, columns)
+            else:
+                logging.warning("Dados de estatísticas não encontrados")
+                self.ont_stats_table.setRowCount(0)
+                
+            conn.close()
+            logging.info("Carregamento de detalhes concluído")
+                
+        except Exception as e:
+            logging.error(f"Erro ao carregar detalhes da ONT do banco: {e}", exc_info=True)
+            QMessageBox.critical(self, "Erro", f"Não foi possível carregar os dados da ONT: {e}")
+
+
+    def populate_ont_general_table(self, data, columns):
+        """Preenche a tabela de dados gerais da ONT."""
+        if not data:
+            return
+            
+        logging.info("Preenchendo tabela de dados gerais...")
+        
+        self.ont_general_table.setRowCount(len(columns))
+        self.ont_general_table.setColumnCount(2)
+        
+        for i, column in enumerate(columns):
+            self.ont_general_table.setItem(i, 0, QTableWidgetItem(column))
+            value = data[i] if data[i] is not None else "N/A"
+            
+            # Formatar valores especiais
+            if column == 'services' and isinstance(value, str):
+                try:
+                    # Tentar parsear JSON
+                    services = json.loads(value)
+                    value = json.dumps(services, indent=2, ensure_ascii=False)
+                except:
+                    pass  # Manter como string se não for JSON válido
+            elif column in ['last_up_time', 'last_down_time', 'last_dying_gasp_time'] and value != 'N/A':
+                # Formatar data/hora
+                try:
+                    if isinstance(value, str):
+                        dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                        value = dt.strftime('%d/%m/%Y %H:%M:%S')
+                    elif hasattr(value, 'strftime'):
+                        value = value.strftime('%d/%m/%Y %H:%M:%S')
+                except:
+                    pass  # Manter como string se não for possível formatar
+                    
+            self.ont_general_table.setItem(i, 1, QTableWidgetItem(str(value)))
+        
+        # Ajustar o tamanho das colunas
+        self.ont_general_table.resizeColumnsToContents()
+        logging.info("Tabela de dados gerais preenchida")
+
+    def populate_ont_traffic_table(self, data, columns):
+        """Preenche a tabela de tráfego da ONT."""
+        if not data:
+            return
+            
+        logging.info("Preenchendo tabela de tráfego...")
+        
+        self.ont_traffic_table.setRowCount(len(columns))
+        self.ont_traffic_table.setColumnCount(2)
+        
+        for i, column in enumerate(columns):
+            self.ont_traffic_table.setItem(i, 0, QTableWidgetItem(column))
+            value = data[i] if data[i] is not None else "N/A"
+            
+            # Formatar valores especiais
+            if column in ['up_traffic_kbps', 'down_traffic_kbps'] and value != 'N/A':
+                try:
+                    value = f"{float(value):.2f} kbps"
+                except:
+                    pass  # Manter como string se não for número
+                    
+            self.ont_traffic_table.setItem(i, 1, QTableWidgetItem(str(value)))
+        
+        # Ajustar o tamanho das colunas
+        self.ont_traffic_table.resizeColumnsToContents()
+        logging.info("Tabela de tráfego preenchida")
+
+
+    def populate_ont_stats_table(self, data, columns):
+        """Preenche a tabela de estatísticas da ONT."""
+        if not data:
+            return
+            
+        logging.info("Preenchendo tabela de estatísticas...")
+        
+        self.ont_stats_table.setRowCount(len(columns))
+        self.ont_stats_table.setColumnCount(2)
+        
+        for i, column in enumerate(columns):
+            self.ont_stats_table.setItem(i, 0, QTableWidgetItem(column))
+            value = data[i] if data[i] is not None else "N/A"
+            
+            # Formatar valores especiais
+            if column.endswith('_bytes') and value != 'N/A':
+                try:
+                    # Converter para MB, GB, etc.
+                    bytes_val = int(value)
+                    if bytes_val > 1024 * 1024 * 1024:  # GB
+                        value = f"{bytes_val / (1024 * 1024 * 1024):.2f} GB"
+                    elif bytes_val > 1024 * 1024:  # MB
+                        value = f"{bytes_val / (1024 * 1024):.2f} MB"
+                    elif bytes_val > 1024:  # KB
+                        value = f"{bytes_val / 1024:.2f} KB"
+                    else:
+                        value = f"{bytes_val} bytes"
+                except:
+                    pass  # Manter como string se não for número
+            elif column.endswith('_frames') and value != 'N/A':
+                try:
+                    # Formatar número com separadores de milhares
+                    value = f"{int(value):,}"
+                except:
+                    pass  # Manter como string se não for número
+                    
+            self.ont_stats_table.setItem(i, 1, QTableWidgetItem(str(value)))
+        
+        # Ajustar o tamanho das colunas
+        self.ont_stats_table.resizeColumnsToContents()
+        logging.info("Tabela de estatísticas preenchida")
+
+    def update_ont_details_data(self):
+        """Atualiza os dados da ONT conectando-se à OLT e executando os comandos."""
+        if not self.selected_ont_for_details:
+            return
+            
+        olt_ip = self.selected_ont_for_details['olt_ip']
+        fsp = self.selected_ont_for_details['fsp']
+        ont_id = self.selected_ont_for_details['ont_id']
+        sn = self.selected_ont_for_details['sn']
+        
+        # Desabilitar o botão durante a atualização
+        self.update_ont_details_btn.setEnabled(False)
+        self.update_ont_details_btn.setText("Atualizando...")
+        
+        # Criar uma thread para não bloquear a GUI
+        self.ont_details_thread = threading.Thread(
+            target=self._update_ont_details_worker,
+            args=(olt_ip, fsp, ont_id, sn),
+            daemon=True
+        )
+        self.ont_details_thread.start()
+
+    def _update_ont_details_worker(self, olt_ip, fsp, ont_id, sn):
+        """Worker que atualiza os dados da ONT em segundo plano."""
+        try:
+            # Obter credenciais da OLT
+            olt_config = None
+            for config in self.olt_configs:
+                if config['ip'] == olt_ip:
+                    olt_config = config
+                    break
+                    
+            if not olt_config:
+                raise Exception(f"Configuração não encontrada para a OLT {olt_ip}")
+                
+            username = olt_config['username']
+            password = olt_config['password']
+            
+            # Conectar à OLT
+            client, shell = connect_to_olt(olt_ip, username, password)
+            if not client or not shell:
+                raise Exception("Não foi possível conectar à OLT")
+                
+            # Enviar enable
+            logging.info("Enviando comando 'enable'...")
+            shell.send("enable\n")
+            time.sleep(1)
+            # Se pedir senha
+            if shell.recv_ready():
+                response = shell.recv(4096).decode('utf-8', errors='ignore')
+                if "Password:" in response:
+                    logging.info("Enviando senha do enable...")
+                    shell.send(f"{password}\n")
+                    time.sleep(1)
+                    
+            # Enviar config
+            logging.info("Enviando comando 'config'...")
+            shell.send("config\n")
+            time.sleep(1)
+            
+            # Parsear F/S/P
+            fsp_parts = fsp.split('/')
+            slot = fsp_parts[1]
+            port = fsp_parts[2]
+            
+            logging.info(f"Processando ONT: FSP={fsp}, Slot={slot}, Port={port}, ONT ID={ont_id}")
+            
+            # Comando 1: display ont wan-info
+            logging.info("Executando comando 1: display ont wan-info...")
+            shell.send(f"interface gpon 0/{slot}\n")
+            time.sleep(1)
+            cmd = f"display ont wan-info 0/{slot} {port} {ont_id}"
+            logging.info(f"Comando: {cmd}")
+            response_wan = send_command_with_pagination(shell, cmd, f"(config-if-gpon-0/{slot})#", timeout=30)
+            logging.info(f"Resposta WAN-INFO: {response_wan[:200]}..." if len(response_wan) > 200 else f"Resposta WAN-INFO: {response_wan}")
+            mac = extract_service_mac(response_wan)
+            logging.info(f"MAC extraído: {mac}")
+            
+            # Comando 2: display ont info
+            logging.info("Executando comando 2: display ont info...")
+            shell.send("quit\n")  # Sair da interface
+            time.sleep(1)
+            cmd = f"display ont info 0 {slot} {port} {ont_id}"
+            logging.info(f"Comando: {cmd}")
+            response_info = send_command_with_pagination(shell, cmd, "(config)#", timeout=30)
+            logging.info(f"Resposta INFO: {response_info[:200]}..." if len(response_info) > 200 else f"Resposta INFO: {response_info}")
+            ont_details = parse_ont_info_details(response_info)
+            logging.info(f"Detalhes da ONT parseados: {ont_details}")
+            
+            # Comando 3: display ont info summary
+            logging.info("Executando comando 3: display ont info summary...")
+            cmd = f"display ont info summary 0/{slot}/{port}"
+            logging.info(f"Comando: {cmd}")
+            response_summary = send_command_with_pagination(shell, cmd, "(config)#", timeout=30)
+            logging.info(f"Resposta SUMMARY: {response_summary[:200]}..." if len(response_summary) > 200 else f"Resposta SUMMARY: {response_summary}")
+            ont_info_dict, online_count, total_count = extract_ont_info(response_summary)
+            logging.info(f"Info extraído: {len(ont_info_dict)} ONTs, Online: {online_count}, Total: {total_count}")
+            
+            # Comando 4: display ont traffic
+            logging.info("Executando comando 4: display ont traffic...")
+            shell.send(f"interface gpon 0/{slot}\n")
+            time.sleep(1)
+            cmd = f"display ont traffic {port} {ont_id}"
+            logging.info(f"Comando: {cmd}")
+            response_traffic = send_command_with_pagination(shell, cmd, f"(config-if-gpon-0/{slot})#", timeout=30)
+            logging.info(f"Resposta TRAFFIC: {response_traffic[:200]}..." if len(response_traffic) > 200 else f"Resposta TRAFFIC: {response_traffic}")
+            traffic_data = parse_ont_traffic(response_traffic)
+            logging.info(f"Tráfego parseado: {traffic_data}")
+            
+            # Comando 5: display statistics ont
+            logging.info("Executando comando 5: display statistics ont...")
+            cmd = f"display statistics ont {port} {ont_id}"
+            logging.info(f"Comando: {cmd}")
+            response_stats = send_command_with_pagination(shell, cmd, f"(config-if-gpon-0/{slot})#", timeout=30)
+            logging.info(f"Resposta STATS: {response_stats[:200]}..." if len(response_stats) > 200 else f"Resposta STATS: {response_stats}")
+            stats_data = parse_ont_statistics(response_stats)
+            logging.info(f"Estatísticas parseadas: {stats_data}")
+            
+            # Sair do modo config
+            logging.info("Saindo do modo config...")
+            shell.send("quit\n")
+            time.sleep(1)
+            shell.send("quit\n")
+            time.sleep(1)
+            
+            # Fechar conexão
+            logging.info("Fechando conexão SSH...")
+            client.close()
+            
+            # Preparar dados para salvar
+            # Dados gerais
+            ont_data = {
+                'fsp': fsp,
+                'ont_id': int(ont_id),
+                'mac': mac,
+                'sn': sn,
+                'rx': ont_details.get('rx_power', 'N/A'),
+                'tx': ont_details.get('tx_power', 'N/A'),
+                'description': ont_info_dict.get(ont_id, {}).get('description', 'N/A'),
+                'status': ont_info_dict.get(ont_id, {}).get('run_state', 'offline'),
+                'last_down_cause': ont_details.get('last_down_cause'),
+                'last_up_time': ont_details.get('last_up_time'),
+                'last_down_time': ont_details.get('last_down_time'),
+                'last_dying_gasp_time': ont_details.get('last_dying_gasp_time'),
+                'services': json.dumps(ont_details.get('services', [])),
+                'ont_distance': ont_details.get('ont_distance'),
+                'memory_occupation': ont_details.get('memory_occupation'),
+                'cpu_occupation': ont_details.get('cpu_occupation'),
+                'temperature': ont_details.get('temperature'),
+                'ont_ip_address': ont_details.get('ont_ip_address'),
+                'line_profile_id': ont_details.get('line_profile_id'),
+                'line_profile_name': ont_details.get('line_profile_name'),
+                'service_profile_id': ont_details.get('service_profile_id'),
+                'service_profile_name': ont_details.get('service_profile_name'),
+            }
+            
+            logging.info("Salvando dados gerais da ONT...")
+            # Salvar dados gerais
+            save_ont_data(olt_ip, ont_data)
+            
+            # Salvar dados de tráfego
+            if traffic_data:
+                logging.info("Salvando dados de tráfego...")
+                traffic_list = [{
+                    'ont_id': int(ont_id),
+                    'up_traffic': traffic_data.get('up_traffic', 0),
+                    'down_traffic': traffic_data.get('down_traffic', 0)
+                }]
+                save_ont_traffic_bulk(olt_ip, fsp, traffic_list)
+            else:
+                logging.warning("Dados de tráfego não encontrados, não salvando...")
+            
+            # Salvar dados de estatísticas
+            if stats_data:
+                logging.info("Salvando dados de estatísticas...")
+                stats_list = [{
+                    'ont_id': int(ont_id),
+                    'upstream_frames': stats_data.get('upstream_frames', 0),
+                    'upstream_bytes': stats_data.get('upstream_bytes', 0),
+                    'upstream_discarded_frames': stats_data.get('upstream_discarded_frames', 0),
+                    'downstream_frames': stats_data.get('downstream_frames', 0),
+                    'downstream_bytes': stats_data.get('downstream_bytes', 0),
+                    'downstream_discarded_frames': stats_data.get('downstream_discarded_frames', 0)
+                }]
+                save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list)
+            else:
+                logging.warning("Dados de estatísticas não encontrados, não salvando...")
+            
+            logging.info("Atualizando a GUI...")
+            # Atualizar a GUI na thread principal usando signal/slot
+            # Usar QTimer.singleShot para chamar o método na thread principal
+            QTimer.singleShot(0, self.load_ont_details_from_db)
+            
+        except Exception as e:
+            logging.error(f"Erro ao atualizar detalhes da ONT: {e}", exc_info=True)
+            # Exibir mensagem de erro na GUI usando QTimer.singleShot
+            error_msg = str(e)
+            QTimer.singleShot(0, lambda: self.show_ont_details_error(error_msg))
+        finally:
+            # Reabilitar o botão na GUI usando QTimer.singleShot
+            logging.info("Reabilitando o botão de atualização...")
+            QTimer.singleShot(0, lambda: self.update_ont_details_btn.setEnabled(True))
+            QTimer.singleShot(0, lambda: self.update_ont_details_btn.setText("Atualizar Dados"))
+
+    def show_ont_details_error(self, error_msg):
+        """Exibe uma mensagem de erro na aba de detalhes da ONT."""
+        logging.error(f"Exibindo erro para o usuário: {error_msg}")
+        QMessageBox.critical(self, "Erro", f"Não foi possível atualizar os dados da ONT: {error_msg}")
+        # Reabilitar o botão
+        self.update_ont_details_btn.setEnabled(True)
+        self.update_ont_details_btn.setText("Atualizar Dados")
 
     def setup_uplink_ddm_tab(self):
         """Configura a interface da aba 'Uplink DDM'"""
