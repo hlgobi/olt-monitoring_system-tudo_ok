@@ -55,63 +55,87 @@ BOARD_PORT_MAP = {
 
 def send_command_with_pagination(shell, command, expected_prompt, timeout=30):
     """
-    Envia um comando e lida com múltiplos prompts e paginação de forma robusta.
+    Envia comando SSH com tratamento robusto.
+    Retorna a saída do comando limpa.
     """
-    # Limpa qualquer dado residual no buffer do shell antes de enviar um novo comando.
-    while shell.recv_ready():
-        shell.recv(4096)
-    
-    logging.debug(f"Executando comando: {command}")
-    shell.send(command + "\n")
     full_response = ""
-    end_time = time.time() + timeout
+    start_time = time.time()
     
-    # Loop principal para ler a resposta completa.
-    while time.time() < end_time:
-        # Se não houver dados prontos para ler, aguarda um pouco.
-        if not shell.recv_ready():
-            time.sleep(0.5)
-            # Verifica se o prompt final já está na resposta
-            if expected_prompt in full_response.rstrip().splitlines()[-1] if full_response.strip() else "":
-                break
-            continue
+    try:
+        # Limpar o buffer antes de enviar
+        while shell.recv_ready():
+            shell.recv(4096)
         
-        try:
-            # Lê um pedaço (chunk) da resposta do shell.
-            chunk = shell.recv(8192).decode('utf-8', errors='ignore')
-            logging.debug(f"RAW CHUNK RECEBIDO: ----\n{chunk}\n----")
-            full_response += chunk
-            
-            # 1. Lida com o prompt de paginação "More"
-            if "---- More" in chunk:
-                logging.debug(f"Paginação detectada. Enviando espaço.")
-                shell.send(" ")
-                time.sleep(0.8)
-                continue
-                
-            # 2. Verifica se o prompt esperado está no final da resposta
-            if expected_prompt in full_response.rstrip().splitlines()[-1] if full_response.strip() else "":
-                logging.debug(f"Prompt esperado '{expected_prompt}' detectado no final da resposta.")
-                break
-                
-        except Exception as e:
-            logging.error(f"Erro durante a leitura do shell: {e}", exc_info=True)
-            break
-            
-    # Limpa a saída final, removendo o eco do comando que foi digitado e o prompt final.
-    lines = full_response.splitlines()
-    cleaned_lines = []
-    for line in lines:
-        # Ignora a linha que contém o próprio comando ou a mensagem de "executando".
-        if line.strip() == command or "Command is being executed" in line:
-            continue
-        cleaned_lines.append(line)
-    
-    # Remove a última linha se ela for o prompt final.
-    if cleaned_lines and expected_prompt in cleaned_lines[-1]:
-        cleaned_lines.pop()
+        logging.debug(f"Enviando comando: {command}")
+        shell.send(command + "\n")
         
-    return "\n".join(cleaned_lines).strip()
+        # Aguardar um pouco para o comando ser processado
+        time.sleep(0.5)
+        
+        while (time.time() - start_time) < timeout:
+            if shell.recv_ready():
+                chunk = shell.recv(8192).decode('utf-8', errors='ignore')
+                full_response += chunk
+                
+                # Trata paginação de forma robusta
+                if "---- More" in chunk:
+                    logging.debug("Paginação detectada. Enviando espaço.")
+                    shell.send(" ")
+                    time.sleep(0.5)
+                    start_time = time.time()  # Reseta o timeout na interação.
+                
+                # Trata prompts potenciais <cr>
+                elif "{ <cr>||<K> }:" in chunk:
+                    logging.debug("Prompt <cr> detectado. Enviando Enter.")
+                    shell.send("\n")
+                    time.sleep(0.5)
+                    start_time = time.time()  # Reseta o timeout na interação.
+                
+                # Verifica marcadores de fim
+                elif expected_prompt in full_response:
+                    logging.debug(f"Prompt esperado '{expected_prompt}' detectado.")
+                    # Espera um pouco mais para garantir que toda a resposta foi recebida
+                    time.sleep(0.5)
+                    # Limpa qualquer dado adicional que possa ter chegado
+                    while shell.recv_ready():
+                        full_response += shell.recv(4096).decode('utf-8', errors='ignore')
+                    break
+            else:
+                time.sleep(0.1)
+
+        cleaned = clean_response(full_response)
+        logging.debug(f"Resposta completa (limpa): {cleaned[:200]}...")
+
+        # Verifica padrões de erro específicos
+        error_patterns = [
+            r"^\s*Error:",
+            r"^\s*Failure:",
+            r"^\s*%",
+            r"^\s*\^"
+        ]
+        
+        found_error = False
+        error_lines_found = []
+        
+        for line in cleaned.splitlines():
+            for pattern in error_patterns:
+                if re.search(pattern, line):
+                    found_error = True
+                    error_lines_found.append(line.strip())
+                    break
+                    
+        if found_error:
+             if not any(ok_msg in cleaned for ok_msg in ["No ONT online", "board does not exist", "PON port does not exist"]):
+                 raise Exception(f"Comando retornou um erro: {error_lines_found if error_lines_found else cleaned.strip().splitlines()[-2:]}")
+
+        if not cleaned.strip():
+             raise Exception("Resposta vazia recebida")
+
+        return cleaned
+
+    except Exception as e:
+        logging.warning(f"Erro no comando '{command}': {str(e)}")
+        raise
 
 # Em olt/processing.py, substitua a função process_ont_details por esta versão corrigida:
 
