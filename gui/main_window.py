@@ -8405,8 +8405,8 @@ class OLTDatabaseGUI(QMainWindow):
                 'ont_id': int(ont_id),
                 'mac': mac,
                 'sn': sn,
-                'rx': ont_details.get('rx_power', 'N/A'),
-                'tx': ont_details.get('tx_power', 'N/A'),
+                'rx': ont_info_dict.get(ont_id, {}).get('rx_power', 'N/A'), # <--- CORRIGIDO
+                'tx': ont_info_dict.get(ont_id, {}).get('tx_power', 'N/A'), # <--- CORRIGIDO
                 'description': ont_info_dict.get(ont_id, {}).get('description', 'N/A'),
                 'status': ont_info_dict.get(ont_id, {}).get('run_state', 'offline'),
                 'last_down_cause': ont_details.get('last_down_cause'),
