@@ -349,63 +349,64 @@ def parse_pon_statistics_packets(response):
 
 # Em olt/parsing.py, substitua a função parse_ont_traffic por esta versão corrigida:
 
-def parse_ont_traffic(response):
-    """Analisa a saída do 'display ont traffic' e retorna uma lista de dicionários."""
+# Em olt/parsing.py, substitua a função parse_ont_traffic por esta:
+
+def parse_ont_traffic(response, ont_id_target=None):
+    """
+    Analisa a saída do 'display ont traffic'.
+    Lida com o formato de múltiplas ONTs ('all') e de ONT única.
+    """
     traffic_list = []
     lines = response.splitlines()
     
-    # Procurar pelo cabeçalho da tabela
+    # --- TENTATIVA 1: PARSE DO FORMATO DE MÚLTIPLAS ONTS ('all') ---
     header_found = False
-    header_line = ""
-    
     for i, line in enumerate(lines):
-        # Procurar pelo cabeçalho exato da OLT
         if "ONT ID" in line and "Up traffic" in line and "Down traffic" in line:
             header_found = True
-            header_line = line
-            logging.info(f"Cabeçalho encontrado na linha {i}: {line}")
-            
-            # As próximas linhas são os dados
             for data_line in lines[i+1:]:
-                data_line = data_line.strip()
-                if not data_line:
+                if data_line.strip().startswith("---"):
                     continue
-                    
-                # Pular linhas que não são dados (como separadores)
-                if data_line.startswith("---") or "Command is being executed" in data_line:
-                    continue
-                    
-                # Tentar extrair os números da linha
-                # Padrão: número seguido de dois números
-                parts = re.split(r'\s+', data_line)
+                parts = re.split(r'\s+', data_line.strip())
                 if len(parts) >= 3:
                     try:
-                        ont_id = int(parts[0])
-                        up_traffic = float(parts[1])
-                        down_traffic = float(parts[2])
-                        
                         traffic_list.append({
-                            "ont_id": ont_id,
-                            "up_traffic": up_traffic,
-                            "down_traffic": down_traffic
+                            "ont_id": int(parts[0]),
+                            "up_traffic": float(parts[1]),
+                            "down_traffic": float(parts[2])
                         })
-                        
-                        logging.debug(f"ONT {ont_id}: Up={up_traffic} kbps, Down={down_traffic} kbps")
-                        
-                    except (ValueError, IndexError) as e:
-                        logging.warning(f"Erro ao parsear linha de tráfego: {data_line} - {e}")
+                    except (ValueError, IndexError):
                         continue
             break
     
+    # --- TENTATIVA 2: PARSE DO FORMATO DE ONT ÚNICA (SE A 1ª FALHAR) ---
     if not header_found:
-        logging.warning("Cabeçalho da tabela de tráfego não encontrado na resposta.")
-        # Logar as primeiras 20 linhas para depuração
-        logging.info("=== INÍCIO DA RESPOSTA BRUTA ===")
-        for i, line in enumerate(lines[:20]):
-            logging.info(f"Linha {i}: {line}")
-        logging.info("=== FIM DA RESPOSTA BRUTA ===")
+        logging.info("Cabeçalho não encontrado, tentando parse de ONT única.")
+        up_traffic, down_traffic = None, None
+        for line in lines:
+            if "Up traffic (kbps)" in line:
+                try:
+                    up_traffic = float(line.split(':')[1].strip())
+                except (ValueError, IndexError):
+                    pass
+            elif "Down traffic (kbps)" in line:
+                try:
+                    down_traffic = float(line.split(':')[1].strip())
+                except (ValueError, IndexError):
+                    pass
+        
+        # Se encontrou os dados e um ID de alvo foi fornecido
+        if up_traffic is not None and down_traffic is not None and ont_id_target is not None:
+            traffic_list.append({
+                "ont_id": ont_id_target,
+                "up_traffic": up_traffic,
+                "down_traffic": down_traffic
+            })
+
+    if not traffic_list:
+        logging.warning("Nenhum dado de tráfego pôde ser parseado da resposta.")
     else:
-        logging.info(f"Parse bem-sucedido. Encontrados {len(traffic_list)} ONTs com dados de tráfego.")
+        logging.info(f"Parse bem-sucedido. Encontrados dados de tráfego para {len(traffic_list)} ONT(s).")
     
     return traffic_list
 

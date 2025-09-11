@@ -8331,34 +8331,76 @@ class OLTDatabaseGUI(QMainWindow):
             logging.info(f"Resposta SUMMARY: {response_summary[:500]}..." if len(response_summary) > 500 else f"Resposta SUMMARY: {response_summary}")
             ont_info_dict, online_count, total_count = extract_ont_info(response_summary)
             logging.info(f"Info extraído: {len(ont_info_dict)} ONTs, Online: {online_count}, Total: {total_count}")
-            
+           
             # Comando 4: display ont traffic
             logging.info("Executando comando 4: display ont traffic...")
             clear_buffer()
             interface_cmd = f"interface gpon {f_frame}/{slot}"
             logging.info(f"Entrando na interface: {interface_cmd}")
             shell.send(f"{interface_cmd}\n")
-            time.sleep(3)
+            time.sleep(3) # Damos um tempo para a OLT processar a entrada na interface
             
             # Verificar se estamos no modo de interface
             expected_interface_prompt = f"(config-if-gpon-{f_frame}/{slot})#"
             logging.info(f"Aguardando prompt: {expected_interface_prompt}")
             success, response, found_prompt = wait_for_prompt(expected_interface_prompt, timeout=15)
-            if not success:
+            
+            # SÓ executa os comandos de tráfego SE a entrada na interface foi bem-sucedida
+            # ... (código para entrar na interface) ...
+            if success:
+                traffic_cmd = f"display ont traffic {port} {ont_id}"
+                logging.info(f"Comando TRAFFIC: {traffic_cmd}")
+
+                # --- NOVO BLOCO PARA TRATAR O COMANDO 'display ont traffic' DE FORMA INTERATIVA ---
+                logging.info("Executando 'display ont traffic' com tratamento interativo...")
+                
+                # Limpa qualquer resíduo no buffer antes de começar
+                while shell.recv_ready():
+                    shell.recv(4096)
+                
+                shell.send(traffic_cmd + "\n")
+                time.sleep(1) # Pequena espera para o primeiro prompt aparecer
+                
+                # 1. Lê a primeira resposta, que deve ser o prompt { <cr>... }:
+                response_part1 = ""
+                if shell.recv_ready():
+                    response_part1 = shell.recv(4096).decode('utf-8', errors='ignore')
+                
+                # 2. Se o prompt aparecer, envia Enter e espera 3s
+                if "{ <cr>" in response_part1:
+                    logging.info("Prompt <cr> detectado. Enviando Enter e aguardando 3 segundos.")
+                    shell.send("\n")
+                    time.sleep(3) # Pausa de 3 segundos sugerida por você
+                
+                # 3. Lê a próxima parte da resposta (que deve ser o "Command:")
+                response_part2 = ""
+                if shell.recv_ready():
+                    response_part2 = shell.recv(4096).decode('utf-8', errors='ignore')
+
+                # 4. Se o "Command:" aparecer, espera 4s
+                if "Command:" in response_part2:
+                    logging.info("'Command:' detectado. Aguardando 4 segundos pela tabela de dados.")
+                    time.sleep(4) # Pausa de 4 segundos sugerida por você
+
+                # 5. Lê o restante da resposta (a tabela de dados e o prompt final)
+                response_traffic = ""
+                while shell.recv_ready():
+                    response_traffic += shell.recv(8192).decode('utf-8', errors='ignore')
+                
+                # Junta todas as partes para o parser (caso algo tenha sobrado nos buffers)
+                full_response_for_parser = response_part1 + response_part2 + response_traffic
+                logging.info(f"Resposta final do tráfego recebida ({len(full_response_for_parser)} bytes).")
+                
+                # --- FIM DO NOVO BLOCO ---
+                
+                traffic_data = parse_ont_traffic(full_response_for_parser, ont_id_target=int(ont_id))
+                logging.info(f"Tráfego parseado: {traffic_data}")
+            else:
+                # Se falhou, lança a exceção e PARA
                 if found_prompt == "ERROR":
                     raise Exception(f"Erro ao entrar no modo de interface {interface_cmd} para tráfego. Resposta: {response}")
                 else:
                     raise Exception(f"Não foi possível entrar no modo de interface {interface_cmd} para tráfego. Timeout. Resposta: {response}")
-            
-            # Construir o comando com os parâmetros corretos
-            traffic_cmd = f"display ont traffic {port} {ont_id}"
-            logging.info(f"Comando TRAFFIC: {traffic_cmd}")
-            
-            # Enviar o comando com tratamento de paginação
-            response_traffic = send_command_with_pagination(traffic_cmd, expected_interface_prompt, timeout=30)
-            logging.info(f"Resposta TRAFFIC: {response_traffic[:500]}..." if len(response_traffic) > 500 else f"Resposta TRAFFIC: {response_traffic}")
-            traffic_data = parse_ont_traffic(response_traffic)
-            logging.info(f"Tráfego parseado: {traffic_data}")
             
             # Comando 5: display statistics ont
             logging.info("Executando comando 5: display statistics ont...")
@@ -8429,15 +8471,20 @@ class OLTDatabaseGUI(QMainWindow):
             # Salvar dados gerais
             save_ont_data(olt_ip, ont_data)
             
+            # Em gui/main_window.py, dentro de _update_ont_details_worker
+            # ...
             # Salvar dados de tráfego
-            if traffic_data:
+            if traffic_data: # Verifica se a lista retornada pelo parser não está vazia
                 logging.info("Salvando dados de tráfego...")
-                traffic_list = [{
+                # Pega o primeiro (e único) dicionário de dentro da lista
+                traffic_dict = traffic_data[0] 
+                
+                traffic_list_to_save = [{
                     'ont_id': int(ont_id),
-                    'up_traffic': traffic_data.get('up_traffic', 0),
-                    'down_traffic': traffic_data.get('down_traffic', 0)
+                    'up_traffic': traffic_dict.get('up_traffic', 0),    # <-- CORRIGIDO
+                    'down_traffic': traffic_dict.get('down_traffic', 0) # <-- CORRIGIDO
                 }]
-                save_ont_traffic_bulk(olt_ip, fsp, traffic_list)
+                save_ont_traffic_bulk(olt_ip, fsp, traffic_list_to_save)
             else:
                 logging.warning("Dados de tráfego não encontrados, não salvando...")
             

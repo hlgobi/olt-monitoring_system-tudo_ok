@@ -35,6 +35,7 @@ from gui.signals import db_signals
 # Define o número de threads que serão usadas para processar as portas PON em paralelo.
 NUM_THREADS = 4
 
+
 # --- Mapeamento de Placas e Portas ---
 # Dicionário que mapeia o nome de uma placa (board) ao seu número de portas.
 # Essencial para saber quantas portas PON devem ser verificadas em cada slot.
@@ -43,7 +44,6 @@ BOARD_PORT_MAP = {
     # Placas GPON (MA5683T)
     "GPFD": 16, "H805GPFD": 16, "GPBD": 8, "H805GPBD": 8,
     "H807GPBD": 8, "H808GPBH": 16,
-    # Placas XG-PON (MA5683T)
     "XGPD": 8, "H801XGPD": 8, "H802XGBC": 4,
     # Placas GPON (MA5800)
     "H901GPUF": 16, "H902GPLF": 16, "H901GPLF": 16,
@@ -88,9 +88,18 @@ def send_command_with_pagination(shell, command, expected_prompt, timeout=30):
                 elif "{ <cr>||<K> }:" in chunk:
                     logging.debug("Prompt <cr> detectado. Enviando Enter.")
                     shell.send("\n")
-                    time.sleep(0.5)
+                    time.sleep(3)
                     start_time = time.time()  # Reseta o timeout na interação.
-                
+                    continue              # <<--- ADIÇÃO CRUCIAL
+
+
+                elif olt_telnet_param_prompt_re.search(chunk.strip().splitlines()[-1]):
+                    logging.debug("Prompt <cr> genérico detectado. Enviando Enter e continuando a escuta.")
+                    shell.send("\n")
+                    time.sleep(3)       # Pequena pausa para a OLT processar o Enter
+                    start_time = time.time() # Reseta o timeout
+                    continue              # <<--- ADIÇÃO CRUCIAL
+
                 # Verifica marcadores de fim
                 elif expected_prompt in full_response:
                     logging.debug(f"Prompt esperado '{expected_prompt}' detectado.")
