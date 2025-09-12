@@ -8312,7 +8312,7 @@ class OLTDatabaseGUI(QMainWindow):
                 else:
                     raise Exception("Timeout ao voltar ao modo config após sair da interface")
             
-            info_cmd = f"display ont info {f_frame} {slot} {port} {ont_id}"
+            info_cmd = f"display ont info 0 {slot} {port} {ont_id}"
             logging.info(f"Comando INFO: {info_cmd}")
             
             # Enviar o comando com tratamento de paginação
