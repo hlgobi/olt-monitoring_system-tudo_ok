@@ -17,9 +17,9 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QTableWidget,
                              QTableWidgetItem, QLabel, QLineEdit,
                              QMessageBox, QComboBox, QDialog, QFormLayout,
-                             QInputDialog, QGroupBox, QTabWidget, QTextEdit, QSplitter,
+                             QInputDialog, QGroupBox, QTabWidget, QTabBar, QTextEdit, QSplitter, # <<< QTabBar DEVE ESTAR AQUI
                              QFileDialog, QScrollArea, QSizePolicy, QGridLayout,
-                             QListWidget, QAbstractItemView, QCheckBox)  # NOVO: QCheckBox
+                             QListWidget, QAbstractItemView, QCheckBox)
 from PyQt5.QtCore import (QObject, pyqtSignal, QTimer, Qt, QEvent, QMetaObject, 
                           pyqtSlot, Q_ARG, QPropertyAnimation, pyqtProperty)
 from PyQt5 import QtGui
@@ -43,6 +43,91 @@ from olt.communication import connect_to_olt, send_command as send_olt_command
 from utils.helpers import (clean_response, parse_ont_device_info, parse_ont_optic_status, 
                            parse_ont_wan_status, parse_lan_wifi_devices, parse_wifi_neighbors, 
                            parse_wifi_config, parse_connectivity_tests, parse_voip_status, parse_ip_routes)
+
+
+
+
+# ==============================================================================
+# NOVA CLASSE PARA ABAS COM TEXTO ROLANTE
+# ==============================================================================
+class ScrollingTabBar(QTabBar):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._animation_timer = QTimer(self)
+        self._animation_timer.setInterval(200)  # Velocidade da rolagem (em milissegundos)
+        self._animation_timer.timeout.connect(self._scroll_tab_text)
+
+        self._hovered_tab_index = -1
+        self._scroll_position = 0
+        self._original_texts = {}
+
+        self.setMouseTracking(True)
+
+    def event(self, event):
+        if event.type() == event.MouseMove:
+            tab_index = self.tabAt(event.pos())
+            if tab_index != self._hovered_tab_index:
+                self._stop_scrolling()
+                if tab_index != -1:
+                    self._start_scrolling(tab_index)
+                self._hovered_tab_index = tab_index
+        elif event.type() == event.Leave:
+            self._stop_scrolling()
+            self._hovered_tab_index = -1
+
+        return super().event(event)
+
+    def _start_scrolling(self, tab_index):
+        # Armazena o texto original se ainda não o fez
+        if tab_index not in self._original_texts:
+            self._original_texts[tab_index] = self.tabText(tab_index)
+
+        original_text = self._original_texts[tab_index]
+        font_metrics = self.fontMetrics()
+        text_width = font_metrics.width(original_text)
+        tab_width = self.tabRect(tab_index).width() - 24  # Subtrai o padding (12px de cada lado)
+
+        # Só inicia a animação se o texto for maior que o espaço da aba
+        if text_width > tab_width:
+            self._hovered_tab_index = tab_index
+            self._scroll_position = 0
+            self._animation_timer.start()
+
+    def _stop_scrolling(self):
+        if self._hovered_tab_index != -1:
+            # Restaura o texto original
+            if self._hovered_tab_index in self._original_texts:
+                original_text = self._original_texts[self._hovered_tab_index]
+                self.setTabText(self._hovered_tab_index, original_text)
+
+        self._animation_timer.stop()
+        self._hovered_tab_index = -1
+        self._scroll_position = 0
+
+    def _scroll_tab_text(self):
+        if self._hovered_tab_index == -1:
+            self._animation_timer.stop()
+            return
+
+        original_text = self._original_texts.get(self._hovered_tab_index, "")
+        if not original_text:
+            return
+
+        # Adiciona espaços no final para criar um efeito de loop suave
+        scrolling_text = original_text + "   "
+        
+        # Move o texto
+        text_to_show = scrolling_text[self._scroll_position:] + scrolling_text[:self._scroll_position]
+        self.setTabText(self._hovered_tab_index, text_to_show)
+
+        self._scroll_position += 1
+        if self._scroll_position >= len(scrolling_text):
+            self._scroll_position = 0
+
+# ==============================================================================
+# FIM DA NOVA CLASSE
+# ==============================================================================
+
 
 
 class OLTDatabaseGUI(QMainWindow):
@@ -124,6 +209,7 @@ class OLTDatabaseGUI(QMainWindow):
 
         self.connect_to_db()
         self.init_ui()
+        self.apply_styles()
         self.load_olt_list_to_filters()
         self.load_data()
         self.setup_timers()
@@ -206,6 +292,14 @@ class OLTDatabaseGUI(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         self.tab_widget = QTabWidget()
+        self.tab_widget.tabBar().setExpanding(True) # <--- ADICIONE ESTA LINHA
+                # Adiciona a barra de abas com rolagem (que já fizemos)
+        scrolling_tab_bar = ScrollingTabBar(self)
+        self.tab_widget.setTabBar(scrolling_tab_bar)
+
+        # <<< --- ADICIONE ESTA LINHA --- >>>
+        # Garante que os botões de rolagem apareçam se as abas não couberem
+        self.tab_widget.setUsesScrollButtons(True)
         central_widget.setLayout(QVBoxLayout())
         central_widget.layout().addWidget(self.tab_widget)
     
@@ -7706,74 +7800,146 @@ class OLTDatabaseGUI(QMainWindow):
 
 
     def setup_ont_details_tab(self):
-        """Configura a aba de detalhes da ONT."""
-        layout = QVBoxLayout(self.ont_details_tab)
-        
-        # Painel de informações da ONT selecionada
-        info_group = QGroupBox("Informações da ONT")
-        info_layout = QFormLayout()
-        
-        self.ont_details_olt_label = QLabel("OLT: Não selecionada")
-        self.ont_details_fsp_label = QLabel("F/S/P: Não selecionado")
-        self.ont_details_id_label = QLabel("ONT ID: Não selecionado")
-        self.ont_details_sn_label = QLabel("Serial: Não selecionado")
-        self.ont_details_status_label = QLabel("Status: Não selecionado")
-        self.ont_details_last_update = QLabel("Última atualização: Nunca")
-        
-        info_layout.addRow(self.ont_details_olt_label)
-        info_layout.addRow(self.ont_details_fsp_label)
-        info_layout.addRow(self.ont_details_id_label)
-        info_layout.addRow(self.ont_details_sn_label)
-        info_layout.addRow(self.ont_details_status_label)
-        info_layout.addRow(self.ont_details_last_update)
-        
-        info_group.setLayout(info_layout)
-        layout.addWidget(info_group)
-        
-        # Botão para atualizar dados
-        self.update_ont_details_btn = QPushButton("Atualizar Dados da ONT")
-        self.update_ont_details_btn.clicked.connect(self.update_ont_details_data)
-        self.update_ont_details_btn.setEnabled(False)
-        layout.addWidget(self.update_ont_details_btn)
-        
-        # Abas para diferentes tipos de dados
-        details_tabs = QTabWidget()
-        
-        # Aba de dados gerais
-        self.ont_general_tab = QWidget()
-        general_layout = QVBoxLayout(self.ont_general_tab)
-        self.ont_general_table = QTableWidget()
-        self.ont_general_table.setColumnCount(2)
-        self.ont_general_table.setHorizontalHeaderLabels(["Propriedade", "Valor"])
-        self.ont_general_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        general_layout.addWidget(self.ont_general_table)
-        details_tabs.addTab(self.ont_general_tab, "Dados Gerais")
-        
-        # Aba de tráfego
-        self.ont_traffic_tab = QWidget()
-        traffic_layout = QVBoxLayout(self.ont_traffic_tab)
-        self.ont_traffic_table = QTableWidget()
-        self.ont_traffic_table.setColumnCount(2)
-        self.ont_traffic_table.setHorizontalHeaderLabels(["Propriedade", "Valor"])
-        self.ont_traffic_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        traffic_layout.addWidget(self.ont_traffic_table)
-        details_tabs.addTab(self.ont_traffic_tab, "Tráfego")
-        
-        # Aba de estatísticas
-        self.ont_stats_tab = QWidget()
-        stats_layout = QVBoxLayout(self.ont_stats_tab)
-        self.ont_stats_table = QTableWidget()
-        self.ont_stats_table.setColumnCount(2)
-        self.ont_stats_table.setHorizontalHeaderLabels(["Propriedade", "Valor"])
-        self.ont_stats_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        stats_layout.addWidget(self.ont_stats_table)
-        details_tabs.addTab(self.ont_stats_tab, "Estatísticas")
-        
-        layout.addWidget(details_tabs)
-        
-        # Armazenar a ONT selecionada
-        self.selected_ont_for_details = None
+            """Configura a aba de detalhes da ONT com um layout amigável e tema roxo."""
+            
+            # 1. Limpa o layout anterior, se houver
+            if self.ont_details_tab.layout():
+                QWidget().setLayout(self.ont_details_tab.layout())
+                
 
+            # Define um nome de objeto para o estilo funcionar
+            self.ont_details_tab.setObjectName("ontDetailsTabWidget")
+
+            # 3. Layout principal
+            main_layout = QVBoxLayout(self.ont_details_tab)
+            
+            # 4. Painel de Informações da ONT Selecionada (Topo)
+            info_group = QGroupBox("Informações da ONT Selecionada")
+            info_layout = QFormLayout(info_group)
+            info_layout.setSpacing(10)
+            
+            self.ont_details_olt_label = QLabel("N/A")
+            self.ont_details_fsp_label = QLabel("N/A")
+            self.ont_details_id_label = QLabel("N/A")
+            self.ont_details_sn_label = QLabel("N/A")
+            
+            info_layout.addRow("<b>OLT:</b>", self.ont_details_olt_label)
+            info_layout.addRow("<b>F/S/P:</b>", self.ont_details_fsp_label)
+            info_layout.addRow("<b>ONT ID:</b>", self.ont_details_id_label)
+            info_layout.addRow("<b>Serial:</b>", self.ont_details_sn_label)
+            
+            main_layout.addWidget(info_group)
+            
+            # 5. Botão de Atualização
+            self.update_ont_details_btn = QPushButton("Atualizar Dados da ONT ao Vivo")
+            self.update_ont_details_btn.clicked.connect(self.update_ont_details_data)
+            self.update_ont_details_btn.setEnabled(False)
+            main_layout.addWidget(self.update_ont_details_btn, 0, Qt.AlignCenter)
+            
+            # 6. Área de Rolagem para os 3 painéis de detalhes
+            scroll_area = QScrollArea()
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
+            
+            scroll_content = QWidget()
+            scroll_content.setStyleSheet("background-color: transparent;")
+            
+            details_layout = QVBoxLayout(scroll_content)
+            details_layout.setSpacing(15)
+            
+            # --- PAINEL 1: DADOS GERAIS ---
+            general_group = QGroupBox("Dados Gerais")
+            general_form_layout = QFormLayout(general_group)
+            
+            # Criando os labels para cada campo de dados gerais
+            self.details_geral_last_check_value = QLabel("N/A")
+            self.details_client_name_value = QLabel("N/A")
+            self.details_mac_value = QLabel("N/A")
+            self.details_serial_value = QLabel("N/A")
+            self.details_rx_power_value = QLabel("N/A")
+            self.details_tx_power_value = QLabel("N/A")
+            self.details_primaria_value = QLabel("N/A")
+            self.details_secundaria_value = QLabel("N/A")
+            self.details_status_value = QLabel("N/A")
+            self.details_last_down_cause_value = QLabel("N/A")
+            self.details_last_up_time_value = QLabel("N/A")
+            self.details_last_down_time_value = QLabel("N/A")
+            self.details_dying_gasp_value = QLabel("N/A")
+            self.details_distance_value = QLabel("N/A")
+            self.details_memory_value = QLabel("N/A")
+            self.details_cpu_value = QLabel("N/A")
+            self.details_temperature_value = QLabel("N/A")
+            self.details_ip_value = QLabel("N/A")
+            self.details_connection_code_value = QLabel("N/A")
+            
+            # Adicionando os labels ao layout do painel
+            general_form_layout.addRow("Última Verificação:", self.details_geral_last_check_value)
+            general_form_layout.addRow("Nome do Cliente:", self.details_client_name_value)
+            general_form_layout.addRow("Endereço MAC:", self.details_mac_value)
+            general_form_layout.addRow("Serial do Modem:", self.details_serial_value)
+            general_form_layout.addRow("Sinal Recebido (Rx):", self.details_rx_power_value)
+            general_form_layout.addRow("Sinal Enviado (Tx):", self.details_tx_power_value)
+            general_form_layout.addRow("Caixa Primária (CTO):", self.details_primaria_value)
+            general_form_layout.addRow("Caixa Secundária (CEO):", self.details_secundaria_value)
+            general_form_layout.addRow("Status do Modem:", self.details_status_value)
+            general_form_layout.addRow("Motivo da Última Queda:", self.details_last_down_cause_value)
+            general_form_layout.addRow("Conectado Desde:", self.details_last_up_time_value)
+            general_form_layout.addRow("Data da Última Queda:", self.details_last_down_time_value)
+            general_form_layout.addRow("Queda por Falta de Energia:", self.details_dying_gasp_value)
+            general_form_layout.addRow("Distância Estimada:", self.details_distance_value)
+            general_form_layout.addRow("Uso de Memória:", self.details_memory_value)
+            general_form_layout.addRow("Uso de Processador:", self.details_cpu_value)
+            general_form_layout.addRow("Temperatura:", self.details_temperature_value)
+            general_form_layout.addRow("Endereço IP do Modem:", self.details_ip_value)
+            general_form_layout.addRow("Código de Conexão:", self.details_connection_code_value)
+            
+            details_layout.addWidget(general_group)
+
+            # --- PAINEL 2: TRÁFEGO ---
+            traffic_group = QGroupBox("Tráfego em Tempo Real")
+            traffic_form_layout = QFormLayout(traffic_group)
+
+            self.details_traffic_last_check_value = QLabel("N/A")
+            self.details_upload_value = QLabel("N/A")
+            self.details_download_value = QLabel("N/A")
+
+            traffic_form_layout.addRow("Última Verificação:", self.details_traffic_last_check_value)
+            traffic_form_layout.addRow("Tráfego de Upload Atual:", self.details_upload_value)
+            traffic_form_layout.addRow("Tráfego de Download Atual:", self.details_download_value)
+
+            details_layout.addWidget(traffic_group)
+
+            # --- PAINEL 3: ESTATÍSTICAS AVANÇADAS ---
+            stats_group = QGroupBox("Estatísticas Avançadas")
+            stats_form_layout = QFormLayout(stats_group)
+            
+            self.details_stats_last_check_value = QLabel("N/A")
+            self.details_up_frames_value = QLabel("N/A")
+            self.details_up_bytes_value = QLabel("N/A")
+            self.details_up_discard_value = QLabel("N/A")
+            self.details_down_frames_value = QLabel("N/A")
+            self.details_down_bytes_value = QLabel("N/A")
+            self.details_down_discard_value = QLabel("N/A")
+
+            stats_form_layout.addRow("Última Verificação:", self.details_stats_last_check_value)
+            stats_form_layout.addRow("Pacotes Enviados (Upload):", self.details_up_frames_value)
+            stats_form_layout.addRow("Bytes Enviados (Upload):", self.details_up_bytes_value)
+            stats_form_layout.addRow("Pacotes Descartados (Upload):", self.details_up_discard_value)
+            stats_form_layout.addRow("Pacotes Recebidos (Download):", self.details_down_frames_value)
+            stats_form_layout.addRow("Bytes Recebidos (Download):", self.details_down_bytes_value)
+            stats_form_layout.addRow("Pacotes Descartados (Download):", self.details_down_discard_value)
+
+            details_layout.addWidget(stats_group)
+            
+            # Adiciona um espaçador para empurrar tudo para cima
+            details_layout.addStretch(1)
+
+            # Finaliza a configuração da área de rolagem
+            scroll_area.setWidget(scroll_content)
+            main_layout.addWidget(scroll_area)
+            
+            # Armazenar a ONT selecionada
+            self.selected_ont_for_details = None
 
     def detail_selected_ont(self):
         """Método chamado quando o botão DETALHAR é pressionado na aba Dados ONT."""
@@ -7845,170 +8011,298 @@ class OLTDatabaseGUI(QMainWindow):
         self.load_ont_details_from_db()
 
     def load_ont_details_from_db(self):
-        """Carrega os dados da ONT selecionada a partir do banco de dados."""
-        if not self.selected_ont_for_details:
-            logging.warning("Nenhuma ONT selecionada para carregar detalhes")
-            return
-            
-        olt_ip = self.selected_ont_for_details['olt_ip']
-        fsp = self.selected_ont_for_details['fsp']
-        ont_id = self.selected_ont_for_details['ont_id']
-        sn = self.selected_ont_for_details['sn']
-        
-        logging.info(f"Carregando detalhes da ONT: OLT={olt_ip}, FSP={fsp}, ONT ID={ont_id}, SN={sn}")
-        
-        try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
-            
-            # Buscar dados gerais mais recentes
-            logging.info("Buscando dados gerais da ONT...")
-            cursor.execute("""
-                SELECT * FROM ont_data 
-                WHERE olt_ip = %s AND fsp = %s AND ont_id = %s AND serial_number = %s
-                ORDER BY collection_time DESC 
-                LIMIT 1
-            """, (olt_ip, fsp, ont_id, sn))
-            general_data = cursor.fetchone()
-            
-            if general_data:
-                logging.info("Dados gerais encontrados")
-                # Obter nomes das colunas
-                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ont_data' ORDER BY ordinal_position")
-                columns = [row[0] for row in cursor.fetchall()]
+            """Carrega os dados da ONT selecionada a partir do banco e preenche os novos painéis amigáveis."""
+            if not self.selected_ont_for_details:
+                logging.warning("Nenhuma ONT selecionada para carregar detalhes.")
+                return
                 
-                # Atualizar status e última atualização
-                status_index = columns.index('status') if 'status' in columns else 19
-                collection_time_index = columns.index('collection_time') if 'collection_time' in columns else 33
-                
-                self.ont_details_status_label.setText(f"Status: {general_data[status_index]}")
-                self.ont_details_last_update.setText(f"Última atualização: {general_data[collection_time_index]}")
-                
-                # Preencher tabela de dados gerais
-                self.populate_ont_general_table(general_data, columns)
-            else:
-                logging.warning("Dados gerais não encontrados")
-                self.ont_general_table.setRowCount(0)
+            olt_ip = self.selected_ont_for_details['olt_ip']
+            fsp = self.selected_ont_for_details['fsp']
+            ont_id = self.selected_ont_for_details['ont_id']
+            sn = self.selected_ont_for_details['sn']
             
-            # Buscar dados de tráfego mais recentes
-            logging.info("Buscando dados de tráfego...")
-            cursor.execute("""
-                SELECT * FROM ont_traffic_data 
-                WHERE olt_ip = %s AND fsp = %s AND ont_id = %s
-                ORDER BY collection_time DESC 
-                LIMIT 1
-            """, (olt_ip, fsp, ont_id))
-            traffic_data = cursor.fetchone()
-            
-            if traffic_data:
-                logging.info("Dados de tráfego encontrados")
-                # Obter nomes das colunas
-                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ont_traffic_data' ORDER BY ordinal_position")
-                columns = [row[0] for row in cursor.fetchall()]
+            logging.info(f"Carregando detalhes da ONT: OLT={olt_ip}, FSP={fsp}, ONT ID={ont_id}, SN={sn}")
+
+            # Mapeamento de nomes de coluna do BD para os labels da GUI
+            general_data_map = {
+                'collection_time': self.details_geral_last_check_value,
+                'client_name': self.details_client_name_value,
+                'mac_address': self.details_mac_value,
+                'serial_number': self.details_serial_value,
+                'rx_power': self.details_rx_power_value,
+                'tx_power': self.details_tx_power_value,
+                'primaria': self.details_primaria_value,
+                'secundaria': self.details_secundaria_value,
+                'status': self.details_status_value,
+                'last_down_cause': self.details_last_down_cause_value,
+                'last_up_time': self.details_last_up_time_value,
+                'last_down_time': self.details_last_down_time_value,
+                'last_dying_gasp_time': self.details_dying_gasp_value,
+                'ont_distance': self.details_distance_value,
+                'memory_occupation': self.details_memory_value,
+                'cpu_occupation': self.details_cpu_value,
+                'temperature': self.details_temperature_value,
+                'ont_ip_address': self.details_ip_value,
+                'connection_code': self.details_connection_code_value,
+            }
+
+            try:
+                conn = psycopg2.connect(**DB_CONFIG)
+                cursor = conn.cursor()
                 
-                # Preencher tabela de tráfego
-                self.populate_ont_traffic_table(traffic_data, columns)
-            else:
-                logging.warning("Dados de tráfego não encontrados")
-                self.ont_traffic_table.setRowCount(0)
-            
-            # Buscar estatísticas mais recentes
-            logging.info("Buscando dados de estatísticas...")
-            cursor.execute("""
-                SELECT * FROM ont_statistics_packets 
-                WHERE olt_ip = %s AND fsp = %s AND ont_id = %s
-                ORDER BY collection_time DESC 
-                LIMIT 1
-            """, (olt_ip, fsp, ont_id))
-            stats_data = cursor.fetchone()
-            
-            if stats_data:
-                logging.info("Dados de estatísticas encontrados")
-                # Obter nomes das colunas
-                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'ont_statistics_packets' ORDER BY ordinal_position")
-                columns = [row[0] for row in cursor.fetchall()]
+                # --- 1. BUSCAR E PREENCHER DADOS GERAIS ---
+                cursor.execute("""
+                    SELECT * FROM ont_data 
+                    WHERE serial_number = %s AND olt_ip = %s
+                    ORDER BY collection_time DESC 
+                    LIMIT 1
+                """, (sn, olt_ip))
                 
-                # Preencher tabela de estatísticas
-                self.populate_ont_stats_table(stats_data, columns)
-            else:
-                logging.warning("Dados de estatísticas não encontrados")
-                self.ont_stats_table.setRowCount(0)
+                general_data_row = cursor.fetchone()
                 
-            conn.close()
-            logging.info("Carregamento de detalhes concluído")
-                
-        except Exception as e:
-            logging.error(f"Erro ao carregar detalhes da ONT do banco: {e}", exc_info=True)
-            QMessageBox.critical(self, "Erro", f"Não foi possível carregar os dados da ONT: {e}")
+                if general_data_row:
+                    column_names = [desc[0] for desc in cursor.description]
+                    data_dict = dict(zip(column_names, general_data_row))
+
+                    # Preenche a label de status no topo
+
+                    for key, label_widget in general_data_map.items():
+                        value = data_dict.get(key)
+                        display_text = "N/A"
+
+                        if value is not None:
+                            # Formatação amigável
+                            if 'time' in key or 'date' in key:
+                                try:
+                                    display_text = value.strftime('%d/%m/%Y %H:%M:%S')
+                                except:
+                                    display_text = str(value)
+                            elif key.endswith('_power'):
+                                display_text = f"{value} dBm"
+                            elif key == 'ont_distance':
+                                display_text = f"{value} metros"
+                            elif key.endswith('_occupation'):
+                                display_text = f"{value}%"
+                            elif key == 'temperature':
+                                display_text = f"{value}°C"
+                            else:
+                                display_text = str(value)
+                        
+                        label_widget.setText(display_text)
+                else:
+                    # Limpa todos os campos se não encontrar dados
+                    for label_widget in general_data_map.values():
+                        label_widget.setText("N/A")
+                    self.ont_details_status_label.setText("<b>N/A</b>")
 
 
-    def populate_ont_general_table(self, data, columns):
-        """Preenche a tabela de dados gerais da ONT."""
-        if not data:
-            return
-            
-        logging.info("Preenchendo tabela de dados gerais...")
-        
-        self.ont_general_table.setRowCount(len(columns))
-        self.ont_general_table.setColumnCount(2)
-        
-        for i, column in enumerate(columns):
-            self.ont_general_table.setItem(i, 0, QTableWidgetItem(column))
-            value = data[i] if data[i] is not None else "N/A"
-            
-            # Formatar valores especiais
-            if column == 'services' and isinstance(value, str):
-                try:
-                    # Tentar parsear JSON
-                    services = json.loads(value)
-                    value = json.dumps(services, indent=2, ensure_ascii=False)
-                except:
-                    pass  # Manter como string se não for JSON válido
-            elif column in ['last_up_time', 'last_down_time', 'last_dying_gasp_time'] and value != 'N/A':
-                # Formatar data/hora
-                try:
-                    if isinstance(value, str):
-                        dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                        value = dt.strftime('%d/%m/%Y %H:%M:%S')
-                    elif hasattr(value, 'strftime'):
-                        value = value.strftime('%d/%m/%Y %H:%M:%S')
-                except:
-                    pass  # Manter como string se não for possível formatar
+                # --- 2. BUSCAR E PREENCHER DADOS DE TRÁFEGO ---
+                cursor.execute("""
+                    SELECT collection_time, up_traffic_kbps, down_traffic_kbps 
+                    FROM ont_traffic_data 
+                    WHERE olt_ip = %s AND fsp = %s AND ont_id = %s
+                    ORDER BY collection_time DESC 
+                    LIMIT 1
+                """, (olt_ip, fsp, int(ont_id)))
+
+                traffic_data_row = cursor.fetchone()
+
+                if traffic_data_row:
+                    ts, up_kbps, down_kbps = traffic_data_row
+                    self.details_traffic_last_check_value.setText(ts.strftime('%d/%m/%Y %H:%M:%S'))
                     
-            self.ont_general_table.setItem(i, 1, QTableWidgetItem(str(value)))
-        
-        # Ajustar o tamanho das colunas
-        self.ont_general_table.resizeColumnsToContents()
-        logging.info("Tabela de dados gerais preenchida")
+                    # Formatação de Upload
+                    if up_kbps is not None:
+                        up_mbps = up_kbps / 1000.0
+                        self.details_upload_value.setText(f"{up_kbps:.2f} kbps ({up_mbps:.2f} Mbps)")
+                    else:
+                        self.details_upload_value.setText("N/A")
 
-    def populate_ont_traffic_table(self, data, columns):
-        """Preenche a tabela de tráfego da ONT."""
-        if not data:
-            return
+                    # Formatação de Download
+                    if down_kbps is not None:
+                        down_mbps = down_kbps / 1000.0
+                        self.details_download_value.setText(f"{down_kbps:.2f} kbps ({down_mbps:.2f} Mbps)")
+                    else:
+                        self.details_download_value.setText("N/A")
+                else:
+                    self.details_traffic_last_check_value.setText("N/A")
+                    self.details_upload_value.setText("N/A")
+                    self.details_download_value.setText("N/A")
+
+
+                # --- 3. BUSCAR E PREENCHER ESTATÍSTICAS AVANÇADAS ---
+                cursor.execute("""
+                    SELECT collection_time, upstream_frames, upstream_bytes, upstream_discarded_frames,
+                        downstream_frames, downstream_bytes, downstream_discarded_frames
+                    FROM ont_statistics_packets
+                    WHERE olt_ip = %s AND fsp = %s AND ont_id = %s
+                    ORDER BY collection_time DESC
+                    LIMIT 1
+                """, (olt_ip, fsp, int(ont_id)))
+
+                stats_data_row = cursor.fetchone()
+
+                if stats_data_row:
+                    ts, up_f, up_b, up_d, down_f, down_b, down_d = stats_data_row
+                    self.details_stats_last_check_value.setText(ts.strftime('%d/%m/%Y %H:%M:%S'))
+                    self.details_up_frames_value.setText(f"{up_f:,}" if up_f is not None else "N/A")
+                    self.details_up_bytes_value.setText(f"{up_b:,}" if up_b is not None else "N/A")
+                    self.details_up_discard_value.setText(f"{up_d:,}" if up_d is not None else "N/A")
+                    self.details_down_frames_value.setText(f"{down_f:,}" if down_f is not None else "N/A")
+                    self.details_down_bytes_value.setText(f"{down_b:,}" if down_b is not None else "N/A")
+                    self.details_down_discard_value.setText(f"{down_d:,}" if down_d is not None else "N/A")
+                else:
+                    self.details_stats_last_check_value.setText("N/A")
+                    self.details_up_frames_value.setText("N/A")
+                    self.details_up_bytes_value.setText("N/A")
+                    self.details_up_discard_value.setText("N/A")
+                    self.details_down_frames_value.setText("N/A")
+                    self.details_down_bytes_value.setText("N/A")
+                    self.details_down_discard_value.setText("N/A")
+                
+                conn.close()
+                logging.info("Carregamento de detalhes para a nova interface concluído com sucesso.")
+
+            except Exception as e:
+                logging.error(f"Erro ao carregar detalhes da ONT do banco: {e}", exc_info=True)
+                QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível carregar os dados da ONT: {e}")
+
+    def apply_styles(self):
+            """Aplica um tema visual completo à aplicação, inspirado no logo."""
             
-        logging.info("Preenchendo tabela de tráfego...")
-        
-        self.ont_traffic_table.setRowCount(len(columns))
-        self.ont_traffic_table.setColumnCount(2)
-        
-        for i, column in enumerate(columns):
-            self.ont_traffic_table.setItem(i, 0, QTableWidgetItem(column))
-            value = data[i] if data[i] is not None else "N/A"
+            # Paleta de Cores extraída do logo
+            COR_ROXO_ESCURO = "#4a148c"
+            COR_ROXO_PRINCIPAL = "#8e24aa"
+            COR_ROXO_CLARO = "#ab47bc"
+            COR_ROXO_HOVER = "#9c27b0"
+            COR_ROXO_FUNDO_CLARO = "#e1bee7"
+            COR_ROXO_FUNDO_SUPER_CLARO = "#f3e5f5"
+            COR_PINK_ACENTO = "#e91e63"
+            COR_BRANCO = "#ffffff"
+            COR_CINZA_TEXTO = "#333333"
+
+            stylesheet = f"""
+                /* --- Estilos Globais --- */
+                QMainWindow, QDialog {{
+                    background-color: {COR_ROXO_FUNDO_SUPER_CLARO};
+                }}
+
+                QGroupBox {{
+                    font-weight: bold;
+                    color: {COR_ROXO_ESCURO};
+                }}
+
+                /* --- Abas (QTabWidget) --- */
+                QTabWidget::pane {{
+                    border: 1px solid {COR_ROXO_CLARO};
+                    border-top: none;
+                    background-color: {COR_BRANCO};
+                }}
+                /* Bloco NOVO e OTIMIZADO - USE ESTE */
+                QTabBar::tab {{
+                    background: {COR_ROXO_FUNDO_CLARO};
+                    color: {COR_ROXO_PRINCIPAL};
+                    border: 1px solid {COR_ROXO_CLARO};
+                    border-bottom: none;
+                    padding: 6px 8px; /* << PADDING AINDA MENOR */
+                    font-weight: bold;
+                    font-size: 8pt;    /* << FONTE UM POUCO MENOR */
+                    border-top-left-radius: 8px;
+                    border-top-right-radius: 8px;
+                    margin-right: 2px;
+                }}
+                QTabBar::tab:hover {{
+                    background: {COR_ROXO_HOVER}; color: {COR_BRANCO};
+                }}
+                QTabBar::tab:selected {{
+                    background: {COR_ROXO_PRINCIPAL}; color: {COR_BRANCO};
+                    border-color: {COR_ROXO_PRINCIPAL};
+                }}
+
+                /* --- Tabelas (QTableWidget) --- */
+                QTableWidget {{
+                    background-color: {COR_BRANCO};
+                    border: 1px solid {COR_ROXO_FUNDO_CLARO};
+                    gridline-color: {COR_ROXO_FUNDO_CLARO};
+                    font-size: 9pt;
+                }}
+                QHeaderView::section {{
+                    background-color: {COR_ROXO_CLARO}; color: {COR_BRANCO};
+                    padding: 4px; border: none;
+                    border-bottom: 1px solid {COR_ROXO_PRINCIPAL}; font-weight: bold;
+                }}
+                QTableWidget::item {{ padding: 4px; }}
+                QTableWidget::item:alternate {{ background-color: {COR_ROXO_FUNDO_SUPER_CLARO}; }}
+                QTableWidget::item:selected {{
+                    background-color: {COR_PINK_ACENTO}; color: {COR_BRANCO};
+                }}
+
+                /* --- BOTÕES GERAIS --- */
+                QPushButton {{
+                    background-color: #fafafa;
+                    color: #333;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    padding: 5px 10px;
+                }}
+                QPushButton:hover {{
+                    background-color: #f0f0f0;
+                    border-color: #c0c0c0;
+                }}
+
+
+                /* =================================================================== */
+                /* === ESTILOS ESPECÍFICOS PARA A ABA "DETALHES ONT" === */
+                /* =================================================================== */
+
+                /* Fundo da aba específica */
+                QWidget#ontDetailsTabWidget {{
+                    background-color: {COR_ROXO_FUNDO_SUPER_CLARO};
+                }}
+
+                /* Painéis (QGroupBox) dentro da aba de detalhes */
+                QWidget#ontDetailsTabWidget QGroupBox {{
+                    background-color: {COR_ROXO_FUNDO_CLARO};
+                    border: 1px solid {COR_ROXO_CLARO};
+                    border-radius: 12px;
+                    margin-top: 10px;
+                    padding-top: 20px;
+                    font-weight: bold;
+                    color: {COR_ROXO_ESCURO};
+                }}
+
+                /* Título dos painéis na aba de detalhes */
+                QWidget#ontDetailsTabWidget QGroupBox::title {{
+                    subcontrol-origin: margin;
+                    subcontrol-position: top center;
+                    padding: 5px 15px;
+                    background-color: {COR_ROXO_CLARO};
+                    color: white;
+                    border-radius: 6px;
+                }}
+
+                /* Labels dentro da aba de detalhes */
+                QWidget#ontDetailsTabWidget QLabel {{
+                    font-size: 11px;
+                    color: {COR_ROXO_ESCURO};
+                    background-color: transparent;
+                }}
+
+                /* Botão dentro da aba de detalhes */
+                QWidget#ontDetailsTabWidget QPushButton {{
+                    background-color: {COR_ROXO_PRINCIPAL};
+                    color: white;
+                    font-weight: bold;
+                    border-radius: 8px;
+                    padding: 8px 16px;
+                    border: none;
+                }}
+                QWidget#ontDetailsTabWidget QPushButton:hover {{
+                    background-color: {COR_ROXO_HOVER};
+                }}
+            """
+            self.setStyleSheet(stylesheet)
             
-            # Formatar valores especiais
-            if column in ['up_traffic_kbps', 'down_traffic_kbps'] and value != 'N/A':
-                try:
-                    value = f"{float(value):.2f} kbps"
-                except:
-                    pass  # Manter como string se não for número
-                    
-            self.ont_traffic_table.setItem(i, 1, QTableWidgetItem(str(value)))
-        
-        # Ajustar o tamanho das colunas
-        self.ont_traffic_table.resizeColumnsToContents()
-        logging.info("Tabela de tráfego preenchida")
-
-
     def populate_ont_stats_table(self, data, columns):
         """Preenche a tabela de estatísticas da ONT."""
         if not data:
