@@ -8129,7 +8129,7 @@ class OLTDatabaseGUI(QMainWindow):
                             logging.debug(f"Erro detectado: {response}")
                             return False, response, "ERROR"
                     
-                    time.sleep(0.3)
+                    time.sleep(1)
                 
                 # Se chegou aqui, o timeout expirou
                 logging.debug(f"Timeout expirado. Resposta recebida: {response}")
@@ -8158,7 +8158,7 @@ class OLTDatabaseGUI(QMainWindow):
                         if "---- More" in chunk:
                             logging.debug("Paginação detectada. Enviando espaço.")
                             shell.send(" ")
-                            time.sleep(1)
+                            time.sleep(3)
                             start_time = time.time()  # Resetar timeout
                             continue
                         
@@ -8167,14 +8167,14 @@ class OLTDatabaseGUI(QMainWindow):
                             if expected_prompt in response:
                                 logging.debug(f"Prompt encontrado: {expected_prompt}")
                                 # Esperar um pouco mais para garantir que não há mais dados
-                                time.sleep(0.5)
+                                time.sleep(2)
                                 return response
                         else:
                             for prompt in expected_prompt:
                                 if prompt in response:
                                     logging.debug(f"Prompt encontrado: {prompt}")
                                     # Esperar um pouco mais para garantir que não há mais dados
-                                    time.sleep(0.5)
+                                    time.sleep(2)
                                     return response
                         
                         # Se receber um erro, retornar imediatamente
@@ -8187,7 +8187,7 @@ class OLTDatabaseGUI(QMainWindow):
                         logging.debug("Nenhum dado recebido há 2 segundos, considerando resposta completa")
                         return response
                     
-                    time.sleep(0.3)
+                    time.sleep(2)
                 
                 # Se chegou aqui, o timeout expirou
                 logging.debug(f"Timeout expirado ao executar comando: {command}")
@@ -8201,7 +8201,7 @@ class OLTDatabaseGUI(QMainWindow):
                     buffer_content += chunk
                 if buffer_content:
                     logging.debug(f"Buffer limpo. Conteúdo: {buffer_content[:100]}...")
-                time.sleep(0.5)
+                time.sleep(2)
                 return buffer_content
             
             # Limpar buffer inicial
@@ -8209,16 +8209,16 @@ class OLTDatabaseGUI(QMainWindow):
             
             # Enviar um Enter para garantir que temos um prompt limpo
             shell.send("\n")
-            time.sleep(1)
+            time.sleep(2)
             clear_buffer()
             
             # Enviar enable
             logging.info("Enviando comando 'enable'...")
             shell.send("enable\n")
-            time.sleep(3)
+            time.sleep(5)
             
             # Verificar resposta do enable
-            success, response, found_prompt = wait_for_prompt(["#", "Password:"], timeout=15)
+            success, response, found_prompt = wait_for_prompt(["#", "Password:"], timeout=30)
             logging.info(f"Resposta do enable: {response[:300]}..." if len(response) > 300 else f"Resposta do enable: {response}")
             
             if not success:
@@ -8234,7 +8234,7 @@ class OLTDatabaseGUI(QMainWindow):
                 time.sleep(3)
                 
                 # Verificar se conseguimos entrar no modo enable
-                success, response, found_prompt = wait_for_prompt("#", timeout=15)
+                success, response, found_prompt = wait_for_prompt("#", timeout=30)
                 if not success:
                     if found_prompt == "ERROR":
                         raise Exception(f"Erro ao entrar no modo enable após enviar senha. Resposta: {response}")
@@ -8269,20 +8269,20 @@ class OLTDatabaseGUI(QMainWindow):
             slot = fsp_parts[1]
             port = fsp_parts[2]
             
-            logging.info(f"Processando ONT: FSP={fsp}, Frame={f_frame}, Slot={slot}, Port={port}, ONT ID={ont_id}")
+            logging.info(f"Processando ONT: FSP={fsp}, Frame=0, Slot={slot}, Port={port}, ONT ID={ont_id}")
             
             # Comando 1: display ont wan-info
             logging.info("Executando comando 1: display ont wan-info...")
             clear_buffer()
-            interface_cmd = f"interface gpon {f_frame}/{slot}"
+            interface_cmd = f"interface gpon 0/{slot}"
             logging.info(f"Entrando na interface: {interface_cmd}")
             shell.send(f"{interface_cmd}\n")
             time.sleep(3)
             
             # Verificar se estamos no modo de interface
-            expected_interface_prompt = f"(config-if-gpon-{f_frame}/{slot})#"
+            expected_interface_prompt = f"(config-if-gpon-0/{slot})#"
             logging.info(f"Aguardando prompt: {expected_interface_prompt}")
-            success, response, found_prompt = wait_for_prompt(expected_interface_prompt, timeout=15)
+            success, response, found_prompt = wait_for_prompt(expected_interface_prompt, timeout=30)
             if not success:
                 if found_prompt == "ERROR":
                     raise Exception(f"Erro ao entrar no modo de interface {interface_cmd}. Resposta: {response}")
@@ -8294,7 +8294,7 @@ class OLTDatabaseGUI(QMainWindow):
             logging.info(f"Comando WAN: {wan_cmd}")
             
             # Enviar o comando com tratamento de paginação
-            response_wan = send_command_with_pagination(wan_cmd, expected_interface_prompt, timeout=30)
+            response_wan = send_command_with_pagination(wan_cmd, expected_interface_prompt, timeout=45)
             logging.info(f"Resposta WAN-INFO: {response_wan[:500]}..." if len(response_wan) > 500 else f"Resposta WAN-INFO: {response_wan}")
             mac = extract_service_mac(response_wan)
             logging.info(f"MAC extraído: {mac}")
@@ -8305,7 +8305,7 @@ class OLTDatabaseGUI(QMainWindow):
             time.sleep(3)
             
             # Verificar se estamos de volta no modo config
-            success, response, found_prompt = wait_for_prompt("(config)#", timeout=15)
+            success, response, found_prompt = wait_for_prompt("(config)#", timeout=30)
             if not success:
                 if found_prompt == "ERROR":
                     raise Exception("Erro ao voltar ao modo config após sair da interface")
@@ -8316,18 +8316,18 @@ class OLTDatabaseGUI(QMainWindow):
             logging.info(f"Comando INFO: {info_cmd}")
             
             # Enviar o comando com tratamento de paginação
-            response_info = send_command_with_pagination(info_cmd, "(config)#", timeout=45)
+            response_info = send_command_with_pagination(info_cmd, "(config)#", timeout=60)
             logging.info(f"Resposta INFO: {response_info[:500]}..." if len(response_info) > 500 else f"Resposta INFO: {response_info}")
             ont_details = parse_ont_info_details(response_info)
             logging.info(f"Detalhes da ONT parseados: {ont_details}")
             
             # Comando 3: display ont info summary
             logging.info("Executando comando 3: display ont info summary...")
-            summary_cmd = f"display ont info summary {f_frame}/{slot}/{port}"
+            summary_cmd = f"display ont info summary 0/{slot}/{port}"
             logging.info(f"Comando SUMMARY: {summary_cmd}")
             
             # Enviar o comando com tratamento de paginação
-            response_summary = send_command_with_pagination(summary_cmd, "(config)#", timeout=45)
+            response_summary = send_command_with_pagination(summary_cmd, "(config)#", timeout=60)
             logging.info(f"Resposta SUMMARY: {response_summary[:500]}..." if len(response_summary) > 500 else f"Resposta SUMMARY: {response_summary}")
             ont_info_dict, online_count, total_count = extract_ont_info(response_summary)
             logging.info(f"Info extraído: {len(ont_info_dict)} ONTs, Online: {online_count}, Total: {total_count}")
@@ -8335,15 +8335,15 @@ class OLTDatabaseGUI(QMainWindow):
             # Comando 4: display ont traffic
             logging.info("Executando comando 4: display ont traffic...")
             clear_buffer()
-            interface_cmd = f"interface gpon {f_frame}/{slot}"
+            interface_cmd = f"interface gpon 0/{slot}"
             logging.info(f"Entrando na interface: {interface_cmd}")
             shell.send(f"{interface_cmd}\n")
             time.sleep(3) # Damos um tempo para a OLT processar a entrada na interface
             
             # Verificar se estamos no modo de interface
-            expected_interface_prompt = f"(config-if-gpon-{f_frame}/{slot})#"
+            expected_interface_prompt = f"(config-if-gpon-0/{slot})#"
             logging.info(f"Aguardando prompt: {expected_interface_prompt}")
-            success, response, found_prompt = wait_for_prompt(expected_interface_prompt, timeout=15)
+            success, response, found_prompt = wait_for_prompt(expected_interface_prompt, timeout=30)
             
             # SÓ executa os comandos de tráfego SE a entrada na interface foi bem-sucedida
             # ... (código para entrar na interface) ...
@@ -8405,15 +8405,15 @@ class OLTDatabaseGUI(QMainWindow):
             # Comando 5: display statistics ont
             logging.info("Executando comando 5: display statistics ont...")
             clear_buffer()
-            interface_cmd = f"interface gpon {f_frame}/{slot}"
+            interface_cmd = f"interface gpon 0/{slot}"
             logging.info(f"Entrando na interface: {interface_cmd}")
             shell.send(f"{interface_cmd}\n")
             time.sleep(3)
 
             # Verificar se estamos no modo de interface
-            expected_interface_prompt = f"(config-if-gpon-{f_frame}/{slot})#"
+            expected_interface_prompt = f"(config-if-gpon-0/{slot})#"
             logging.info(f"Aguardando prompt: {expected_interface_prompt}")
-            success, response, found_prompt = wait_for_prompt(expected_interface_prompt, timeout=15)
+            success, response, found_prompt = wait_for_prompt(expected_interface_prompt, timeout=30)
             if not success:
                 if found_prompt == "ERROR":
                     raise Exception(f"Erro ao entrar no modo de interface {interface_cmd} para tráfego. Resposta: {response}")
@@ -8424,7 +8424,7 @@ class OLTDatabaseGUI(QMainWindow):
             logging.info(f"Comando STATS: {stats_cmd}")
             
             # Enviar o comando com tratamento de paginação
-            response_stats = send_command_with_pagination(stats_cmd, expected_interface_prompt, timeout=30)
+            response_stats = send_command_with_pagination(stats_cmd, expected_interface_prompt, timeout=45)
             logging.info(f"Resposta STATS: {response_stats[:500]}..." if len(response_stats) > 500 else f"Resposta STATS: {response_stats}")
             stats_data = parse_ont_statistics(response_stats)
             logging.info(f"Estatísticas parseadas: {stats_data}")
