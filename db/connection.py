@@ -148,6 +148,17 @@ def create_tables():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_data_olt ON public.ont_data(olt_identifier);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_data_primaria ON public.ont_data(primaria);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_data_secundaria ON public.ont_data(secundaria);")
+            # --- INÍCIO DA ADIÇÃO ---
+            # Adicionar colunas para os detalhes da versão da ONT
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS vendor_id VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS ont_version VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS product_id VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS equipment_id VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS main_software_version VARCHAR(100);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS standby_software_version VARCHAR(100);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS ont_product_description TEXT;")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS support_xml_version VARCHAR(50);")
+            # --- FIM DA ADIÇÃO ---
             
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.pon_status (

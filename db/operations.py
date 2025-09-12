@@ -132,8 +132,12 @@ def save_ont_data(olt_ip, ont_info):
                     last_dying_gasp_time, line_profile_name, services,
                     ont_distance, memory_occupation, cpu_occupation, temperature,
                     ont_ip_address, line_profile_id, service_profile_id, service_profile_name,
-                    connection_code, collection_time
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
+                    connection_code,
+                    vendor_id, ont_version, product_id, equipment_id,
+                    main_software_version, standby_software_version,
+                    ont_product_description, support_xml_version,
+                    collection_time
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
                     CAST(%s AS TIMESTAMP WITH TIME ZONE))
             """
             
@@ -173,7 +177,15 @@ def save_ont_data(olt_ip, ont_info):
                 ont_info.get('service_profile_id'),        # 32
                 ont_info.get('service_profile_name'),      # 33
                 ont_info.get('connection_code'),           # 34
-                current_time.isoformat()                   # 35 - como string ISO com fuso
+                ont_info.get('vendor_id'),                 # 35
+                ont_info.get('ont_version'),               # 36
+                ont_info.get('product_id'),                # 37
+                ont_info.get('equipment_id'),              # 38
+                ont_info.get('main_software_version'),     # 39
+                ont_info.get('standby_software_version'),  # 40
+                ont_info.get('ont_product_description'),   # 41
+                ont_info.get('support_xml_version'),       # 42
+                current_time.isoformat()                   # 43 - como string ISO com fuso
             )
             
             # Log para depuração

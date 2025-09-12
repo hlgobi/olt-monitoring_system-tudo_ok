@@ -11,7 +11,7 @@ import time
 from olt.processing import send_command_with_pagination
 from olt.parsing import (
     extract_service_mac, parse_ont_info_details, extract_ont_info, 
-    parse_ont_traffic, parse_ont_statistics
+    parse_ont_traffic, parse_ont_statistics, parse_ont_version_details
 )
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QTableWidget,
@@ -7851,6 +7851,7 @@ class OLTDatabaseGUI(QMainWindow):
             general_group = QGroupBox("Dados Gerais")
             general_form_layout = QFormLayout(general_group)
             
+            
             # Criando os labels para cada campo de dados gerais
             self.details_geral_last_check_value = QLabel("N/A")
             self.details_client_name_value = QLabel("N/A")
@@ -7862,7 +7863,9 @@ class OLTDatabaseGUI(QMainWindow):
             self.details_secundaria_value = QLabel("N/A")
             self.details_status_value = QLabel("N/A")
             self.details_last_down_cause_value = QLabel("N/A")
+            self.details_stability_value = QLabel("N/A") # Novo label para estabilidade
             self.details_last_up_time_value = QLabel("N/A")
+            self.details_uptime_value = QLabel("N/A") # NOVO LABEL PARA O TEMPO ONLINE
             self.details_last_down_time_value = QLabel("N/A")
             self.details_dying_gasp_value = QLabel("N/A")
             self.details_distance_value = QLabel("N/A")
@@ -7908,6 +7911,32 @@ class OLTDatabaseGUI(QMainWindow):
             traffic_form_layout.addRow("Tráfego de Download Atual:", self.details_download_value)
 
             details_layout.addWidget(traffic_group)
+
+            # --- PAINEL 4: DETALHES DE FIRMWARE E HARDWARE (NOVO) ---
+            firmware_group = QGroupBox("Detalhes de Firmware e Hardware")
+            firmware_form_layout = QFormLayout(firmware_group)
+
+            self.details_fabricante_value = QLabel("N/A")
+            self.details_versao_hw_value = QLabel("N/A")
+            self.details_produto_id_value = QLabel("N/A")
+            self.details_equipamento_id_value = QLabel("N/A")
+            self.details_firmware_ativo_value = QLabel("N/A")
+            self.details_firmware_backup_value = QLabel("N/A")
+            self.details_descricao_produto_value = QLabel("N/A")
+            self.details_descricao_produto_value.setWordWrap(True) # Para quebrar linha
+            self.details_perfil_gestao_value = QLabel("N/A")
+
+            firmware_form_layout.addRow("Fabricante:", self.details_fabricante_value)
+            firmware_form_layout.addRow("Versão do Hardware:", self.details_versao_hw_value)
+            firmware_form_layout.addRow("ID do Produto:", self.details_produto_id_value)
+            firmware_form_layout.addRow("ID do Equipamento:", self.details_equipamento_id_value)
+            firmware_form_layout.addRow("Versão do Firmware (Ativo):", self.details_firmware_ativo_value)
+            firmware_form_layout.addRow("Versão do Firmware (Backup):", self.details_firmware_backup_value)
+            firmware_form_layout.addRow("Descrição do Produto:", self.details_descricao_produto_value)
+            firmware_form_layout.addRow("Versão do Perfil de Gestão:", self.details_perfil_gestao_value)
+            
+            details_layout.addWidget(firmware_group)
+            # --- FIM DA ADIÇÃO ---
 
             # --- PAINEL 3: ESTATÍSTICAS AVANÇADAS ---
             stats_group = QGroupBox("Estatísticas Avançadas")
@@ -8010,162 +8039,191 @@ class OLTDatabaseGUI(QMainWindow):
         # Carregar os dados existentes da ONT
         self.load_ont_details_from_db()
 
+# Em gui/main_window.py, substitua a função inteira por esta versão final e corrigida:
+
     def load_ont_details_from_db(self):
-            """Carrega os dados da ONT selecionada a partir do banco e preenche os novos painéis amigáveis."""
-            if not self.selected_ont_for_details:
-                logging.warning("Nenhuma ONT selecionada para carregar detalhes.")
-                return
-                
-            olt_ip = self.selected_ont_for_details['olt_ip']
-            fsp = self.selected_ont_for_details['fsp']
-            ont_id = self.selected_ont_for_details['ont_id']
-            sn = self.selected_ont_for_details['sn']
+        """Carrega os dados da ONT selecionada a partir do banco e preenche os novos painéis amigáveis."""
+        if not self.selected_ont_for_details:
+            logging.warning("Nenhuma ONT selecionada para carregar detalhes.")
+            return
             
-            logging.info(f"Carregando detalhes da ONT: OLT={olt_ip}, FSP={fsp}, ONT ID={ont_id}, SN={sn}")
+        olt_ip = self.selected_ont_for_details['olt_ip']
+        sn = self.selected_ont_for_details['sn']
+        
+        logging.info(f"Carregando detalhes da ONT: OLT={olt_ip}, SN={sn}")
 
-            # Mapeamento de nomes de coluna do BD para os labels da GUI
-            general_data_map = {
-                'collection_time': self.details_geral_last_check_value,
-                'client_name': self.details_client_name_value,
-                'mac_address': self.details_mac_value,
-                'serial_number': self.details_serial_value,
-                'rx_power': self.details_rx_power_value,
-                'tx_power': self.details_tx_power_value,
-                'primaria': self.details_primaria_value,
-                'secundaria': self.details_secundaria_value,
-                'status': self.details_status_value,
-                'last_down_cause': self.details_last_down_cause_value,
-                'last_up_time': self.details_last_up_time_value,
-                'last_down_time': self.details_last_down_time_value,
-                'last_dying_gasp_time': self.details_dying_gasp_value,
-                'ont_distance': self.details_distance_value,
-                'memory_occupation': self.details_memory_value,
-                'cpu_occupation': self.details_cpu_value,
-                'temperature': self.details_temperature_value,
-                'ont_ip_address': self.details_ip_value,
-                'connection_code': self.details_connection_code_value,
-            }
+        data_map = {
+            'collection_time': self.details_geral_last_check_value, 'client_name': self.details_client_name_value,
+            'mac_address': self.details_mac_value, 'serial_number': self.details_serial_value,
+            'tx_power': self.details_tx_power_value, 'primaria': self.details_primaria_value,
+            'secundaria': self.details_secundaria_value, 'last_dying_gasp_time': self.details_dying_gasp_value,
+            'ont_distance': self.details_distance_value, 'memory_occupation': self.details_memory_value,
+            'cpu_occupation': self.details_cpu_value, 'temperature': self.details_temperature_value,
+            'ont_ip_address': self.details_ip_value, 'connection_code': self.details_connection_code_value,
+            'vendor_id': self.details_fabricante_value, 'ont_version': self.details_versao_hw_value,
+            'product_id': self.details_produto_id_value, 'equipment_id': self.details_equipamento_id_value,
+            'main_software_version': self.details_firmware_ativo_value, 'standby_software_version': self.details_firmware_backup_value,
+            'ont_product_description': self.details_descricao_produto_value, 'support_xml_version': self.details_perfil_gestao_value,
+            'up_traffic_kbps': self.details_upload_value, 'down_traffic_kbps': self.details_download_value,
+            'upstream_frames': self.details_up_frames_value, 'upstream_bytes': self.details_up_bytes_value,
+            'upstream_discarded_frames': self.details_up_discard_value, 'downstream_frames': self.details_down_frames_value,
+            'downstream_bytes': self.details_down_bytes_value, 'downstream_discarded_frames': self.details_down_discard_value,
+            'traffic_collection_time': self.details_traffic_last_check_value,
+            'stats_collection_time': self.details_stats_last_check_value
+        }
 
-            try:
-                conn = psycopg2.connect(**DB_CONFIG)
-                cursor = conn.cursor()
-                
-                # --- 1. BUSCAR E PREENCHER DADOS GERAIS ---
-                cursor.execute("""
-                    SELECT * FROM ont_data 
-                    WHERE serial_number = %s AND olt_ip = %s
-                    ORDER BY collection_time DESC 
-                    LIMIT 1
-                """, (sn, olt_ip))
-                
-                general_data_row = cursor.fetchone()
-                
-                if general_data_row:
-                    column_names = [desc[0] for desc in cursor.description]
-                    data_dict = dict(zip(column_names, general_data_row))
-
-                    # Preenche a label de status no topo
-
-                    for key, label_widget in general_data_map.items():
-                        value = data_dict.get(key)
-                        display_text = "N/A"
-
-                        if value is not None:
-                            # Formatação amigável
-                            if 'time' in key or 'date' in key:
-                                try:
-                                    display_text = value.strftime('%d/%m/%Y %H:%M:%S')
-                                except:
-                                    display_text = str(value)
-                            elif key.endswith('_power'):
-                                display_text = f"{value} dBm"
-                            elif key == 'ont_distance':
-                                display_text = f"{value} metros"
-                            elif key.endswith('_occupation'):
-                                display_text = f"{value}%"
-                            elif key == 'temperature':
-                                display_text = f"{value}°C"
-                            else:
-                                display_text = str(value)
-                        
-                        label_widget.setText(display_text)
-                else:
-                    # Limpa todos os campos se não encontrar dados
-                    for label_widget in general_data_map.values():
-                        label_widget.setText("N/A")
-                    self.ont_details_status_label.setText("<b>N/A</b>")
-
-
-                # --- 2. BUSCAR E PREENCHER DADOS DE TRÁFEGO ---
-                cursor.execute("""
-                    SELECT collection_time, up_traffic_kbps, down_traffic_kbps 
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            
+            query = """
+                WITH latest_general AS (
+                    SELECT * FROM ont_data WHERE serial_number = %s AND olt_ip = %s ORDER BY collection_time DESC LIMIT 1
+                ),
+                latest_traffic AS (
+                    SELECT collection_time as traffic_collection_time, up_traffic_kbps, down_traffic_kbps 
                     FROM ont_traffic_data 
-                    WHERE olt_ip = %s AND fsp = %s AND ont_id = %s
-                    ORDER BY collection_time DESC 
-                    LIMIT 1
-                """, (olt_ip, fsp, int(ont_id)))
-
-                traffic_data_row = cursor.fetchone()
-
-                if traffic_data_row:
-                    ts, up_kbps, down_kbps = traffic_data_row
-                    self.details_traffic_last_check_value.setText(ts.strftime('%d/%m/%Y %H:%M:%S'))
-                    
-                    # Formatação de Upload
-                    if up_kbps is not None:
-                        up_mbps = up_kbps / 1000.0
-                        self.details_upload_value.setText(f"{up_kbps:.2f} kbps ({up_mbps:.2f} Mbps)")
-                    else:
-                        self.details_upload_value.setText("N/A")
-
-                    # Formatação de Download
-                    if down_kbps is not None:
-                        down_mbps = down_kbps / 1000.0
-                        self.details_download_value.setText(f"{down_kbps:.2f} kbps ({down_mbps:.2f} Mbps)")
-                    else:
-                        self.details_download_value.setText("N/A")
-                else:
-                    self.details_traffic_last_check_value.setText("N/A")
-                    self.details_upload_value.setText("N/A")
-                    self.details_download_value.setText("N/A")
-
-
-                # --- 3. BUSCAR E PREENCHER ESTATÍSTICAS AVANÇADAS ---
-                cursor.execute("""
-                    SELECT collection_time, upstream_frames, upstream_bytes, upstream_discarded_frames,
+                    WHERE olt_ip = %s AND fsp = (SELECT fsp FROM latest_general) AND ont_id = (SELECT ont_id FROM latest_general) 
+                    ORDER BY collection_time DESC LIMIT 1
+                ),
+                latest_stats AS (
+                    SELECT collection_time as stats_collection_time, upstream_frames, upstream_bytes, upstream_discarded_frames,
                         downstream_frames, downstream_bytes, downstream_discarded_frames
                     FROM ont_statistics_packets
-                    WHERE olt_ip = %s AND fsp = %s AND ont_id = %s
-                    ORDER BY collection_time DESC
-                    LIMIT 1
-                """, (olt_ip, fsp, int(ont_id)))
-
-                stats_data_row = cursor.fetchone()
-
-                if stats_data_row:
-                    ts, up_f, up_b, up_d, down_f, down_b, down_d = stats_data_row
-                    self.details_stats_last_check_value.setText(ts.strftime('%d/%m/%Y %H:%M:%S'))
-                    self.details_up_frames_value.setText(f"{up_f:,}" if up_f is not None else "N/A")
-                    self.details_up_bytes_value.setText(f"{up_b:,}" if up_b is not None else "N/A")
-                    self.details_up_discard_value.setText(f"{up_d:,}" if up_d is not None else "N/A")
-                    self.details_down_frames_value.setText(f"{down_f:,}" if down_f is not None else "N/A")
-                    self.details_down_bytes_value.setText(f"{down_b:,}" if down_b is not None else "N/A")
-                    self.details_down_discard_value.setText(f"{down_d:,}" if down_d is not None else "N/A")
-                else:
-                    self.details_stats_last_check_value.setText("N/A")
-                    self.details_up_frames_value.setText("N/A")
-                    self.details_up_bytes_value.setText("N/A")
-                    self.details_up_discard_value.setText("N/A")
-                    self.details_down_frames_value.setText("N/A")
-                    self.details_down_bytes_value.setText("N/A")
-                    self.details_down_discard_value.setText("N/A")
-                
+                    WHERE olt_ip = %s AND fsp = (SELECT fsp FROM latest_general) AND ont_id = (SELECT ont_id FROM latest_general)
+                    ORDER BY collection_time DESC LIMIT 1
+                )
+                SELECT * FROM latest_general
+                LEFT JOIN latest_traffic ON true
+                LEFT JOIN latest_stats ON true;
+            """
+            cursor.execute(query, (sn, olt_ip, olt_ip, olt_ip))
+            
+            full_data_row = cursor.fetchone()
+            
+            if not full_data_row:
+                all_labels = list(data_map.values()) + [
+                    self.details_rx_power_value, self.details_last_down_time_value,
+                    self.details_last_down_cause_value, self.details_stability_value,
+                    self.details_last_up_time_value, self.details_uptime_value, self.details_status_value
+                ]
+                for label_widget in all_labels:
+                    label_widget.setText("N/A"); label_widget.setStyleSheet("")
+                logging.warning(f"Nenhum dado encontrado no banco para a ONT SN {sn}")
                 conn.close()
-                logging.info("Carregamento de detalhes para a nova interface concluído com sucesso.")
+                return
 
-            except Exception as e:
-                logging.error(f"Erro ao carregar detalhes da ONT do banco: {e}", exc_info=True)
-                QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível carregar os dados da ONT: {e}")
+            column_names = [desc[0] for desc in cursor.description]
+            data_dict = dict(zip(column_names, full_data_row))
+
+            # <<< --- CORREÇÃO DEFINITIVA PARA DATAS/HORAS --- >>>
+            def parse_db_timestamp(ts_value):
+                if isinstance(ts_value, datetime):
+                    return ts_value
+                if isinstance(ts_value, str):
+                    # Tenta múltiplos formatos de data que podem vir do banco como texto
+                    for fmt in ('%Y-%m-%d %H:%M:%S', '%d/%m/%Y %H:%M:%S'):
+                        try:
+                            return datetime.strptime(ts_value.split('.')[0], fmt) # .split para remover milissegundos
+                        except ValueError:
+                            continue
+                    try: # Tenta formato ISO completo
+                        return datetime.fromisoformat(ts_value.split('+')[0].strip())
+                    except ValueError:
+                        return None
+                return None
+
+            status = data_dict.get('status')
+            last_up = parse_db_timestamp(data_dict.get('last_up_time'))
+            collection_time = parse_db_timestamp(data_dict.get('collection_time'))
+            
+            uptime_duration = None
+            if status == 'online' and last_up and collection_time:
+                uptime_duration = collection_time - last_up
+            
+            cursor.execute("""
+                SELECT COUNT(*) FROM ont_data 
+                WHERE serial_number = %s AND last_down_cause IS NOT NULL AND last_down_cause <> 'N/A'
+                AND collection_time >= NOW() - INTERVAL '7 days'
+            """, (sn,))
+            drop_count_7_days = cursor.fetchone()[0]
+            
+            conn.close()
+
+            for key, label_widget in data_map.items():
+                value = data_dict.get(key)
+                display_text = str(value) if value is not None else "N/A"
+                if value is not None:
+                    if 'time' in key:
+                        dt_obj = parse_db_timestamp(value)
+                        if dt_obj: display_text = dt_obj.strftime('%d/%m/%Y %H:%M:%S')
+                    elif key.endswith('_bytes') or key.endswith('_frames'): display_text = f"{value:,}"
+                    elif key.endswith('_kbps'): display_text = f"{value/1000.0:.2f} Mbps ({value:.0f} kbps)" if value > 0 else "0 kbps"
+                    elif key.endswith('_power'): display_text = f"{value} dBm"
+                    elif key == 'ont_distance': display_text = f"{value} metros"
+                    elif key.endswith('_occupation'): display_text = f"{value}%"
+                    elif key == 'temperature': display_text = f"{value}°C"
+                label_widget.setText(display_text)
+                label_widget.setStyleSheet("")
+
+            self.details_status_value.setText(status.capitalize() if status else "N/A")
+
+            rx_value = data_dict.get('rx_power')
+            rx_display_text = str(rx_value) if rx_value is not None else "N/A"
+            self.details_rx_power_value.setText(rx_display_text); self.details_rx_power_value.setStyleSheet("color: gray;")
+            try:
+                rx_float = float(rx_value)
+                if -22.0 <= rx_float <= 0: status_text, style = "✅ OK", "color: white; background-color: #2E7D32; padding: 3px; border-radius: 4px; font-weight: bold;"
+                elif -25.0 < rx_float < -22.0: status_text, style = "⚠️ RUIM", "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
+                else: status_text, style = "🚨 PÉSSIMO", "color: white; background-color: #C62828; padding: 3px; border-radius: 4px; font-weight: bold;"
+                self.details_rx_power_value.setText(f"{rx_display_text} dBm ({status_text})"); self.details_rx_power_value.setStyleSheet(style)
+            except (ValueError, TypeError): pass
+
+            down_cause_value = data_dict.get('last_down_cause')
+            dc_display_text = str(down_cause_value) if down_cause_value is not None else "N/A"
+            self.details_last_down_cause_value.setText(dc_display_text); self.details_last_down_cause_value.setStyleSheet("")
+            if dc_display_text != "N/A":
+                raw_value = dc_display_text.lower().strip()
+                icon, translated_text, style = "", "", ""
+                if "losi" in raw_value or "lobi" in raw_value: icon, translated_text, style = "🚨", "Sem Sinal de Fibra", "color: white; background-color: #C62828; padding: 3px; border-radius: 4px; font-weight: bold;"
+                elif "dying-gasp" in raw_value: icon, translated_text, style = "⚡️", "Sem Energia Elétrica", "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
+                elif "reset by ont comma" in raw_value: icon, translated_text, style = "🛠️", "Técnico Resetou", "color: black; background-color: #81D4FA; padding: 3px; border-radius: 4px; font-weight: bold;"
+                elif "reset" in raw_value: icon, translated_text, style = "🔄", "Modem Resetado", "color: white; background-color: #FF9800; padding: 3px; border-radius: 4px; font-weight: bold;"
+                if translated_text:
+                    self.details_last_down_cause_value.setText(f"{icon} {translated_text} ({down_cause_value})"); self.details_last_down_cause_value.setStyleSheet(style)
+            
+            last_down_time_obj = parse_db_timestamp(data_dict.get('last_down_time'))
+            self.details_last_down_time_value.setText(last_down_time_obj.strftime('%d/%m/%Y %H:%M:%S') if last_down_time_obj else "N/A")
+
+            up_time_text = last_up.strftime('%d/%m/%Y %H:%M:%S') if last_up else "N/A"
+            self.details_last_up_time_value.setText(up_time_text)
+            self.details_last_up_time_value.setStyleSheet("")
+            
+            uptime_text, uptime_style = "N/A", ""
+            if uptime_duration:
+                uptime_text = self._format_timedelta(uptime_duration)
+                if uptime_duration.total_seconds() < 3600: uptime_style = "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
+                elif uptime_duration.days < 7: uptime_style = "color: white; background-color: #4CAF50; padding: 3px; border-radius: 4px; font-weight: bold;"
+                else: uptime_style = "color: white; background-color: #1B5E20; padding: 3px; border-radius: 4px; font-weight: bold;"
+            elif status == 'offline':
+                uptime_text, uptime_style = "OFFLINE", "color: white; background-color: #757575; padding: 3px; border-radius: 4px; font-weight: bold;"
+            
+            self.details_uptime_value.setText(uptime_text)
+            self.details_uptime_value.setStyleSheet(uptime_style)
+
+            if drop_count_7_days == 0: stability_text, stability_style = "✅ Estável (Nenhuma queda em 7 dias)", "color: #1B5E20; font-weight: bold;"
+            elif drop_count_7_days <= 3: stability_text, stability_style = f"⚠️ Instável ({drop_count_7_days} quedas em 7 dias)", "color: #FF6F00; font-weight: bold;"
+            else: stability_text, stability_style = f"🚨 Crítico ({drop_count_7_days} quedas em 7 dias)", "color: #C62828; font-weight: bold;"
+            self.details_stability_value.setText(stability_text)
+            self.details_stability_value.setStyleSheet(stability_style)
+            
+            logging.info("Carregamento de detalhes para a nova interface concluído com sucesso.")
+
+        except Exception as e:
+            logging.error(f"Erro ao carregar detalhes da ONT do banco: {e}", exc_info=True)
+            QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível carregar os dados da ONT: {e}")
+            if 'conn' in locals() and conn and not conn.closed:
+                conn.close()
 
     def apply_styles(self):
             """Aplica um tema visual completo à aplicação, inspirado no logo."""
@@ -8723,6 +8781,18 @@ class OLTDatabaseGUI(QMainWindow):
             stats_data = parse_ont_statistics(response_stats)
             logging.info(f"Estatísticas parseadas: {stats_data}")
             
+            # --- INÍCIO DA ADIÇÃO ---
+            # Comando 6: display ont version (NOVO)
+            logging.info("Executando comando 6: display ont version...")
+            version_cmd = f"display ont version {port} {ont_id}"
+            logging.info(f"Comando VERSION: {version_cmd}")
+
+            response_version = send_command_with_pagination(version_cmd, expected_interface_prompt, timeout=45)
+            logging.info(f"Resposta VERSION: {response_version[:500]}..." if len(response_version) > 500 else f"Resposta VERSION: {response_version}")
+            version_data = parse_ont_version_details(response_version)
+            logging.info(f"Dados de versão parseados: {version_data}")
+            # --- FIM DA ADIÇÃO ---
+
             # Sair do modo config
             logging.info("Saindo do modo config...")
             shell.send("quit\n")
@@ -8761,6 +8831,12 @@ class OLTDatabaseGUI(QMainWindow):
                 'service_profile_name': ont_details.get('service_profile_name'),
             }
             
+            # --- INÍCIO DA ADIÇÃO ---
+            # Adiciona os novos dados de versão ao dicionário principal
+            if version_data:
+                ont_data.update(version_data)
+            # --- FIM DA ADIÇÃO ---
+
             logging.info("Salvando dados gerais da ONT...")
             # Salvar dados gerais
             save_ont_data(olt_ip, ont_data)
@@ -9098,6 +9174,30 @@ class OLTDatabaseGUI(QMainWindow):
         
         # Exibir o diálogo
         dialog.exec_()
+
+# Em gui/main_window.py, dentro da classe OLTDatabaseGUI
+
+    def _format_timedelta(self, td):
+        """Formata um objeto timedelta em uma string amigável (dias, horas, minutos)."""
+        if td is None:
+            return "N/A"
+        
+        days = td.days
+        hours, remainder = divmod(td.seconds, 3600)
+        minutes, _ = divmod(remainder, 60)
+
+        parts = []
+        if days > 0:
+            parts.append(f"{days} {'dia' if days == 1 else 'dias'}")
+        if hours > 0:
+            parts.append(f"{hours} {'hora' if hours == 1 else 'horas'}")
+        if minutes > 0 and days == 0: # Só mostra minutos se for menos de 1 dia
+            parts.append(f"{minutes} {'minuto' if minutes == 1 else 'minutos'}")
+        
+        if not parts:
+            return "menos de 1 minuto"
+            
+        return ", ".join(parts)
 
     def load_ddm_olt_list(self):
         """Carrega a lista de OLTs disponíveis na tabela DDM"""

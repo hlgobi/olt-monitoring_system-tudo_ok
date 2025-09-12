@@ -578,3 +578,56 @@ def parse_uplink_ddm_response(response):
     except Exception as e:
         logging.error(f"Erro ao parsear resposta DDM: {e}")
         return None
+    
+# Em olt/parsing.py, adicione esta nova função no final do arquivo.
+
+def parse_ont_version_details(raw_output: str) -> dict:
+    """
+    Analisa a saída do comando 'display ont version' e extrai os detalhes da ONT.
+
+    Args:
+        raw_output: O texto bruto retornado pelo comando SSH.
+
+    Returns:
+        Um dicionário contendo os detalhes parseados da ONT.
+    """
+    details = {
+        'vendor_id': None,
+        'ont_version': None,
+        'product_id': None,
+        'equipment_id': None,
+        'main_software_version': None,
+        'standby_software_version': None,
+        'ont_product_description': None,
+        'support_xml_version': None
+    }
+
+    # Regex para a descrição que pode ter múltiplas linhas
+    desc_match = re.search(
+        r"OntProductDescription\s+:\s*(.*?)\s+Support XML Version", 
+        raw_output, 
+        re.DOTALL
+    )
+    if desc_match:
+        # Limpa a descrição removendo quebras de linha e espaços extras
+        description = desc_match.group(1).strip().replace('\n', ' ').replace('     ', ' ')
+        details['ont_product_description'] = description
+
+    # Regex para os outros campos de uma linha
+    for line in raw_output.splitlines():
+        if ':' in line:
+            key, value = map(str.strip, line.split(':', 1))
+            key_map = {
+                "Vendor-ID": "vendor_id",
+                "ONT Version": "ont_version",
+                "Product-ID": "product_id",
+                "Equipment-ID": "equipment_id",
+                "Main Software Version": "main_software_version",
+                "Standby Software Version": "standby_software_version",
+                "Support XML Version": "support_xml_version"
+            }
+            if key in key_map:
+                details[key_map[key]] = value
+
+    logging.debug(f"Detalhes de versão da ONT parseados: {details}")
+    return details
