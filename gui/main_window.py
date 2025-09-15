@@ -7841,10 +7841,9 @@ class OLTDatabaseGUI(QMainWindow):
         if self.tab_widget.currentWidget() == self.ont_eth_tab:
             self.load_ont_eth_data()
 
-# Em gui/main_window.py, substitua a função setup_ont_details_tab
-
+    # Em gui/main_window.py, substitua completamente a função setup_ont_details_tab por esta:
     def setup_ont_details_tab(self):
-        """Configura a aba de detalhes da ONT com um layout amigável e tema roxo."""
+        """Configura a aba de detalhes da ONT com um layout de grade (dashboard) para otimizar o espaço."""
         
         # 1. Limpa o layout anterior, se houver
         if self.ont_details_tab.layout():
@@ -7856,7 +7855,7 @@ class OLTDatabaseGUI(QMainWindow):
         # 3. Layout principal
         main_layout = QVBoxLayout(self.ont_details_tab)
         
-        # 4. Painel de Informações da ONT Selecionada (Topo)
+        # 4. Painel de Informações da ONT Selecionada (Topo - Fixo)
         info_group = QGroupBox("Informações da ONT Selecionada")
         info_layout = QFormLayout(info_group)
         info_layout.setSpacing(10)
@@ -7873,7 +7872,7 @@ class OLTDatabaseGUI(QMainWindow):
         
         main_layout.addWidget(info_group)
         
-        # 5. Botão de Atualização
+        # 5. Botão de Atualização (Fixo)
         self.update_ont_details_btn = QPushButton("Atualizar Dados da ONT ao Vivo")
         self.update_ont_details_btn.clicked.connect(self.update_ont_details_data)
         self.update_ont_details_btn.setEnabled(False)
@@ -7887,66 +7886,68 @@ class OLTDatabaseGUI(QMainWindow):
         scroll_content = QWidget()
         scroll_content.setStyleSheet("background-color: transparent;")
         
-        details_layout = QVBoxLayout(scroll_content)
-        details_layout.setSpacing(15)
-        
-        # --- PAINEL 1: STATUS E SINAL ---
+        # NOVO: Layout em Grade para organizar os painéis lado a lado
+        grid_layout = QGridLayout(scroll_content)
+        grid_layout.setSpacing(15)
+
+        # --- Coluna da Esquerda ---
+
+        # PAINEL 1: STATUS E SINAL
         status_group = QGroupBox("Status e Sinal")
         status_form_layout = QFormLayout(status_group)
-        
         self.details_status_value = QLabel("N/A")
         self.details_uptime_value = QLabel("N/A")
         self.details_rx_power_value = QLabel("N/A")
-        
         status_form_layout.addRow("Status do Modem:", self.details_status_value)
         status_form_layout.addRow("Tempo Online (Uptime):", self.details_uptime_value)
         status_form_layout.addRow("Qualidade do Sinal (Rx):", self.details_rx_power_value)
-        details_layout.addWidget(status_group)
+        grid_layout.addWidget(status_group, 0, 0) # Linha 0, Coluna 0
 
-        # --- PAINEL 2: DIAGNÓSTICO DE INSTABILIDADE ---
+        # PAINEL 2: DIAGNÓSTICO DE INSTABILIDADE
         stability_group = QGroupBox("Diagnóstico de Instabilidade")
         stability_form_layout = QFormLayout(stability_group)
-
         self.details_stability_value = QTextEdit("N/A")
         self.details_stability_value.setReadOnly(True)
         self.details_stability_value.setStyleSheet("background-color: transparent; border: none;")
         self.details_stability_value.setMaximumHeight(80)
-
         self.details_daily_drops_value = QTextEdit("N/A")
         self.details_daily_drops_value.setReadOnly(True)
         self.details_daily_drops_value.setStyleSheet("background-color: transparent; border: none;")
         self.details_daily_drops_value.setMaximumHeight(80)
-
         self.details_flapping_alert_value = QLabel("N/A")
-
         stability_form_layout.addRow("<b>Resumo de Quedas (7 dias):</b>", self.details_stability_value)
         stability_form_layout.addRow("<b>Quedas Hoje:</b>", self.details_daily_drops_value)
         stability_form_layout.addRow("<b>Alerta de Instabilidade:</b>", self.details_flapping_alert_value)
-        details_layout.addWidget(stability_group)
+        grid_layout.addWidget(stability_group, 1, 0, 2, 1) # Linha 1, Coluna 0, Ocupa 2 linhas de altura
 
-        # --- PAINEL 3: IDENTIFICAÇÃO E LOCALIZAÇÃO ---
+        # --- Coluna da Direita ---
+
+        # PAINEL 3: IDENTIFICAÇÃO E LOCALIZAÇÃO
         location_group = QGroupBox("Identificação e Localização")
         location_form_layout = QFormLayout(location_group)
-
         self.details_client_name_value = QLabel("N/A")
         self.details_connection_code_value = QLabel("N/A")
         self.details_primaria_value = QLabel("N/A")
         self.details_secundaria_value = QLabel("N/A")
-        self.details_porta_secundaria_value = QLabel("N/A") # NOVO WIDGET
+        self.details_porta_secundaria_value = QLabel("N/A")
         self.details_distance_value = QLabel("N/A")
-        
         location_form_layout.addRow("Nome do Cliente:", self.details_client_name_value)
         location_form_layout.addRow("Código de Conexão:", self.details_connection_code_value)
         location_form_layout.addRow("Caixa Primária (CTO):", self.details_primaria_value)
         location_form_layout.addRow("Caixa Secundária (CEO):", self.details_secundaria_value)
-        location_form_layout.addRow("Porta Secundária:", self.details_porta_secundaria_value) # NOVA LINHA
+        location_form_layout.addRow("Porta Secundária:", self.details_porta_secundaria_value)
         location_form_layout.addRow("Distância Estimada:", self.details_distance_value)
-        details_layout.addWidget(location_group)
+        grid_layout.addWidget(location_group, 0, 1) # Linha 0, Coluna 1
 
-        # --- PAINEL 4: DETALHES DE HARDWARE E FIRMWARE ---
-        firmware_group = QGroupBox("Detalhes de Hardware e Firmware")
-        firmware_form_layout = QFormLayout(firmware_group)
+        # --- NOVO: Painel com Abas para agrupar detalhes técnicos ---
+        technical_details_group = QGroupBox("Detalhes Técnicos")
+        technical_layout = QVBoxLayout(technical_details_group)
         
+        tabs = QTabWidget()
+        
+        # Aba 1: Hardware e Firmware
+        hw_tab = QWidget()
+        hw_form_layout = QFormLayout(hw_tab)
         self.details_serial_value = QLabel("N/A")
         self.details_mac_value = QLabel("N/A")
         self.details_fabricante_value = QLabel("N/A")
@@ -7959,25 +7960,22 @@ class OLTDatabaseGUI(QMainWindow):
         self.details_descricao_produto_value.setWordWrap(True)
         self.details_perfil_gestao_value = QLabel("N/A")
         self.details_geral_last_check_value = QLabel("N/A")
+        hw_form_layout.addRow("Serial do Modem:", self.details_serial_value)
+        hw_form_layout.addRow("Endereço MAC:", self.details_mac_value)
+        hw_form_layout.addRow("Fabricante:", self.details_fabricante_value)
+        hw_form_layout.addRow("Versão do Hardware:", self.details_versao_hw_value)
+        hw_form_layout.addRow("ID do Produto:", self.details_produto_id_value)
+        hw_form_layout.addRow("ID do Equipamento:", self.details_equipamento_id_value)
+        hw_form_layout.addRow("Firmware (Ativo):", self.details_firmware_ativo_value)
+        hw_form_layout.addRow("Firmware (Backup):", self.details_firmware_backup_value)
+        hw_form_layout.addRow("Descrição do Produto:", self.details_descricao_produto_value)
+        hw_form_layout.addRow("Perfil de Gestão:", self.details_perfil_gestao_value)
+        hw_form_layout.addRow("Última Verificação (Geral):", self.details_geral_last_check_value)
+        tabs.addTab(hw_tab, "Hardware")
 
-        firmware_form_layout.addRow("Serial do Modem:", self.details_serial_value)
-        firmware_form_layout.addRow("Endereço MAC:", self.details_mac_value)
-        firmware_form_layout.addRow("Fabricante:", self.details_fabricante_value)
-        firmware_form_layout.addRow("Versão do Hardware:", self.details_versao_hw_value)
-        firmware_form_layout.addRow("ID do Produto:", self.details_produto_id_value)
-        firmware_form_layout.addRow("ID do Equipamento:", self.details_equipamento_id_value)
-        firmware_form_layout.addRow("Versão do Firmware (Ativo):", self.details_firmware_ativo_value)
-        firmware_form_layout.addRow("Versão do Firmware (Backup):", self.details_firmware_backup_value)
-        firmware_form_layout.addRow("Descrição do Produto:", self.details_descricao_produto_value)
-        firmware_form_layout.addRow("Versão do Perfil de Gestão:", self.details_perfil_gestao_value)
-        firmware_form_layout.addRow("Última Verificação (Geral):", self.details_geral_last_check_value)
-        
-        details_layout.addWidget(firmware_group)
-        
-        # --- PAINEL 5: OUTRAS INFORMAÇÕES TÉCNICAS ---
-        other_group = QGroupBox("Outras Informações Técnicas")
-        other_form_layout = QFormLayout(other_group)
-        
+        # Aba 2: Outras Informações
+        other_tab = QWidget()
+        other_form_layout = QFormLayout(other_tab)
         self.details_tx_power_value = QLabel("N/A")
         self.details_last_down_cause_value = QLabel("N/A")
         self.details_last_up_time_value = QLabel("N/A")
@@ -7987,7 +7985,6 @@ class OLTDatabaseGUI(QMainWindow):
         self.details_cpu_value = QLabel("N/A")
         self.details_temperature_value = QLabel("N/A")
         self.details_ip_value = QLabel("N/A")
-
         other_form_layout.addRow("Sinal Enviado (Tx):", self.details_tx_power_value)
         other_form_layout.addRow("Motivo da Última Queda:", self.details_last_down_cause_value)
         other_form_layout.addRow("Conectado Desde:", self.details_last_up_time_value)
@@ -7997,9 +7994,16 @@ class OLTDatabaseGUI(QMainWindow):
         other_form_layout.addRow("Uso de Processador:", self.details_cpu_value)
         other_form_layout.addRow("Temperatura:", self.details_temperature_value)
         other_form_layout.addRow("Endereço IP do Modem:", self.details_ip_value)
-        details_layout.addWidget(other_group)
-        
-        details_layout.addStretch(1)
+        tabs.addTab(other_tab, "Outras Infos")
+
+        technical_layout.addWidget(tabs)
+        grid_layout.addWidget(technical_details_group, 1, 1, 2, 1) # Linha 1, Coluna 1, Ocupa 2 linhas de altura
+
+        # Ajusta o layout da grade para que as colunas tenham larguras proporcionais
+        grid_layout.setColumnStretch(0, 1)
+        grid_layout.setColumnStretch(1, 1)
+
+        # Finaliza a configuração da área de rolagem
         scroll_area.setWidget(scroll_content)
         main_layout.addWidget(scroll_area)
         
