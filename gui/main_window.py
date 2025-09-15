@@ -7863,6 +7863,7 @@ class OLTDatabaseGUI(QMainWindow):
             self.details_secundaria_value = QLabel("N/A")
             self.details_status_value = QLabel("N/A")
             self.details_last_down_cause_value = QLabel("N/A")
+            self.details_stability_value = QLabel("N/A") # <<< ADICIONE ESTA LINHA
             self.details_stability_value = QLabel("N/A") # Novo label para estabilidade
             self.details_last_up_time_value = QLabel("N/A")
             self.details_uptime_value = QLabel("N/A") # NOVO LABEL PARA O TEMPO ONLINE
@@ -7886,7 +7887,9 @@ class OLTDatabaseGUI(QMainWindow):
             general_form_layout.addRow("Caixa Secundária (CEO):", self.details_secundaria_value)
             general_form_layout.addRow("Status do Modem:", self.details_status_value)
             general_form_layout.addRow("Motivo da Última Queda:", self.details_last_down_cause_value)
+            general_form_layout.addRow("<b>Estabilidade (Últimos 7 dias):</b>", self.details_stability_value) # <<< ADICIONE ESTA LINHA
             general_form_layout.addRow("Conectado Desde:", self.details_last_up_time_value)
+            general_form_layout.addRow("<b>Tempo Online (Uptime):</b>", self.details_uptime_value)
             general_form_layout.addRow("Data da Última Queda:", self.details_last_down_time_value)
             general_form_layout.addRow("Queda por Falta de Energia:", self.details_dying_gasp_value)
             general_form_layout.addRow("Distância Estimada:", self.details_distance_value)
@@ -8039,8 +8042,6 @@ class OLTDatabaseGUI(QMainWindow):
         # Carregar os dados existentes da ONT
         self.load_ont_details_from_db()
 
-# Em gui/main_window.py, substitua a função inteira por esta versão final e corrigida:
-
     def load_ont_details_from_db(self):
         """Carrega os dados da ONT selecionada a partir do banco e preenche os novos painéis amigáveis."""
         if not self.selected_ont_for_details:
@@ -8116,18 +8117,16 @@ class OLTDatabaseGUI(QMainWindow):
             column_names = [desc[0] for desc in cursor.description]
             data_dict = dict(zip(column_names, full_data_row))
 
-            # <<< --- CORREÇÃO DEFINITIVA PARA DATAS/HORAS --- >>>
             def parse_db_timestamp(ts_value):
                 if isinstance(ts_value, datetime):
                     return ts_value
                 if isinstance(ts_value, str):
-                    # Tenta múltiplos formatos de data que podem vir do banco como texto
                     for fmt in ('%Y-%m-%d %H:%M:%S', '%d/%m/%Y %H:%M:%S'):
                         try:
-                            return datetime.strptime(ts_value.split('.')[0], fmt) # .split para remover milissegundos
+                            return datetime.strptime(ts_value.split('.')[0], fmt)
                         except ValueError:
                             continue
-                    try: # Tenta formato ISO completo
+                    try:
                         return datetime.fromisoformat(ts_value.split('+')[0].strip())
                     except ValueError:
                         return None
@@ -8141,12 +8140,14 @@ class OLTDatabaseGUI(QMainWindow):
             if status == 'online' and last_up and collection_time:
                 uptime_duration = collection_time - last_up
             
+            # --- LÓGICA DE ESTABILIDADE ---
             cursor.execute("""
                 SELECT COUNT(*) FROM ont_data 
                 WHERE serial_number = %s AND last_down_cause IS NOT NULL AND last_down_cause <> 'N/A'
                 AND collection_time >= NOW() - INTERVAL '7 days'
             """, (sn,))
             drop_count_7_days = cursor.fetchone()[0]
+            # --- FIM DA LÓGICA DE ESTABILIDADE ---
             
             conn.close()
 
@@ -8179,6 +8180,7 @@ class OLTDatabaseGUI(QMainWindow):
                 self.details_rx_power_value.setText(f"{rx_display_text} dBm ({status_text})"); self.details_rx_power_value.setStyleSheet(style)
             except (ValueError, TypeError): pass
 
+            # --- LÓGICA DE TRADUÇÃO DA CAUSA DA QUEDA ---
             down_cause_value = data_dict.get('last_down_cause')
             dc_display_text = str(down_cause_value) if down_cause_value is not None else "N/A"
             self.details_last_down_cause_value.setText(dc_display_text); self.details_last_down_cause_value.setStyleSheet("")
@@ -8191,6 +8193,7 @@ class OLTDatabaseGUI(QMainWindow):
                 elif "reset" in raw_value: icon, translated_text, style = "🔄", "Modem Resetado", "color: white; background-color: #FF9800; padding: 3px; border-radius: 4px; font-weight: bold;"
                 if translated_text:
                     self.details_last_down_cause_value.setText(f"{icon} {translated_text} ({down_cause_value})"); self.details_last_down_cause_value.setStyleSheet(style)
+            # --- FIM DA LÓGICA DE TRADUÇÃO ---
             
             last_down_time_obj = parse_db_timestamp(data_dict.get('last_down_time'))
             self.details_last_down_time_value.setText(last_down_time_obj.strftime('%d/%m/%Y %H:%M:%S') if last_down_time_obj else "N/A")
@@ -8211,11 +8214,13 @@ class OLTDatabaseGUI(QMainWindow):
             self.details_uptime_value.setText(uptime_text)
             self.details_uptime_value.setStyleSheet(uptime_style)
 
+            # --- EXIBIÇÃO DA ESTABILIDADE ---
             if drop_count_7_days == 0: stability_text, stability_style = "✅ Estável (Nenhuma queda em 7 dias)", "color: #1B5E20; font-weight: bold;"
             elif drop_count_7_days <= 3: stability_text, stability_style = f"⚠️ Instável ({drop_count_7_days} quedas em 7 dias)", "color: #FF6F00; font-weight: bold;"
             else: stability_text, stability_style = f"🚨 Crítico ({drop_count_7_days} quedas em 7 dias)", "color: #C62828; font-weight: bold;"
             self.details_stability_value.setText(stability_text)
             self.details_stability_value.setStyleSheet(stability_style)
+            # --- FIM DA EXIBIÇÃO DA ESTABILIDADE ---
             
             logging.info("Carregamento de detalhes para a nova interface concluído com sucesso.")
 
@@ -9175,17 +9180,14 @@ class OLTDatabaseGUI(QMainWindow):
         # Exibir o diálogo
         dialog.exec_()
 
-# Em gui/main_window.py, dentro da classe OLTDatabaseGUI
-
     def _format_timedelta(self, td):
         """Formata um objeto timedelta em uma string amigável (dias, horas, minutos)."""
         if td is None:
             return "N/A"
-        
+
         days = td.days
         hours, remainder = divmod(td.seconds, 3600)
         minutes, _ = divmod(remainder, 60)
-
         parts = []
         if days > 0:
             parts.append(f"{days} {'dia' if days == 1 else 'dias'}")
@@ -9193,10 +9195,10 @@ class OLTDatabaseGUI(QMainWindow):
             parts.append(f"{hours} {'hora' if hours == 1 else 'horas'}")
         if minutes > 0 and days == 0: # Só mostra minutos se for menos de 1 dia
             parts.append(f"{minutes} {'minuto' if minutes == 1 else 'minutos'}")
-        
+
         if not parts:
             return "menos de 1 minuto"
-            
+
         return ", ".join(parts)
 
     def load_ddm_olt_list(self):
