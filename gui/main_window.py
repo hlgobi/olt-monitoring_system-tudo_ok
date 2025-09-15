@@ -1823,17 +1823,12 @@ class OLTDatabaseGUI(QMainWindow):
 
     def _start_blinking_animation(self, widget: QLabel):
         """Aplica uma animação de 'pulsar' no fundo de um QLabel para o status Offline."""
-        
-        # Limpa qualquer animação anterior que possa estar no widget
         if hasattr(widget, 'animation') and widget.animation:
             widget.animation.stop()
 
-        # Define as cores da animação (de um vermelho claro para um mais forte)
         start_color = QColor("#ffcdd2")
-        end_color = QColor("#C62828") 
+        end_color = QColor("#C62828")
 
-        # Para animar uma cor de stylesheet, usamos uma propriedade customizada
-        # e um slot para aplicá-la, pois o stylesheet em si não é animável diretamente.
         def _set_background_color(color):
             widget.setStyleSheet(f"""
                 QLabel {{
@@ -1845,29 +1840,25 @@ class OLTDatabaseGUI(QMainWindow):
                 }}
             """)
 
-        # Animação de ida (claro -> escuro)
         anim_forward = QPropertyAnimation(widget, b"color")
         anim_forward.setDuration(900)
         anim_forward.setStartValue(start_color)
         anim_forward.setEndValue(end_color)
         
-        # Animação de volta (escuro -> claro)
         anim_backward = QPropertyAnimation(widget, b"color")
         anim_backward.setDuration(900)
         anim_backward.setStartValue(end_color)
         anim_backward.setEndValue(start_color)
 
-        # Conectamos a mudança do valor da animação à nossa função de aplicar o estilo
         anim_forward.valueChanged.connect(_set_background_color)
         anim_backward.valueChanged.connect(_set_background_color)
         
-        # Criamos um grupo para executar as animações em sequência e em loop infinito
+        from PyQt5.QtCore import QSequentialAnimationGroup
         anim_group = QSequentialAnimationGroup()
         anim_group.addAnimation(anim_forward)
         anim_group.addAnimation(anim_backward)
         anim_group.setLoopCount(-1)
         
-        # Armazenamos a animação no próprio widget para poder pará-la depois
         widget.animation = anim_group
         widget.animation.start()
 
@@ -7850,6 +7841,7 @@ class OLTDatabaseGUI(QMainWindow):
         if self.tab_widget.currentWidget() == self.ont_eth_tab:
             self.load_ont_eth_data()
 
+# Em gui/main_window.py, substitua a função setup_ont_details_tab
 
     def setup_ont_details_tab(self):
         """Configura a aba de detalhes da ONT com um layout amigável e tema roxo."""
@@ -7858,8 +7850,9 @@ class OLTDatabaseGUI(QMainWindow):
         if self.ont_details_tab.layout():
             QWidget().setLayout(self.ont_details_tab.layout())
             
-        # Define um nome de objeto para o estilo funcionar
+        # 2. Define um nome de objeto para o estilo funcionar
         self.ont_details_tab.setObjectName("ontDetailsTabWidget")
+
         # 3. Layout principal
         main_layout = QVBoxLayout(self.ont_details_tab)
         
@@ -7886,7 +7879,7 @@ class OLTDatabaseGUI(QMainWindow):
         self.update_ont_details_btn.setEnabled(False)
         main_layout.addWidget(self.update_ont_details_btn, 0, Qt.AlignCenter)
         
-        # 6. Área de Rolagem para os 3 painéis de detalhes
+        # 6. Área de Rolagem para os painéis de detalhes
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
@@ -7897,81 +7890,65 @@ class OLTDatabaseGUI(QMainWindow):
         details_layout = QVBoxLayout(scroll_content)
         details_layout.setSpacing(15)
         
-        # --- PAINEL 1: DADOS GERAIS ---
-        general_group = QGroupBox("Dados Gerais")
-        general_form_layout = QFormLayout(general_group)
+        # --- PAINEL 1: STATUS E SINAL ---
+        status_group = QGroupBox("Status e Sinal")
+        status_form_layout = QFormLayout(status_group)
         
-        
-        # Criando os labels para cada campo de dados gerais
-        self.details_geral_last_check_value = QLabel("N/A")
-        self.details_client_name_value = QLabel("N/A")
-        self.details_mac_value = QLabel("N/A")
-        self.details_serial_value = QLabel("N/A")
-        self.details_rx_power_value = QLabel("N/A")
-        self.details_tx_power_value = QLabel("N/A")
-        self.details_primaria_value = QLabel("N/A")
-        self.details_secundaria_value = QLabel("N/A")
         self.details_status_value = QLabel("N/A")
-        self.details_last_down_cause_value = QLabel("N/A")
+        self.details_uptime_value = QLabel("N/A")
+        self.details_rx_power_value = QLabel("N/A")
+        
+        status_form_layout.addRow("Status do Modem:", self.details_status_value)
+        status_form_layout.addRow("Tempo Online (Uptime):", self.details_uptime_value)
+        status_form_layout.addRow("Qualidade do Sinal (Rx):", self.details_rx_power_value)
+        details_layout.addWidget(status_group)
+
+        # --- PAINEL 2: DIAGNÓSTICO DE INSTABILIDADE ---
+        stability_group = QGroupBox("Diagnóstico de Instabilidade")
+        stability_form_layout = QFormLayout(stability_group)
+
         self.details_stability_value = QTextEdit("N/A")
         self.details_stability_value.setReadOnly(True)
         self.details_stability_value.setStyleSheet("background-color: transparent; border: none;")
         self.details_stability_value.setMaximumHeight(80)
+
         self.details_daily_drops_value = QTextEdit("N/A")
         self.details_daily_drops_value.setReadOnly(True)
         self.details_daily_drops_value.setStyleSheet("background-color: transparent; border: none;")
         self.details_daily_drops_value.setMaximumHeight(80)
+
         self.details_flapping_alert_value = QLabel("N/A")
-        self.details_last_up_time_value = QLabel("N/A")
-        self.details_uptime_value = QLabel("N/A")
-        self.details_last_down_time_value = QLabel("N/A")
-        self.details_dying_gasp_value = QLabel("N/A")
-        self.details_distance_value = QLabel("N/A")
-        self.details_memory_value = QLabel("N/A")
-        self.details_cpu_value = QLabel("N/A")
-        self.details_temperature_value = QLabel("N/A")
-        self.details_ip_value = QLabel("N/A")
+
+        stability_form_layout.addRow("<b>Resumo de Quedas (7 dias):</b>", self.details_stability_value)
+        stability_form_layout.addRow("<b>Quedas Hoje:</b>", self.details_daily_drops_value)
+        stability_form_layout.addRow("<b>Alerta de Instabilidade:</b>", self.details_flapping_alert_value)
+        details_layout.addWidget(stability_group)
+
+        # --- PAINEL 3: IDENTIFICAÇÃO E LOCALIZAÇÃO ---
+        location_group = QGroupBox("Identificação e Localização")
+        location_form_layout = QFormLayout(location_group)
+
+        self.details_client_name_value = QLabel("N/A")
         self.details_connection_code_value = QLabel("N/A")
+        self.details_primaria_value = QLabel("N/A")
+        self.details_secundaria_value = QLabel("N/A")
+        self.details_porta_secundaria_value = QLabel("N/A") # NOVO WIDGET
+        self.details_distance_value = QLabel("N/A")
         
-        # Adicionando os labels ao layout do painel
-        general_form_layout.addRow("Última Verificação:", self.details_geral_last_check_value)
-        general_form_layout.addRow("Nome do Cliente:", self.details_client_name_value)
-        general_form_layout.addRow("Status do Modem:", self.details_status_value)
-        general_form_layout.addRow("Motivo da Última Queda:", self.details_last_down_cause_value)
-        general_form_layout.addRow("<b>Resumo de Quedas (7 dias):</b>", self.details_stability_value)
-        general_form_layout.addRow("<b>Quedas Hoje:</b>", self.details_daily_drops_value)
-        general_form_layout.addRow("<b>Alerta de Instabilidade:</b>", self.details_flapping_alert_value)
-        general_form_layout.addRow("Conectado Desde:", self.details_last_up_time_value)
-        general_form_layout.addRow("Tempo Online (Uptime):", self.details_uptime_value)
-        general_form_layout.addRow("Data da Última Queda:", self.details_last_down_time_value)
-        general_form_layout.addRow("Queda por Falta de Energia:", self.details_dying_gasp_value)
-        general_form_layout.addRow("Endereço MAC:", self.details_mac_value)
-        general_form_layout.addRow("Serial do Modem:", self.details_serial_value)
-        general_form_layout.addRow("Sinal Recebido (Rx):", self.details_rx_power_value)
-        general_form_layout.addRow("Sinal Enviado (Tx):", self.details_tx_power_value)
-        general_form_layout.addRow("Caixa Primária (CTO):", self.details_primaria_value)
-        general_form_layout.addRow("Caixa Secundária (CEO):", self.details_secundaria_value)
-        general_form_layout.addRow("Distância Estimada:", self.details_distance_value)
-        general_form_layout.addRow("Uso de Memória:", self.details_memory_value)
-        general_form_layout.addRow("Uso de Processador:", self.details_cpu_value)
-        general_form_layout.addRow("Temperatura:", self.details_temperature_value)
-        general_form_layout.addRow("Endereço IP do Modem:", self.details_ip_value)
-        general_form_layout.addRow("Código de Conexão:", self.details_connection_code_value)
-        
-        details_layout.addWidget(general_group)
-        # --- PAINEL 2: TRÁFEGO ---
-        traffic_group = QGroupBox("Tráfego em Tempo Real")
-        traffic_form_layout = QFormLayout(traffic_group)
-        self.details_traffic_last_check_value = QLabel("N/A")
-        self.details_upload_value = QLabel("N/A")
-        self.details_download_value = QLabel("N/A")
-        traffic_form_layout.addRow("Última Verificação:", self.details_traffic_last_check_value)
-        traffic_form_layout.addRow("Tráfego de Upload Atual:", self.details_upload_value)
-        traffic_form_layout.addRow("Tráfego de Download Atual:", self.details_download_value)
-        details_layout.addWidget(traffic_group)
-        # --- PAINEL 4: DETALHES DE FIRMWARE E HARDWARE (NOVO) ---
-        firmware_group = QGroupBox("Detalhes de Firmware e Hardware")
+        location_form_layout.addRow("Nome do Cliente:", self.details_client_name_value)
+        location_form_layout.addRow("Código de Conexão:", self.details_connection_code_value)
+        location_form_layout.addRow("Caixa Primária (CTO):", self.details_primaria_value)
+        location_form_layout.addRow("Caixa Secundária (CEO):", self.details_secundaria_value)
+        location_form_layout.addRow("Porta Secundária:", self.details_porta_secundaria_value) # NOVA LINHA
+        location_form_layout.addRow("Distância Estimada:", self.details_distance_value)
+        details_layout.addWidget(location_group)
+
+        # --- PAINEL 4: DETALHES DE HARDWARE E FIRMWARE ---
+        firmware_group = QGroupBox("Detalhes de Hardware e Firmware")
         firmware_form_layout = QFormLayout(firmware_group)
+        
+        self.details_serial_value = QLabel("N/A")
+        self.details_mac_value = QLabel("N/A")
         self.details_fabricante_value = QLabel("N/A")
         self.details_versao_hw_value = QLabel("N/A")
         self.details_produto_id_value = QLabel("N/A")
@@ -7979,8 +7956,12 @@ class OLTDatabaseGUI(QMainWindow):
         self.details_firmware_ativo_value = QLabel("N/A")
         self.details_firmware_backup_value = QLabel("N/A")
         self.details_descricao_produto_value = QLabel("N/A")
-        self.details_descricao_produto_value.setWordWrap(True) # Para quebrar linha
+        self.details_descricao_produto_value.setWordWrap(True)
         self.details_perfil_gestao_value = QLabel("N/A")
+        self.details_geral_last_check_value = QLabel("N/A")
+
+        firmware_form_layout.addRow("Serial do Modem:", self.details_serial_value)
+        firmware_form_layout.addRow("Endereço MAC:", self.details_mac_value)
         firmware_form_layout.addRow("Fabricante:", self.details_fabricante_value)
         firmware_form_layout.addRow("Versão do Hardware:", self.details_versao_hw_value)
         firmware_form_layout.addRow("ID do Produto:", self.details_produto_id_value)
@@ -7989,35 +7970,39 @@ class OLTDatabaseGUI(QMainWindow):
         firmware_form_layout.addRow("Versão do Firmware (Backup):", self.details_firmware_backup_value)
         firmware_form_layout.addRow("Descrição do Produto:", self.details_descricao_produto_value)
         firmware_form_layout.addRow("Versão do Perfil de Gestão:", self.details_perfil_gestao_value)
+        firmware_form_layout.addRow("Última Verificação (Geral):", self.details_geral_last_check_value)
         
         details_layout.addWidget(firmware_group)
-        # --- PAINEL 3: ESTATÍSTICAS AVANÇADAS ---
-        stats_group = QGroupBox("Estatísticas Avançadas")
-        stats_form_layout = QFormLayout(stats_group)
         
-        self.details_stats_last_check_value = QLabel("N/A")
-        self.details_up_frames_value = QLabel("N/A")
-        self.details_up_bytes_value = QLabel("N/A")
-        self.details_up_discard_value = QLabel("N/A")
-        self.details_down_frames_value = QLabel("N/A")
-        self.details_down_bytes_value = QLabel("N/A")
-        self.details_down_discard_value = QLabel("N/A")
-        stats_form_layout.addRow("Última Verificação:", self.details_stats_last_check_value)
-        stats_form_layout.addRow("Pacotes Enviados (Upload):", self.details_up_frames_value)
-        stats_form_layout.addRow("Bytes Enviados (Upload):", self.details_up_bytes_value)
-        stats_form_layout.addRow("Pacotes Descartados (Upload):", self.details_up_discard_value)
-        stats_form_layout.addRow("Pacotes Recebidos (Download):", self.details_down_frames_value)
-        stats_form_layout.addRow("Bytes Recebidos (Download):", self.details_down_bytes_value)
-        stats_form_layout.addRow("Pacotes Descartados (Download):", self.details_down_discard_value)
-        details_layout.addWidget(stats_group)
+        # --- PAINEL 5: OUTRAS INFORMAÇÕES TÉCNICAS ---
+        other_group = QGroupBox("Outras Informações Técnicas")
+        other_form_layout = QFormLayout(other_group)
         
-        # Adiciona um espaçador para empurrar tudo para cima
+        self.details_tx_power_value = QLabel("N/A")
+        self.details_last_down_cause_value = QLabel("N/A")
+        self.details_last_up_time_value = QLabel("N/A")
+        self.details_last_down_time_value = QLabel("N/A")
+        self.details_dying_gasp_value = QLabel("N/A")
+        self.details_memory_value = QLabel("N/A")
+        self.details_cpu_value = QLabel("N/A")
+        self.details_temperature_value = QLabel("N/A")
+        self.details_ip_value = QLabel("N/A")
+
+        other_form_layout.addRow("Sinal Enviado (Tx):", self.details_tx_power_value)
+        other_form_layout.addRow("Motivo da Última Queda:", self.details_last_down_cause_value)
+        other_form_layout.addRow("Conectado Desde:", self.details_last_up_time_value)
+        other_form_layout.addRow("Data da Última Queda:", self.details_last_down_time_value)
+        other_form_layout.addRow("Queda por Falta de Energia:", self.details_dying_gasp_value)
+        other_form_layout.addRow("Uso de Memória:", self.details_memory_value)
+        other_form_layout.addRow("Uso de Processador:", self.details_cpu_value)
+        other_form_layout.addRow("Temperatura:", self.details_temperature_value)
+        other_form_layout.addRow("Endereço IP do Modem:", self.details_ip_value)
+        details_layout.addWidget(other_group)
+        
         details_layout.addStretch(1)
-        # Finaliza a configuração da área de rolagem
         scroll_area.setWidget(scroll_content)
         main_layout.addWidget(scroll_area)
         
-        # Armazenar a ONT selecionada
         self.selected_ont_for_details = None
 
     def detail_selected_ont(self):
@@ -8091,6 +8076,8 @@ class OLTDatabaseGUI(QMainWindow):
 
     # Em gui/main_window.py, substitua a função inteira por esta versão final e corrigida:
 
+# Em gui/main_window.py, substitua a função load_ont_details_from_db
+
     def load_ont_details_from_db(self):
         """Carrega os dados da ONT selecionada a partir do banco e preenche os novos painéis amigáveis."""
         if not self.selected_ont_for_details:
@@ -8106,48 +8093,23 @@ class OLTDatabaseGUI(QMainWindow):
             'collection_time': self.details_geral_last_check_value, 'client_name': self.details_client_name_value,
             'mac_address': self.details_mac_value, 'serial_number': self.details_serial_value,
             'tx_power': self.details_tx_power_value, 'primaria': self.details_primaria_value,
-            'secundaria': self.details_secundaria_value, 'last_dying_gasp_time': self.details_dying_gasp_value,
+            'secundaria': self.details_secundaria_value, 'porta_secundaria': self.details_porta_secundaria_value, # NOVA ENTRADA
+            'last_dying_gasp_time': self.details_dying_gasp_value,
             'ont_distance': self.details_distance_value, 'memory_occupation': self.details_memory_value,
             'cpu_occupation': self.details_cpu_value, 'temperature': self.details_temperature_value,
             'ont_ip_address': self.details_ip_value, 'connection_code': self.details_connection_code_value,
             'vendor_id': self.details_fabricante_value, 'ont_version': self.details_versao_hw_value,
             'product_id': self.details_produto_id_value, 'equipment_id': self.details_equipamento_id_value,
             'main_software_version': self.details_firmware_ativo_value, 'standby_software_version': self.details_firmware_backup_value,
-            'ont_product_description': self.details_descricao_produto_value, 'support_xml_version': self.details_perfil_gestao_value,
-            'up_traffic_kbps': self.details_upload_value, 'down_traffic_kbps': self.details_download_value,
-            'upstream_frames': self.details_up_frames_value, 'upstream_bytes': self.details_up_bytes_value,
-            'upstream_discarded_frames': self.details_up_discard_value, 'downstream_frames': self.details_down_frames_value,
-            'downstream_bytes': self.details_down_bytes_value, 'downstream_discarded_frames': self.details_down_discard_value,
-            'traffic_collection_time': self.details_traffic_last_check_value,
-            'stats_collection_time': self.details_stats_last_check_value
+            'ont_product_description': self.details_descricao_produto_value, 'support_xml_version': self.details_perfil_gestao_value
         }
-
+        
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
             
-            query = """
-                WITH latest_general AS (
-                    SELECT * FROM ont_data WHERE serial_number = %s AND olt_ip = %s ORDER BY collection_time DESC LIMIT 1
-                ),
-                latest_traffic AS (
-                    SELECT collection_time as traffic_collection_time, up_traffic_kbps, down_traffic_kbps 
-                    FROM ont_traffic_data 
-                    WHERE olt_ip = %s AND fsp = (SELECT fsp FROM latest_general) AND ont_id = (SELECT ont_id FROM latest_general) 
-                    ORDER BY collection_time DESC LIMIT 1
-                ),
-                latest_stats AS (
-                    SELECT collection_time as stats_collection_time, upstream_frames, upstream_bytes, upstream_discarded_frames,
-                        downstream_frames, downstream_bytes, downstream_discarded_frames
-                    FROM ont_statistics_packets
-                    WHERE olt_ip = %s AND fsp = (SELECT fsp FROM latest_general) AND ont_id = (SELECT ont_id FROM latest_general)
-                    ORDER BY collection_time DESC LIMIT 1
-                )
-                SELECT * FROM latest_general
-                LEFT JOIN latest_traffic ON true
-                LEFT JOIN latest_stats ON true;
-            """
-            cursor.execute(query, (sn, olt_ip, olt_ip, olt_ip))
+            query = "SELECT * FROM ont_data WHERE serial_number = %s ORDER BY collection_time DESC LIMIT 1"
+            cursor.execute(query, (sn,))
             
             full_data_row = cursor.fetchone()
             
@@ -8173,18 +8135,14 @@ class OLTDatabaseGUI(QMainWindow):
                 if isinstance(ts_value, str):
                     for fmt in ('%Y-%m-%d %H:%M:%S', '%d/%m/%Y %H:%M:%S'):
                         try: return datetime.strptime(ts_value.split('.')[0], fmt)
-                        except ValueError: continue
-                    try: return datetime.fromisoformat(ts_value.split('+')[0].strip())
-                    except ValueError: return None
+                        except (ValueError, TypeError): continue
+                    try: return datetime.fromisoformat(ts_value.replace("Z", "+00:00").split('+')[0].strip())
+                    except (ValueError, TypeError): return None
                 return None
 
-            status = data_dict.get('status', 'unknown').lower() # Garantir minúsculas para comparação
+            status = data_dict.get('status', 'unknown').lower()
             last_up = parse_db_timestamp(data_dict.get('last_up_time'))
             collection_time = parse_db_timestamp(data_dict.get('collection_time'))
-            
-            uptime_duration = None
-            if status == 'online' and last_up and collection_time:
-                uptime_duration = collection_time - last_up
             
             cursor.execute("""
                 SELECT last_down_cause, COUNT(*) FROM ont_data
@@ -8208,15 +8166,25 @@ class OLTDatabaseGUI(QMainWindow):
             
             conn.close()
 
-            # Preenche todos os outros campos de dados
+            # 1. Preenche os campos de dados gerais
             for key, label_widget in data_map.items():
                 value = data_dict.get(key)
                 display_text = str(value) if value is not None else "N/A"
-                # (lógica de formatação de valores...)
+                if value is not None:
+                    if 'time' in key:
+                        dt_obj = parse_db_timestamp(value)
+                        if dt_obj: display_text = dt_obj.strftime('%d/%m/%Y %H:%M:%S')
+                    elif key.endswith('_bytes') or key.endswith('_frames'): display_text = f"{value:,}"
+                    elif key.endswith('_kbps'): display_text = f"{value/1000.0:.2f} Mbps ({value:.0f} kbps)" if value > 0 else "0 kbps"
+                    elif key.endswith('_power'): display_text = f"{value} dBm"
+                    elif key == 'ont_distance': display_text = f"{value} metros"
+                    elif key.endswith('_occupation'): display_text = f"{value}%"
+                    elif key == 'temperature': display_text = f"{value}°C"
+                
                 label_widget.setText(display_text)
                 label_widget.setStyleSheet("")
 
-            # --- LÓGICA DE STATUS DO MODEM (COM CORES E ANIMAÇÃO) ---
+            # 2. Status do Modem (com cores e animação)
             if hasattr(self.details_status_value, 'animation') and self.details_status_value.animation:
                 self.details_status_value.animation.stop()
                 self.details_status_value.animation = None
@@ -8226,69 +8194,45 @@ class OLTDatabaseGUI(QMainWindow):
                 self.details_status_value.setStyleSheet("color: white; background-color: #2E7D32; padding: 3px 8px; border-radius: 5px; font-weight: bold;")
             elif status == 'offline':
                 self.details_status_value.setText("❌ OFFLINE")
-                # A animação irá definir o estilo dinamicamente
                 self._start_blinking_animation(self.details_status_value)
             else:
                 self.details_status_value.setText(status.upper())
                 self.details_status_value.setStyleSheet("color: black; background-color: #E0E0E0; padding: 3px 8px; border-radius: 5px; font-weight: bold;")
-        # --- FIM DA LÓGICA DE STATUS ---
 
-            self.details_status_value.setText(status.capitalize() if status else "N/A")
-
+            # 3. Qualidade do Sinal (Rx)
             rx_value = data_dict.get('rx_power')
             rx_display_text = str(rx_value) if rx_value is not None else "N/A"
             self.details_rx_power_value.setText(rx_display_text); self.details_rx_power_value.setStyleSheet("color: gray;")
             try:
                 rx_float = float(rx_value)
-                if -22.0 <= rx_float <= 0: status_text, style = "✅ OK", "color: white; background-color: #2E7D32; padding: 3px; border-radius: 4px; font-weight: bold;"
-                elif -25.0 < rx_float < -22.0: status_text, style = "⚠️ RUIM", "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
+                if -22.0 <= rx_float: status_text, style = "✅ OK", "color: white; background-color: #2E7D32; padding: 3px; border-radius: 4px; font-weight: bold;"
+                elif -25.0 <= rx_float < -22.0: status_text, style = "⚠️ RUIM", "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
                 else: status_text, style = "🚨 PÉSSIMO", "color: white; background-color: #C62828; padding: 3px; border-radius: 4px; font-weight: bold;"
                 self.details_rx_power_value.setText(f"{rx_display_text} dBm ({status_text})"); self.details_rx_power_value.setStyleSheet(style)
             except (ValueError, TypeError): pass
 
-            down_cause_value = data_dict.get('last_down_cause')
-            dc_display_text = str(down_cause_value) if down_cause_value is not None else "N/A"
-            self.details_last_down_cause_value.setText(dc_display_text); self.details_last_down_cause_value.setStyleSheet("")
-            if dc_display_text != "N/A":
-                raw_value = dc_display_text.lower().strip()
-                icon, translated_text, style = "", "", ""
-                if "losi" in raw_value or "lobi" in raw_value: icon, translated_text, style = "🚨", "Sem Sinal de Fibra", "color: white; background-color: #C62828; padding: 3px; border-radius: 4px; font-weight: bold;"
-                elif "dying-gasp" in raw_value: icon, translated_text, style = "⚡️", "Sem Energia Elétrica", "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
-                elif "reset by ont comma" in raw_value: icon, translated_text, style = "🛠️", "Técnico Resetou", "color: black; background-color: #81D4FA; padding: 3px; border-radius: 4px; font-weight: bold;"
-                elif "reset" in raw_value: icon, translated_text, style = "🔄", "Modem Resetado", "color: white; background-color: #FF9800; padding: 3px; border-radius: 4px; font-weight: bold;"
-                if translated_text:
-                    self.details_last_down_cause_value.setText(f"{icon} {translated_text} ({down_cause_value})"); self.details_last_down_cause_value.setStyleSheet(style)
-            
-            last_down_time_obj = parse_db_timestamp(data_dict.get('last_down_time'))
-            self.details_last_down_time_value.setText(last_down_time_obj.strftime('%d/%m/%Y %H:%M:%S') if last_down_time_obj else "N/A")
-
-            up_time_text = last_up.strftime('%d/%m/%Y %H:%M:%S') if last_up else "N/A"
-            self.details_last_up_time_value.setText(up_time_text)
-            self.details_last_up_time_value.setStyleSheet("")
-            
+            # 4. Uptime
             uptime_text, uptime_style = "N/A", ""
             if status == 'online':
+                uptime_duration = collection_time - last_up if last_up and collection_time else None
                 if uptime_duration:
                     uptime_text = self._format_timedelta(uptime_duration)
                     if uptime_duration.total_seconds() < 3600: uptime_style = "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
                     elif uptime_duration.days < 7: uptime_style = "color: white; background-color: #4CAF50; padding: 3px; border-radius: 4px; font-weight: bold;"
                     else: uptime_style = "color: white; background-color: #1B5E20; padding: 3px; border-radius: 4px; font-weight: bold;"
                 else:
-                    uptime_text = "Online (sem registro de início)"
-                    uptime_style = "color: #2E7D32; font-weight: bold;"
+                    uptime_text, uptime_style = "Online (sem registro de início)", "color: #2E7D32; font-weight: bold;"
             elif status == 'offline':
                 uptime_text, uptime_style = "OFFLINE", "color: white; background-color: #757575; padding: 3px; border-radius: 4px; font-weight: bold;"
-            
             self.details_uptime_value.setText(uptime_text)
             self.details_uptime_value.setStyleSheet(uptime_style)
 
-            # --- EXIBIÇÃO DO RESUMO SEMANAL DE QUEDAS ---
+            # 5. Resumo de Quedas (7 dias)
             if not weekly_drops_by_cause:
                 self.details_stability_value.setHtml("<span style='color: #1B5E20; font-weight: bold;'>✅ Nenhuma queda nos últimos 7 dias</span>")
             else:
-                weekly_html = ""
                 total_weekly_drops = sum(count for _, count in weekly_drops_by_cause)
-                weekly_html += f"<p style='margin:0; padding:0; font-weight:bold;'>Total de {total_weekly_drops} quedas:</p>"
+                weekly_html = f"<p style='margin:0; padding:0; font-weight:bold;'>Total de {total_weekly_drops} quedas:</p>"
                 for cause, count in weekly_drops_by_cause:
                     raw_cause = cause.lower().strip()
                     icon, text = "❔", cause
@@ -8299,7 +8243,7 @@ class OLTDatabaseGUI(QMainWindow):
                     weekly_html += f"<p style='margin:0; padding:0;'>{icon} {text}</p>"
                 self.details_stability_value.setHtml(weekly_html)
 
-            # --- EXIBIÇÃO DAS QUEDAS DE HOJE ---
+            # 6. Quedas Hoje
             if not daily_drops_by_cause:
                 self.details_daily_drops_value.setHtml("<span style='color: #1B5E20; font-weight: bold;'>✅ Nenhuma queda hoje</span>")
             else:
@@ -8313,17 +8257,35 @@ class OLTDatabaseGUI(QMainWindow):
                     elif "reset" in raw_cause: icon, text = "🔄", f"<b>Reset (Cliente/Técnico):</b> {count} {'vez' if count == 1 else 'vezes'}"
                     daily_html += f"<p style='margin:0; padding:0;'>{icon} {text}</p>"
                 self.details_daily_drops_value.setHtml(daily_html)
-                
-            # --- EXIBIÇÃO DO ALERTA DE FLAPPING (ÚLTIMA HORA) ---
+            
+            # 7. Alerta de Flapping (Última Hora)
             if drop_count_last_hour == 0:
                 flapping_text, flapping_style = "✅ Nenhuma queda recente (última hora)", "color: #1B5E20; font-weight: bold;"
             elif drop_count_last_hour <= 2:
                 flapping_text, flapping_style = f"⚠️ {drop_count_last_hour} {'queda' if drop_count_last_hour == 1 else 'quedas'} na última hora", "color: #FF6F00; font-weight: bold;"
             else:
                 flapping_text, flapping_style = f"🚨 ALERTA DE FLAPPING: {drop_count_last_hour} quedas na última hora!", "color: white; background-color: #C62828; padding: 3px; border-radius: 4px; font-weight: bold;"
-            
             self.details_flapping_alert_value.setText(flapping_text)
             self.details_flapping_alert_value.setStyleSheet(flapping_style)
+            
+            # 8. Outros campos com formatação condicional
+            down_cause_value = data_dict.get('last_down_cause')
+            dc_display_text = str(down_cause_value) if down_cause_value is not None else "N/A"
+            if dc_display_text != "N/A":
+                raw_value = dc_display_text.lower().strip()
+                icon, translated_text, style = "❔", down_cause_value, ""
+                if "losi" in raw_value or "lobi" in raw_value: icon, translated_text, style = "🚨", "Sem Sinal de Fibra", "color: white; background-color: #C62828; padding: 3px; border-radius: 4px; font-weight: bold;"
+                elif "dying-gasp" in raw_value: icon, translated_text, style = "⚡️", "Sem Energia Elétrica", "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
+                elif "reset by ont comma" in raw_value: icon, translated_text, style = "🛠️", "Técnico Resetou", "color: black; background-color: #81D4FA; padding: 3px; border-radius: 4px; font-weight: bold;"
+                elif "reset" in raw_value: icon, translated_text, style = "🔄", "Modem Resetado", "color: white; background-color: #FF9800; padding: 3px; border-radius: 4px; font-weight: bold;"
+                self.details_last_down_cause_value.setText(f"{icon} {translated_text} ({down_cause_value})")
+                self.details_last_down_cause_value.setStyleSheet(style)
+            else:
+                self.details_last_down_cause_value.setText("N/A")
+                self.details_last_down_cause_value.setStyleSheet("")
+
+            last_down_time_obj = parse_db_timestamp(data_dict.get('last_down_time'))
+            self.details_last_down_time_value.setText(last_down_time_obj.strftime('%d/%m/%Y %H:%M:%S') if last_down_time_obj else "N/A")
             
             logging.info("Carregamento de detalhes para a nova interface concluído com sucesso.")
 
