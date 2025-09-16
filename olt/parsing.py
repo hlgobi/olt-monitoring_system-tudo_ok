@@ -5,7 +5,6 @@ import logging
 import time
 from datetime import datetime
 from utils.helpers import format_mac 
-# Em olt/parsing.py, substitua a função extract_service_mac por esta:
 
 def extract_service_mac(response):
     """
@@ -21,13 +20,14 @@ def extract_service_mac(response):
         
         # Procura pela linha que começa com "mac address"
         if clean_line.startswith("mac address"):
+            logging.debug(f"Parsing line for MAC: '{line.strip()}'") # NOVO LOG
             try:
                 # Pega tudo que vem depois do caractere ":"
                 raw_mac = line.split(":", 1)[1].strip()
                 
                 # Usa a função auxiliar para limpar e formatar o MAC
                 formatted_mac = format_mac(raw_mac)
-                
+                logging.debug(f"  -> MAC extraído: '{formatted_mac}'") # NOVO LOG
                 if formatted_mac != "N/A":
                     # Se encontrou e formatou com sucesso, retorna o valor
                     return formatted_mac
@@ -36,7 +36,7 @@ def extract_service_mac(response):
                 # Apenas continua para a próxima linha
                 continue
                 
-    # Se o loop terminar e não encontrar nenhum MAC, retorna "N/A"
+    logging.debug("MAC address not found in response.") # NOVO LOG
     return "N/A"
 
 def extract_ont_info(summary_response):
@@ -74,8 +74,10 @@ def extract_ont_info(summary_response):
     # 3. Analisa a primeira seção (Run State, UpTime, DownTime).
     state_pattern = re.compile(r"^\s*(\d+)\s+([a-zA-Z-]+)\s+.*$", re.MULTILINE)
     for match in state_pattern.finditer(state_section):
+        logging.debug(f"Parsing state line: '{match.group(0).strip()}'") # NOVO LOG
         ont_id = match.group(1)
         run_state = match.group(2).lower()
+        logging.debug(f"  -> State data extracted: ONT ID={ont_id}, Run State={run_state}") # NOVO LOG
         ont_data[ont_id] = {"run_state": run_state}
 
     # 4. Analisa a segunda seção (SN, Type, Power, Description).
@@ -90,6 +92,7 @@ def extract_ont_info(summary_response):
     )
     
     for match in details_pattern.finditer(details_section):
+        logging.debug(f"Parsing details line: '{match.group(0).strip()}'") # NOVO LOG
         ont_id = match.group(1)
         sn = match.group(2)
         rx_tx = match.group(5)
@@ -100,8 +103,9 @@ def extract_ont_info(summary_response):
             try:
                 rx_power, tx_power = rx_tx.split('/')
             except ValueError:
-                pass 
+                pass
 
+        logging.debug(f"  -> Details data extracted: ONT ID={ont_id}, SN={sn}, Rx/Tx={rx_tx}, Description={description}") # NOVO LOG
         if ont_id in ont_data:
             ont_data[ont_id].update({
                 "sn": sn,
@@ -162,12 +166,15 @@ def parse_ont_info_details(output_text):
 
     for line in lines:
         clean_line = line.strip()
+        logging.debug(f"Parsing detail line: '{clean_line}'") # NOVO LOG
+
 
         if ":" in clean_line:
             try:
                 key, value = clean_line.split(':', 1)
                 key = key.strip()
                 value = value.strip()
+                logging.debug(f"  -> Key: '{key}', Value: '{value}'") # NOVO LOG
 
                 # Mapeamento de chaves para os nomes no nosso dicionário
                 key_map = {
@@ -196,6 +203,7 @@ def parse_ont_info_details(output_text):
                         value = re.sub(r'[^0-9.]', '', value)
                     
                     details[details_key] = value
+                    logging.debug(f"  -> Mapped and saved: {details_key} = {value}") # NOVO LOG
 
             except ValueError:
                 # Ignora linhas que têm ":" mas não estão no formato chave: valor
@@ -212,6 +220,7 @@ def parse_ont_info_details(output_text):
                     'vlan_id': parts[3]
                 }
                 details['services'].append(service_info)
+                logging.debug(f"  -> Service Info extracted: {service_info}") # NOVO LOG
 
     logging.debug(f"Detalhes da ONT extraídos (versão aprimorada): {details}")
     return details
@@ -248,7 +257,7 @@ def parse_pon_port_state(response):
         parts = re.split(r'\s{2,}', line, 1) # Divide em chave e valor onde há 2 ou mais espaços
         if len(parts) == 2:
             key, value = parts[0].strip(), parts[1].strip()
-            
+            logging.debug(f"Parsing PON state line: '{line}' -> Key: '{key}', Value: '{value}'") # NOVO LOG
             if key in key_map:
                 db_key = key_map[key]
                 
@@ -274,6 +283,7 @@ def parse_pon_port_state(response):
                         state_data[db_key] = None
                 else:
                     state_data[db_key] = value
+                    logging.debug(f"  -> Mapped: {db_key} = {value}") # NOVO LOG
 
     return state_data
 # --- FIM DA MODIFICAÇÃO ---
@@ -297,6 +307,7 @@ def parse_port_info(response):
         parts = re.split(r'\s{2,}', line.strip(), 1)
         if len(parts) == 2:
             key, value = parts[0].strip(), parts[1].strip()
+            logging.debug(f"Parsing Port Info line: '{line}' -> Key: '{key}', Value: '{value}'") # NOVO LOG
             if key in key_map:
                 db_key = key_map[key]
                 if db_key == 'left_guaranteed_bandwidth_kbps':
@@ -306,7 +317,8 @@ def parse_port_info(response):
                         info_data[db_key] = None
                 else:
                     info_data[db_key] = value
-    
+                    logging.debug(f"  -> Mapped: {db_key} = {value}") # NOVO LOG
+
     return info_data
 
 # Em olt/parsing.py, adicione esta nova função
@@ -338,11 +350,12 @@ def parse_pon_statistics_packets(response):
             key, value = line.split(":", 1)
             key = key.strip()
             if key in key_map:
-                # O valor é o primeiro número encontrado na string de valor
+                logging.debug(f"Parsing PON stats line: '{line.strip()}'") # NOVO LOG
                 numeric_value = re.search(r'^\s*(\d+)', value.strip())
                 if numeric_value:
                     try:
                         stats_data[key_map[key]] = int(numeric_value.group(1))
+                        logging.debug(f"  -> Mapped: {key_map[key]} = {val}") # NOVO LOG
                     except (ValueError, TypeError):
                         continue
     return stats_data
@@ -369,6 +382,7 @@ def parse_ont_traffic(response, ont_id_target=None):
             for data_line in lines[i+1:]:
                 if data_line.strip().startswith("---"):
                     continue
+                logging.debug(f"Parsing ONT traffic line: '{data_line.strip()}'") # NOVO LOG
                 parts = re.split(r'\s+', data_line.strip())
                 if len(parts) >= 3:
                     try:
@@ -377,6 +391,7 @@ def parse_ont_traffic(response, ont_id_target=None):
                             "up_traffic": float(parts[1]),
                             "down_traffic": float(parts[2])
                         })
+                        logging.debug(f"  -> Extracted traffic: {data}") # NOVO LOG
                     except (ValueError, IndexError):
                         continue
             break
@@ -456,11 +471,11 @@ def parse_ont_statistics(response):
                 for map_key, db_key in key_map.items():
                     if map_key.lower() in key.lower():
                         try:
-                            # Extrai apenas o valor numérico
+                            logging.debug(f"Parsing ONT stats line: '{line.strip()}'") # NOVO LOG
                             numeric_match = re.search(r'(\d+)', value_str)
                             if numeric_match:
                                 stats_data[db_key] = int(numeric_match.group(1))
-                                logging.debug(f"parse_ont_statistics: {db_key} = {stats_data[db_key]}")
+                                logging.debug(f"  -> Mapped: {key_map[key]} = {stats_data[key_map[key]]}") # NOVO LOG
                             break
                         except (ValueError, TypeError) as e:
                             logging.warning(f"parse_ont_statistics: Erro ao converter valor '{value_str}' para {db_key}: {e}")
@@ -521,11 +536,11 @@ def parse_ont_eth_statistics(response):
                 for map_key, db_key in key_map.items():
                     if map_key.lower() in key.lower():
                         try:
-                            # Extrai apenas o valor numérico
+                            logging.debug(f"Parsing ONT ETH stats line: '{line.strip()}'") # NOVO LOG
                             numeric_match = re.search(r'(\d+)', value_str)
                             if numeric_match:
                                 stats_data[db_key] = int(numeric_match.group(1))
-                                logging.debug(f"parse_ont_eth_statistics: {db_key} = {stats_data[db_key]}")
+                            logging.debug(f"  -> Mapped: {key_map[key]} = {stats_data[key_map[key]]}") # NOVO LOG
                             break
                         except (ValueError, TypeError) as e:
                             logging.warning(f"parse_ont_eth_statistics: Erro ao converter valor '{value_str}' para {db_key}: {e}")
@@ -631,7 +646,7 @@ def parse_ont_version_details(raw_output: str) -> dict:
             if key in key_map:
                 details[key_map[key]] = value
 
-    logging.debug(f"Detalhes de versão da ONT parseados: {details}")
+                logging.debug(f"  -> Mapped: {key_map[key]} = {value}") # NOVO LOG
     return details
 
 # olt/parsing.py
@@ -666,9 +681,10 @@ def parse_ont_optical_info(raw_output: str) -> dict:
         if ":" in line:
             try:
                 key, value = [x.strip() for x in line.split(":", 1)]
+                logging.debug(f"Parsing Optical Info line: '{line.strip()}'") # NOVO LOG
                 if key in key_map:
                     db_key = key_map[key]
-                    
+                    logging.debug(f"  -> Mapped: {db_key} = {value}") # NOVO LOG
                     if value in ['-', 'N/A', '[-,-]']:
                         details[db_key] = None
                         continue
