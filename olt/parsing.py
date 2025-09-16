@@ -145,6 +145,7 @@ def parse_ont_info_details(output_text):
         'last_up_time': 'N/A',
         'last_down_time': 'N/A',
         'last_dying_gasp_time': 'N/A',
+        'ont_online_duration': 'N/A',  # <-- ADICIONADO
         'services': [],
         'ont_distance': 'N/A',
         'memory_occupation': 'N/A',
@@ -174,6 +175,7 @@ def parse_ont_info_details(output_text):
                     "Last up time": "last_up_time",
                     "Last down time": "last_down_time",
                     "Last dying gasp time": "last_dying_gasp_time",
+                    "ONT online duration": "ont_online_duration", # <-- ADICIONADO
                     "ONT distance(m)": "ont_distance",
                     "Memory occupation": "memory_occupation",
                     "CPU occupation": "cpu_occupation",

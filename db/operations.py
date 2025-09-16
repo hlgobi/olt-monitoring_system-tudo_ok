@@ -185,7 +185,8 @@ def save_ont_data(olt_ip, ont_info):
                 ont_info.get('standby_software_version'),  # 40
                 ont_info.get('ont_product_description'),   # 41
                 ont_info.get('support_xml_version'),       # 42
-                current_time.isoformat()                   # 43 - como string ISO com fuso
+                ont_info.get('ont_online_duration'),       # 43
+                current_time.isoformat()                   # 44 - como string ISO com fuso
             )
             
             # Log para depuração

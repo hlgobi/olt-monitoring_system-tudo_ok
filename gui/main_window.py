@@ -7841,12 +7841,16 @@ class OLTDatabaseGUI(QMainWindow):
         if self.tab_widget.currentWidget() == self.ont_eth_tab:
             self.load_ont_eth_data()
 
-    # Em gui/main_window.py, substitua completamente a função setup_ont_details_tab por esta:
+    # Em gui/main_window.py, substitua esta função
+
     def setup_ont_details_tab(self):
         """Configura a aba de detalhes da ONT com um layout de grade (dashboard) para otimizar o espaço."""
         
         # 1. Limpa o layout anterior, se houver
         if self.ont_details_tab.layout():
+            while (item := self.ont_details_tab.layout().takeAt(0)) is not None:
+                if item.widget():
+                    item.widget().deleteLater()
             QWidget().setLayout(self.ont_details_tab.layout())
             
         # 2. Define um nome de objeto para o estilo funcionar
@@ -7886,7 +7890,6 @@ class OLTDatabaseGUI(QMainWindow):
         scroll_content = QWidget()
         scroll_content.setStyleSheet("background-color: transparent;")
         
-        # NOVO: Layout em Grade para organizar os painéis lado a lado
         grid_layout = QGridLayout(scroll_content)
         grid_layout.setSpacing(15)
 
@@ -7898,10 +7901,13 @@ class OLTDatabaseGUI(QMainWindow):
         self.details_status_value = QLabel("N/A")
         self.details_uptime_value = QLabel("N/A")
         self.details_rx_power_value = QLabel("N/A")
+        self.details_status_last_check_value = QLabel("N/A") # NOVO LABEL
+        
         status_form_layout.addRow("Status do Modem:", self.details_status_value)
         status_form_layout.addRow("Tempo Online (Uptime):", self.details_uptime_value)
-        status_form_layout.addRow("Qualidade do Sinal (Rx):", self.details_rx_power_value)
-        grid_layout.addWidget(status_group, 0, 0) # Linha 0, Coluna 0
+        status_form_layout.addRow("Qualidade do Sinal no Modem (Rx):", self.details_rx_power_value)
+        status_form_layout.addRow("Última Verificação:", self.details_status_last_check_value) # NOVO CAMPO
+        grid_layout.addWidget(status_group, 0, 0)
 
         # PAINEL 2: DIAGNÓSTICO DE INSTABILIDADE
         stability_group = QGroupBox("Diagnóstico de Instabilidade")
@@ -7918,7 +7924,7 @@ class OLTDatabaseGUI(QMainWindow):
         stability_form_layout.addRow("<b>Resumo de Quedas (7 dias):</b>", self.details_stability_value)
         stability_form_layout.addRow("<b>Quedas Hoje:</b>", self.details_daily_drops_value)
         stability_form_layout.addRow("<b>Alerta de Instabilidade:</b>", self.details_flapping_alert_value)
-        grid_layout.addWidget(stability_group, 1, 0, 2, 1) # Linha 1, Coluna 0, Ocupa 2 linhas de altura
+        grid_layout.addWidget(stability_group, 1, 0, 2, 1)
 
         # --- Coluna da Direita ---
 
@@ -7937,9 +7943,9 @@ class OLTDatabaseGUI(QMainWindow):
         location_form_layout.addRow("Caixa Secundária (CEO):", self.details_secundaria_value)
         location_form_layout.addRow("Porta Secundária:", self.details_porta_secundaria_value)
         location_form_layout.addRow("Distância Estimada:", self.details_distance_value)
-        grid_layout.addWidget(location_group, 0, 1) # Linha 0, Coluna 1
+        grid_layout.addWidget(location_group, 0, 1)
 
-        # --- NOVO: Painel com Abas para agrupar detalhes técnicos ---
+        # Painel com Abas para agrupar detalhes técnicos
         technical_details_group = QGroupBox("Detalhes Técnicos")
         technical_layout = QVBoxLayout(technical_details_group)
         
@@ -7976,6 +7982,7 @@ class OLTDatabaseGUI(QMainWindow):
         # Aba 2: Outras Informações
         other_tab = QWidget()
         other_form_layout = QFormLayout(other_tab)
+        self.details_outras_last_check_value = QLabel("N/A")
         self.details_tx_power_value = QLabel("N/A")
         self.details_last_down_cause_value = QLabel("N/A")
         self.details_last_up_time_value = QLabel("N/A")
@@ -7985,6 +7992,7 @@ class OLTDatabaseGUI(QMainWindow):
         self.details_cpu_value = QLabel("N/A")
         self.details_temperature_value = QLabel("N/A")
         self.details_ip_value = QLabel("N/A")
+        other_form_layout.addRow("Última Verificação:", self.details_outras_last_check_value)
         other_form_layout.addRow("Sinal Enviado (Tx):", self.details_tx_power_value)
         other_form_layout.addRow("Motivo da Última Queda:", self.details_last_down_cause_value)
         other_form_layout.addRow("Conectado Desde:", self.details_last_up_time_value)
@@ -7996,14 +8004,42 @@ class OLTDatabaseGUI(QMainWindow):
         other_form_layout.addRow("Endereço IP do Modem:", self.details_ip_value)
         tabs.addTab(other_tab, "Outras Infos")
 
-        technical_layout.addWidget(tabs)
-        grid_layout.addWidget(technical_details_group, 1, 1, 2, 1) # Linha 1, Coluna 1, Ocupa 2 linhas de altura
+        # Aba 3: Tráfego em Tempo Real
+        traffic_tab = QWidget()
+        traffic_form_layout = QFormLayout(traffic_tab)
+        self.details_traffic_last_check_value = QLabel("N/A")
+        self.details_upload_value = QLabel("N/A")
+        self.details_download_value = QLabel("N/A")
+        traffic_form_layout.addRow("Última Verificação:", self.details_traffic_last_check_value)
+        traffic_form_layout.addRow("Tráfego de Upload Atual:", self.details_upload_value)
+        traffic_form_layout.addRow("Tráfego de Download Atual:", self.details_download_value)
+        tabs.addTab(traffic_tab, "Tráfego")
 
-        # Ajusta o layout da grade para que as colunas tenham larguras proporcionais
+        # Aba 4: Estatísticas de Pacotes
+        stats_tab = QWidget()
+        stats_form_layout = QFormLayout(stats_tab)
+        self.details_stats_last_check_value = QLabel("N/A")
+        self.details_up_frames_value = QLabel("N/A")
+        self.details_up_bytes_value = QLabel("N/A")
+        self.details_up_discard_value = QLabel("N/A")
+        self.details_down_frames_value = QLabel("N/A")
+        self.details_down_bytes_value = QLabel("N/A")
+        self.details_down_discard_value = QLabel("N/A")
+        stats_form_layout.addRow("Última Verificação:", self.details_stats_last_check_value)
+        stats_form_layout.addRow("Pacotes Enviados (Upload):", self.details_up_frames_value)
+        stats_form_layout.addRow("Bytes Enviados (Upload):", self.details_up_bytes_value)
+        stats_form_layout.addRow("Pacotes Descartados (Upload):", self.details_up_discard_value)
+        stats_form_layout.addRow("Pacotes Recebidos (Download):", self.details_down_frames_value)
+        stats_form_layout.addRow("Bytes Recebidos (Download):", self.details_down_bytes_value)
+        stats_form_layout.addRow("Pacotes Descartados (Download):", self.details_down_discard_value)
+        tabs.addTab(stats_tab, "Contadores")
+        
+        technical_layout.addWidget(tabs)
+        grid_layout.addWidget(technical_details_group, 1, 1, 2, 1)
+
         grid_layout.setColumnStretch(0, 1)
         grid_layout.setColumnStretch(1, 1)
 
-        # Finaliza a configuração da área de rolagem
         scroll_area.setWidget(scroll_content)
         main_layout.addWidget(scroll_area)
         
@@ -8078,9 +8114,7 @@ class OLTDatabaseGUI(QMainWindow):
         # Carregar os dados existentes da ONT
         self.load_ont_details_from_db()
 
-    # Em gui/main_window.py, substitua a função inteira por esta versão final e corrigida:
-
-# Em gui/main_window.py, substitua a função load_ont_details_from_db
+    # Em gui/main_window.py, substitua esta função
 
     def load_ont_details_from_db(self):
         """Carrega os dados da ONT selecionada a partir do banco e preenche os novos painéis amigáveis."""
@@ -8097,7 +8131,7 @@ class OLTDatabaseGUI(QMainWindow):
             'collection_time': self.details_geral_last_check_value, 'client_name': self.details_client_name_value,
             'mac_address': self.details_mac_value, 'serial_number': self.details_serial_value,
             'tx_power': self.details_tx_power_value, 'primaria': self.details_primaria_value,
-            'secundaria': self.details_secundaria_value, 'porta_secundaria': self.details_porta_secundaria_value, # NOVA ENTRADA
+            'secundaria': self.details_secundaria_value, 'porta_secundaria': self.details_porta_secundaria_value,
             'last_dying_gasp_time': self.details_dying_gasp_value,
             'ont_distance': self.details_distance_value, 'memory_occupation': self.details_memory_value,
             'cpu_occupation': self.details_cpu_value, 'temperature': self.details_temperature_value,
@@ -8105,14 +8139,44 @@ class OLTDatabaseGUI(QMainWindow):
             'vendor_id': self.details_fabricante_value, 'ont_version': self.details_versao_hw_value,
             'product_id': self.details_produto_id_value, 'equipment_id': self.details_equipamento_id_value,
             'main_software_version': self.details_firmware_ativo_value, 'standby_software_version': self.details_firmware_backup_value,
-            'ont_product_description': self.details_descricao_produto_value, 'support_xml_version': self.details_perfil_gestao_value
+            'ont_product_description': self.details_descricao_produto_value, 'support_xml_version': self.details_perfil_gestao_value,
+            'up_traffic_kbps': self.details_upload_value, 'down_traffic_kbps': self.details_download_value,
+            'upstream_frames': self.details_up_frames_value, 'upstream_bytes': self.details_up_bytes_value,
+            'upstream_discarded_frames': self.details_up_discard_value, 'downstream_frames': self.details_down_frames_value,
+            'downstream_bytes': self.details_down_bytes_value, 'downstream_discarded_frames': self.details_down_discard_value,
+            'traffic_collection_time': self.details_traffic_last_check_value,
+            'stats_collection_time': self.details_stats_last_check_value
         }
         
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
             
-            query = "SELECT * FROM ont_data WHERE serial_number = %s ORDER BY collection_time DESC LIMIT 1"
+            query = """
+                WITH latest_general AS (
+                    SELECT * FROM ont_data WHERE serial_number = %s ORDER BY collection_time DESC LIMIT 1
+                ),
+                latest_traffic AS (
+                    SELECT collection_time as traffic_collection_time, up_traffic_kbps, down_traffic_kbps 
+                    FROM ont_traffic_data 
+                    WHERE olt_ip = (SELECT olt_ip FROM latest_general) 
+                    AND fsp = (SELECT fsp FROM latest_general) 
+                    AND ont_id = (SELECT ont_id FROM latest_general) 
+                    ORDER BY collection_time DESC LIMIT 1
+                ),
+                latest_stats AS (
+                    SELECT collection_time as stats_collection_time, upstream_frames, upstream_bytes, upstream_discarded_frames,
+                        downstream_frames, downstream_bytes, downstream_discarded_frames
+                    FROM ont_statistics_packets
+                    WHERE olt_identifier = (SELECT olt_identifier FROM latest_general) 
+                    AND fsp = (SELECT fsp FROM latest_general) 
+                    AND ont_id = (SELECT ont_id FROM latest_general)
+                    ORDER BY collection_time DESC LIMIT 1
+                )
+                SELECT * FROM latest_general
+                LEFT JOIN latest_traffic ON true
+                LEFT JOIN latest_stats ON true;
+            """
             cursor.execute(query, (sn,))
             
             full_data_row = cursor.fetchone()
@@ -8122,7 +8186,8 @@ class OLTDatabaseGUI(QMainWindow):
                     self.details_rx_power_value, self.details_last_down_time_value,
                     self.details_last_down_cause_value, self.details_stability_value,
                     self.details_daily_drops_value, self.details_flapping_alert_value,
-                    self.details_last_up_time_value, self.details_uptime_value, self.details_status_value
+                    self.details_last_up_time_value, self.details_uptime_value, self.details_status_value,
+                    self.details_status_last_check_value, self.details_outras_last_check_value
                 ]
                 for label_widget in all_labels:
                     if isinstance(label_widget, QLabel): label_widget.setText("N/A"); label_widget.setStyleSheet("")
@@ -8188,7 +8253,14 @@ class OLTDatabaseGUI(QMainWindow):
                 label_widget.setText(display_text)
                 label_widget.setStyleSheet("")
 
-            # 2. Status do Modem (com cores e animação)
+            # 2. Preenche manualmente os timestamps que não estão no data_map
+            collection_time_obj = parse_db_timestamp(data_dict.get('collection_time'))
+            formatted_time = collection_time_obj.strftime('%d/%m/%Y %H:%M:%S') if collection_time_obj else "N/A"
+
+            self.details_outras_last_check_value.setText(formatted_time)
+            self.details_status_last_check_value.setText(formatted_time)
+
+            # 3. Status do Modem
             if hasattr(self.details_status_value, 'animation') and self.details_status_value.animation:
                 self.details_status_value.animation.stop()
                 self.details_status_value.animation = None
@@ -8203,7 +8275,7 @@ class OLTDatabaseGUI(QMainWindow):
                 self.details_status_value.setText(status.upper())
                 self.details_status_value.setStyleSheet("color: black; background-color: #E0E0E0; padding: 3px 8px; border-radius: 5px; font-weight: bold;")
 
-            # 3. Qualidade do Sinal (Rx)
+            # 4. Qualidade do Sinal (Rx)
             rx_value = data_dict.get('rx_power')
             rx_display_text = str(rx_value) if rx_value is not None else "N/A"
             self.details_rx_power_value.setText(rx_display_text); self.details_rx_power_value.setStyleSheet("color: gray;")
@@ -8215,23 +8287,28 @@ class OLTDatabaseGUI(QMainWindow):
                 self.details_rx_power_value.setText(f"{rx_display_text} dBm ({status_text})"); self.details_rx_power_value.setStyleSheet(style)
             except (ValueError, TypeError): pass
 
-            # 4. Uptime
+            # 5. Uptime (com lógica de fallback)
             uptime_text, uptime_style = "N/A", ""
             if status == 'online':
-                uptime_duration = collection_time - last_up if last_up and collection_time else None
-                if uptime_duration:
-                    uptime_text = self._format_timedelta(uptime_duration)
-                    if uptime_duration.total_seconds() < 3600: uptime_style = "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
-                    elif uptime_duration.days < 7: uptime_style = "color: white; background-color: #4CAF50; padding: 3px; border-radius: 4px; font-weight: bold;"
-                    else: uptime_style = "color: white; background-color: #1B5E20; padding: 3px; border-radius: 4px; font-weight: bold;"
+                ont_duration_str = data_dict.get('ont_online_duration')
+                if ont_duration_str and ont_duration_str != 'N/A' and ont_duration_str.strip() != '-':
+                    uptime_text = ont_duration_str
+                    uptime_style = "color: white; background-color: #1B5E20; padding: 3px; border-radius: 4px; font-weight: bold;"
                 else:
-                    uptime_text, uptime_style = "Online (sem registro de início)", "color: #2E7D32; font-weight: bold;"
+                    uptime_duration = collection_time - last_up if last_up and collection_time else None
+                    if uptime_duration:
+                        uptime_text = self._format_timedelta(uptime_duration)
+                        if uptime_duration.total_seconds() < 3600: uptime_style = "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
+                        elif uptime_duration.days < 7: uptime_style = "color: white; background-color: #4CAF50; padding: 3px; border-radius: 4px; font-weight: bold;"
+                        else: uptime_style = "color: white; background-color: #1B5E20; padding: 3px; border-radius: 4px; font-weight: bold;"
+                    else:
+                        uptime_text, uptime_style = "Online (sem registro de início)", "color: #2E7D32; font-weight: bold;"
             elif status == 'offline':
                 uptime_text, uptime_style = "OFFLINE", "color: white; background-color: #757575; padding: 3px; border-radius: 4px; font-weight: bold;"
             self.details_uptime_value.setText(uptime_text)
             self.details_uptime_value.setStyleSheet(uptime_style)
 
-            # 5. Resumo de Quedas (7 dias)
+            # 6. Resumo de Quedas (7 dias)
             if not weekly_drops_by_cause:
                 self.details_stability_value.setHtml("<span style='color: #1B5E20; font-weight: bold;'>✅ Nenhuma queda nos últimos 7 dias</span>")
             else:
@@ -8244,10 +8321,11 @@ class OLTDatabaseGUI(QMainWindow):
                     elif "dying-gasp" in raw_cause: icon, text = "⚡️", f"<b>Sem Energia Elétrica:</b> {count} {'vez' if count == 1 else 'vezes'}"
                     elif "reset by ont comma" in raw_cause: icon, text = "🛠️", f"<b>Reset pelo Técnico:</b> {count} {'vez' if count == 1 else 'vezes'}"
                     elif "reset" in raw_cause: icon, text = "🔄", f"<b>Reset (Cliente/Técnico):</b> {count} {'vez' if count == 1 else 'vezes'}"
+                    else: text = f"<b>{cause}:</b> {count} {'vez' if count == 1 else 'vezes'}"
                     weekly_html += f"<p style='margin:0; padding:0;'>{icon} {text}</p>"
                 self.details_stability_value.setHtml(weekly_html)
 
-            # 6. Quedas Hoje
+            # 7. Quedas Hoje
             if not daily_drops_by_cause:
                 self.details_daily_drops_value.setHtml("<span style='color: #1B5E20; font-weight: bold;'>✅ Nenhuma queda hoje</span>")
             else:
@@ -8259,10 +8337,11 @@ class OLTDatabaseGUI(QMainWindow):
                     elif "dying-gasp" in raw_cause: icon, text = "⚡️", f"<b>Sem Energia Elétrica:</b> {count} {'vez' if count == 1 else 'vezes'}"
                     elif "reset by ont comma" in raw_cause: icon, text = "🛠️", f"<b>Reset pelo Técnico:</b> {count} {'vez' if count == 1 else 'vezes'}"
                     elif "reset" in raw_cause: icon, text = "🔄", f"<b>Reset (Cliente/Técnico):</b> {count} {'vez' if count == 1 else 'vezes'}"
+                    else: text = f"<b>{cause}:</b> {count} {'vez' if count == 1 else 'vezes'}"
                     daily_html += f"<p style='margin:0; padding:0;'>{icon} {text}</p>"
                 self.details_daily_drops_value.setHtml(daily_html)
             
-            # 7. Alerta de Flapping (Última Hora)
+            # 8. Alerta de Flapping (Última Hora)
             if drop_count_last_hour == 0:
                 flapping_text, flapping_style = "✅ Nenhuma queda recente (última hora)", "color: #1B5E20; font-weight: bold;"
             elif drop_count_last_hour <= 2:
@@ -8272,7 +8351,7 @@ class OLTDatabaseGUI(QMainWindow):
             self.details_flapping_alert_value.setText(flapping_text)
             self.details_flapping_alert_value.setStyleSheet(flapping_style)
             
-            # 8. Outros campos com formatação condicional
+            # 9. Outros campos com formatação condicional
             down_cause_value = data_dict.get('last_down_cause')
             dc_display_text = str(down_cause_value) if down_cause_value is not None else "N/A"
             if dc_display_text != "N/A":

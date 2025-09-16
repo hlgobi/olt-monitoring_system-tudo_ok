@@ -91,6 +91,7 @@ def create_tables():
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS previous_fsp VARCHAR(20);",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS previous_ont_id INTEGER;",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS olt_identifier VARCHAR(10);",
+                "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS ont_online_duration VARCHAR(100);", # <-- ADICIONADO
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS primaria VARCHAR(100);",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS secundaria VARCHAR(100);",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS porta_secundaria VARCHAR(10);",
