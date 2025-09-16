@@ -20,7 +20,7 @@ from olt.communication import send_command, connect_to_olt
 from olt.parsing import (extract_service_mac, extract_ont_info, parse_ont_info_details, 
                          parse_pon_port_state, parse_port_info, parse_pon_statistics_packets, 
                          parse_ont_traffic, parse_ont_statistics, parse_ont_eth_statistics,
-                         parse_uplink_ddm_response)
+                         parse_uplink_ddm_response, parse_ont_optical_info)
 
 # Substitua a importação de operations para incluir a nova função
 # Substitua a importação existente por esta que inclui todas as funções

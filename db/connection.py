@@ -159,8 +159,25 @@ def create_tables():
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS standby_software_version VARCHAR(100);")
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS ont_product_description TEXT;")
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS support_xml_version VARCHAR(50);")
+            # --- INÍCIO DA ADIÇÃO PARA DADOS ÓPTICOS ---
+            logging.info("Adicionando colunas para detalhes ópticos da ONT...")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_module_type VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_module_subtype VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_encapsulation_type VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_vendor_name VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_vendor_pn VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_vendor_sn VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_date_code VARCHAR(20);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_olt_rx_ont_power_dbm FLOAT;")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS ont_voltage_v FLOAT;")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS ont_tx_bias_current_ma FLOAT;")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_rx_power_alarm VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_tx_power_alarm VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_bias_current_alarm VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_temperature_alarm VARCHAR(50);")
+            cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_voltage_alarm VARCHAR(50);")
             # --- FIM DA ADIÇÃO ---
-            
+           
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.pon_status (
                     id SERIAL PRIMARY KEY,

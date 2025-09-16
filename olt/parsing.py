@@ -633,3 +633,56 @@ def parse_ont_version_details(raw_output: str) -> dict:
 
     logging.debug(f"Detalhes de versão da ONT parseados: {details}")
     return details
+
+# olt/parsing.py
+
+# Adicione esta nova função ao final do arquivo
+def parse_ont_optical_info(raw_output: str) -> dict:
+    """
+    Analisa a saída do comando 'display ont optical-info' e extrai os detalhes ópticos.
+    Retorna um dicionário com chaves prontas para o banco de dados.
+    """
+    details = {}
+    # Mapeia o nome do campo na OLT para o nome da coluna no banco de dados
+    key_map = {
+        "Module type": "optical_module_type",
+        "Module sub-type": "optical_module_subtype",
+        "Encapsulation Type": "optical_encapsulation_type",
+        "Vendor name": "optical_vendor_name",
+        "Vendor PN": "optical_vendor_pn",
+        "Vendor SN": "optical_vendor_sn",
+        "Date Code": "optical_date_code",
+        "OLT Rx ONT optical power(dBm)": "optical_olt_rx_ont_power_dbm",
+        "Voltage(V)": "ont_voltage_v",
+        "Laser bias current(mA)": "ont_tx_bias_current_ma",
+        "Rx power current alarm threshold(dBm)": "optical_rx_power_alarm",
+        "Tx power current alarm threshold(dBm)": "optical_tx_power_alarm",
+        "Tx bias current alarm threshold(mA)": "optical_bias_current_alarm",
+        "Temperature alarm threshold(C)": "optical_temperature_alarm",
+        "Supply voltage alarm threshold(V)": "optical_voltage_alarm"
+    }
+
+    for line in raw_output.splitlines():
+        if ":" in line:
+            try:
+                key, value = [x.strip() for x in line.split(":", 1)]
+                if key in key_map:
+                    db_key = key_map[key]
+                    
+                    if value in ['-', 'N/A', '[-,-]']:
+                        details[db_key] = None
+                        continue
+
+                    # Converte para float se for um valor numérico
+                    if db_key in ['optical_olt_rx_ont_power_dbm', 'ont_voltage_v', 'ont_tx_bias_current_ma']:
+                        numeric_match = re.search(r'([-+]?\d*\.?\d+)', value)
+                        details[db_key] = float(numeric_match.group(1)) if numeric_match else None
+                    # Para os thresholds e outros, armazena a string
+                    else:
+                        details[db_key] = value
+            except (ValueError, IndexError):
+                continue
+
+    logging.debug(f"Detalhes ópticos da ONT parseados: {details}")
+    return details
+

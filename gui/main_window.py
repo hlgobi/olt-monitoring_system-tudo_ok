@@ -11,7 +11,7 @@ import time
 from olt.processing import send_command_with_pagination
 from olt.parsing import (
     extract_service_mac, parse_ont_info_details, extract_ont_info, 
-    parse_ont_traffic, parse_ont_statistics, parse_ont_version_details
+    parse_ont_traffic, parse_ont_statistics, parse_ont_version_details, parse_ont_optical_info
 )
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QTableWidget,
@@ -8034,6 +8034,21 @@ class OLTDatabaseGUI(QMainWindow):
         stats_form_layout.addRow("Pacotes Descartados (Download):", self.details_down_discard_value)
         tabs.addTab(stats_tab, "Contadores")
         
+        # --- INÍCIO DA ADIÇÃO ---
+        # Aba 5: Detalhes Ópticos (NOVO)
+        optical_tab = QWidget()
+        optical_layout = QVBoxLayout(optical_tab)
+        
+        self.details_optical_table = QTableWidget()
+        self.details_optical_table.setColumnCount(4)
+        self.details_optical_table.setHorizontalHeaderLabels([
+            "Parâmetro", "Valor Atual", "Faixa Aceitável", "Status"
+        ])
+        self.details_optical_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        optical_layout.addWidget(self.details_optical_table)
+        tabs.addTab(optical_tab, "Detalhes Ópticos")
+        # --- FIM DA ADIÇÃO ---
+
         technical_layout.addWidget(tabs)
         grid_layout.addWidget(technical_details_group, 1, 1, 2, 1)
 
@@ -8368,6 +8383,52 @@ class OLTDatabaseGUI(QMainWindow):
 
                 last_down_time_obj = parse_db_timestamp(data_dict.get('last_down_time'))
                 self.details_last_down_time_value.setText(last_down_time_obj.strftime('%d/%m/%Y %H:%M:%S') if last_down_time_obj else "N/A")
+                        
+                # --- INÍCIO DA ADIÇÃO PARA A ABA ÓPTICA ---
+                logging.info("Preenchendo a aba de detalhes ópticos...")
+                optical_table = self.details_optical_table
+                optical_table.setSortingEnabled(False)
+                optical_table.setRowCount(0)
+
+                # Mapeamento do nome na OLT para a coluna no banco e nome simplificado
+                optical_display_map = [
+                    {'olt_name': "Rx optical power(dBm)", 'simple_name': "Sinal recebido (ONU Rx)", 'db_col': 'rx_power', 'threshold_col': 'optical_rx_power_alarm', 'unit': 'dBm'},
+                    {'olt_name': "Tx optical power(dBm)", 'simple_name': "Sinal transmitido (ONU Tx)", 'db_col': 'tx_power', 'threshold_col': 'optical_tx_power_alarm', 'unit': 'dBm'},
+                    {'olt_name': "Laser bias current(mA)", 'simple_name': "Corrente do laser", 'db_col': 'ont_tx_bias_current_ma', 'threshold_col': 'optical_bias_current_alarm', 'unit': 'mA'},
+                    {'olt_name': "Temperature(C)", 'simple_name': "Temperatura", 'db_col': 'temperature', 'threshold_col': 'optical_temperature_alarm', 'unit': '°C'},
+                    {'olt_name': "Voltage(V)", 'simple_name': "Tensão de alimentação", 'db_col': 'ont_voltage_v', 'threshold_col': 'optical_voltage_alarm', 'unit': 'V'},
+                    {'olt_name': "OLT Rx ONT optical power(dBm)", 'simple_name': "Sinal visto pela OLT", 'db_col': 'optical_olt_rx_ont_power_dbm', 'threshold_col': None, 'unit': 'dBm'},
+                    {'olt_name': "Module type", 'simple_name': "Tipo de fibra", 'db_col': 'optical_module_type', 'threshold_col': None, 'unit': ''},
+                    {'olt_name': "Module sub-type", 'simple_name': "Classe do módulo", 'db_col': 'optical_module_subtype', 'threshold_col': None, 'unit': ''},
+                    {'olt_name': "Vendor name", 'simple_name': "Fabricante", 'db_col': 'optical_vendor_name', 'threshold_col': None, 'unit': ''},
+                    {'olt_name': "Vendor PN", 'simple_name': "Modelo", 'db_col': 'optical_vendor_pn', 'threshold_col': None, 'unit': ''},
+                    {'olt_name': "Vendor SN", 'simple_name': "Número de série", 'db_col': 'optical_vendor_sn', 'threshold_col': None, 'unit': ''},
+                    {'olt_name': "Date Code", 'simple_name': "Data de fabricação", 'db_col': 'optical_date_code', 'threshold_col': None, 'unit': ''},
+                ]
+                
+                for item_map in optical_display_map:
+                    row_pos = optical_table.rowCount()
+                    optical_table.insertRow(row_pos)
+                    
+                    # Coluna 0: Parâmetro (Nome Simplificado)
+                    optical_table.setItem(row_pos, 0, QTableWidgetItem(item_map['simple_name']))
+                    
+                    # Coluna 1: Valor Atual
+                    value = data_dict.get(item_map['db_col'])
+                    value_str = f"{value} {item_map['unit']}" if value is not None else "N/A"
+                    optical_table.setItem(row_pos, 1, QTableWidgetItem(value_str))
+                    
+                    # Coluna 2: Faixa Aceitável
+                    threshold_str = data_dict.get(item_map['threshold_col']) if item_map['threshold_col'] else "N/A"
+                    optical_table.setItem(row_pos, 2, QTableWidgetItem(threshold_str))
+                    
+                    # Coluna 3: Status (com cor)
+                    status_item = self._get_optical_status_item(value, threshold_str)
+                    optical_table.setItem(row_pos, 3, status_item)
+
+                optical_table.resizeColumnsToContents()
+                optical_table.setSortingEnabled(True)
+                # --- FIM DA ADIÇÃO ---
                 
                 logging.info("Carregamento de detalhes para a nova interface concluído com sucesso.")
 
@@ -8945,6 +9006,22 @@ class OLTDatabaseGUI(QMainWindow):
             logging.info(f"Dados de versão parseados: {version_data}")
             # --- FIM DA ADIÇÃO ---
 
+            # --- INÍCIO DA ADIÇÃO ---
+            # Comando 7: display ont optical-info (NOVO)
+            logging.info("Executando comando 7: display ont optical-info...")
+            optical_info_cmd = f"display ont optical-info {port} {ont_id}"
+            logging.info(f"Comando OPTICAL-INFO: {optical_info_cmd}")
+            
+            # --- LINHA CORRIGIDA ---
+            # Removemos o argumento 'shell' da chamada para corresponder à definição local da função
+            response_optical = send_command_with_pagination(optical_info_cmd, expected_interface_prompt, timeout=45)
+            # --- FIM DA CORREÇÃO ---
+            
+            logging.info(f"Resposta OPTICAL-INFO: {response_optical[:500]}..." if len(response_optical) > 500 else f"Resposta OPTICAL-INFO: {response_optical}")
+            optical_data = parse_ont_optical_info(response_optical)
+            logging.info(f"Dados ópticos parseados: {optical_data}")
+            # --- FIM DA ADIÇÃO ---
+
             # Sair do modo config
             logging.info("Saindo do modo config...")
             shell.send("quit\n")
@@ -8983,11 +9060,13 @@ class OLTDatabaseGUI(QMainWindow):
                 'service_profile_name': ont_details.get('service_profile_name'),
             }
             
-            # --- INÍCIO DA ADIÇÃO ---
-            # Adiciona os novos dados de versão ao dicionário principal
+            # --- MODIFICAÇÃO: Adicionar os novos dados ao dicionário principal ---
+            # Adiciona os novos dados de versão e ópticos ao dicionário principal
             if version_data:
                 ont_data.update(version_data)
-            # --- FIM DA ADIÇÃO ---
+            if optical_data:
+                ont_data.update(optical_data)
+            # --- FIM DA MODIFICAÇÃO ---
 
             logging.info("Salvando dados gerais da ONT...")
             # Salvar dados gerais
@@ -9040,6 +9119,35 @@ class OLTDatabaseGUI(QMainWindow):
             logging.info("Reabilitando o botão de atualização...")
             QTimer.singleShot(0, lambda: self.update_ont_details_btn.setEnabled(True))
             QTimer.singleShot(0, lambda: self.update_ont_details_btn.setText("Atualizar Dados"))
+
+    # Adicione este método auxiliar para colorir as células da nova tabela
+    def _get_optical_status_item(self, value, threshold_str):
+        """Cria um QTableWidgetItem com cor baseada no valor e no limiar."""
+        status_text = "N/A"
+        color = QColor("white")
+        
+        if value is None or threshold_str is None or threshold_str == '[-,-]':
+            return QTableWidgetItem("N/A")
+
+        try:
+            # Tenta extrair os limites do formato [min,max]
+            limits = re.findall(r'([-+]?\d*\.?\d+)', threshold_str)
+            if len(limits) == 2:
+                min_val, max_val = float(limits[0]), float(limits[1])
+                
+                if min_val <= value <= max_val:
+                    status_text = "✅ OK"
+                    color = QColor("#C8E6C9") # Verde claro
+                else:
+                    status_text = "🚨 Fora da Faixa"
+                    color = QColor("#FFCDD2") # Vermelho claro
+            
+            item = QTableWidgetItem(status_text)
+            item.setBackground(color)
+            return item
+        except (ValueError, TypeError, IndexError) as e:
+            logging.warning(f"Erro ao avaliar limiar óptico: valor={value}, limiar='{threshold_str}', erro={e}")
+            return QTableWidgetItem("Erro")
 
     def show_ont_details_error(self, error_msg):
         """Exibe uma mensagem de erro na aba de detalhes da ONT."""

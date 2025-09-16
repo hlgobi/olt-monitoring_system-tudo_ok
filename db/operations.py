@@ -64,7 +64,10 @@ def to_db_timestamp(ts_str):
                 logging.error(f"Não foi possível converter o timestamp: {ts_str}")
                 return None
 
-# Em operations.py, substitua a função save_ont_data
+# db/operations.py
+
+# Substitua a função save_ont_data inteira por esta versão atualizada
+
 def save_ont_data(olt_ip, ont_info):
     """
     Salva ou atualiza os dados de uma ONT no banco de dados, incluindo detalhes de status
@@ -74,7 +77,6 @@ def save_ont_data(olt_ip, ont_info):
     try:
         olt_identifier = olt_ip.split('.')[-1]
         
-        # Parseia a descrição
         description = ont_info.get('description', 'N/A')
         parsed_desc = parse_descricao_avancada(description)
         primaria = parsed_desc.get('primaria', 'N/A')
@@ -83,16 +85,13 @@ def save_ont_data(olt_ip, ont_info):
         
         conn = psycopg2.connect(**DB_CONFIG)
         
-        # Definir o fuso horário da sessão para America/Sao_Paulo
         with conn.cursor() as cursor:
             cursor.execute("SET TIME ZONE 'America/Sao_Paulo';")
-            # Verifica se o fuso foi definido corretamente
             cursor.execute("SHOW timezone;")
             tz = cursor.fetchone()[0]
             logging.info(f"Fuso horário da sessão PostgreSQL: {tz}")
         
         with conn.cursor() as cursor:
-            # Verifica o registro anterior
             cursor.execute("""
                 SELECT fsp, ont_id, mac_address, client_name
                 FROM public.ont_data
@@ -102,7 +101,6 @@ def save_ont_data(olt_ip, ont_info):
             """, (ont_info['sn'],))
             previous_record = cursor.fetchone()
             
-            # Variáveis para controle de mudanças
             fsp_changed = False
             ont_id_changed = False
             mac_changed = False
@@ -117,10 +115,8 @@ def save_ont_data(olt_ip, ont_info):
                 ont_id_changed = previous_ont_id != int(ont_info['ont_id'])
                 mac_changed = previous_mac and previous_mac != ont_info['mac'] and ont_info['mac'] != 'N/A'
             
-            # Obtém a hora atual no fuso de Brasília
             current_time = get_current_brasilia_time()
             
-            # Comando SQL - usando CURRENT_TIMESTAMP com fuso explícito
             sql = """
                 INSERT INTO public.ont_data (
                     olt_ip, olt_identifier, fsp, ont_id, mac_address, client_name,
@@ -137,66 +133,51 @@ def save_ont_data(olt_ip, ont_info):
                     main_software_version, standby_software_version,
                     ont_product_description, support_xml_version,
                     ont_online_duration,
+                    optical_module_type, optical_module_subtype, optical_encapsulation_type,
+                    optical_vendor_name, optical_vendor_pn, optical_vendor_sn,
+                    optical_date_code, optical_olt_rx_ont_power_dbm, ont_voltage_v,
+                    ont_tx_bias_current_ma, optical_rx_power_alarm, optical_tx_power_alarm,
+                    optical_bias_current_alarm, optical_temperature_alarm, optical_voltage_alarm,
                     collection_time
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     CAST(%s AS TIMESTAMP WITH TIME ZONE))
             """
             
-            # Parâmetros
             params = (
-                olt_ip,                                    # 1
-                olt_identifier,                            # 2
-                ont_info['fsp'],                           # 3
-                int(ont_info['ont_id']),                   # 4
-                ont_info['mac'] if ont_info['mac'] != 'N/A' else None,  # 5
-                existing_client_name,                      # 6
-                previous_mac if mac_changed else None,      # 7
-                ont_info['sn'],                            # 8
-                float(ont_info['rx']) if ont_info['rx'] not in ['N/A', '-'] else None,  # 9
-                float(ont_info['tx']) if ont_info['tx'] not in ['N/A', '-'] else None,  # 10
-                ont_info['description'],                   # 11
-                primaria,                                  # 12
-                secundaria,                                # 13
-                porta_secundaria,                           # 14
-                fsp_changed,                               # 15
-                ont_id_changed,                            # 16
-                previous_fsp if fsp_changed else None,     # 17
-                previous_ont_id if ont_id_changed else None,  # 18
-                ont_info['status'],                        # 19
-                ont_info.get('last_down_cause'),           # 20
-                to_db_timestamp(ont_info.get('last_up_time')),  # 21
-                to_db_timestamp(ont_info.get('last_down_time')),  # 22
-                to_db_timestamp(ont_info.get('last_dying_gasp_time')),  # 23
-                ont_info.get('line_profile_name'),         # 24
-                ont_info.get('services'),                  # 25
-                ont_info.get('ont_distance'),              # 26
-                ont_info.get('memory_occupation'),         # 27
-                ont_info.get('cpu_occupation'),            # 28
-                ont_info.get('temperature'),               # 29
-                ont_info.get('ont_ip_address'),            # 30
-                ont_info.get('line_profile_id'),           # 31
-                ont_info.get('service_profile_id'),        # 32
-                ont_info.get('service_profile_name'),      # 33
-                ont_info.get('connection_code'),           # 34
-                ont_info.get('vendor_id'),                 # 35
-                ont_info.get('ont_version'),               # 36
-                ont_info.get('product_id'),                # 37
-                ont_info.get('equipment_id'),              # 38
-                ont_info.get('main_software_version'),     # 39
-                ont_info.get('standby_software_version'),  # 40
-                ont_info.get('ont_product_description'),   # 41
-                ont_info.get('support_xml_version'),       # 42
-                ont_info.get('ont_online_duration'),       # 43
-                current_time.isoformat()                   # 44 - como string ISO com fuso
+                olt_ip, olt_identifier, ont_info['fsp'], int(ont_info['ont_id']), 
+                ont_info['mac'] if ont_info['mac'] != 'N/A' else None, existing_client_name,
+                previous_mac if mac_changed else None, ont_info['sn'], 
+                float(ont_info['rx']) if ont_info['rx'] not in ['N/A', '-'] else None, 
+                float(ont_info['tx']) if ont_info['tx'] not in ['N/A', '-'] else None,
+                ont_info['description'], primaria, secundaria, porta_secundaria,
+                fsp_changed, ont_id_changed, previous_fsp if fsp_changed else None, 
+                previous_ont_id if ont_id_changed else None, ont_info['status'],
+                ont_info.get('last_down_cause'), to_db_timestamp(ont_info.get('last_up_time')),
+                to_db_timestamp(ont_info.get('last_down_time')), to_db_timestamp(ont_info.get('last_dying_gasp_time')),
+                ont_info.get('line_profile_name'), ont_info.get('services'),
+                ont_info.get('ont_distance'), ont_info.get('memory_occupation'), 
+                ont_info.get('cpu_occupation'), ont_info.get('temperature'),
+                ont_info.get('ont_ip_address'), ont_info.get('line_profile_id'),
+                ont_info.get('service_profile_id'), ont_info.get('service_profile_name'),
+                ont_info.get('connection_code'), ont_info.get('vendor_id'),
+                ont_info.get('ont_version'), ont_info.get('product_id'),
+                ont_info.get('equipment_id'), ont_info.get('main_software_version'),
+                ont_info.get('standby_software_version'), ont_info.get('ont_product_description'),
+                ont_info.get('support_xml_version'), ont_info.get('ont_online_duration'),
+                ont_info.get('optical_module_type'), ont_info.get('optical_module_subtype'),
+                ont_info.get('optical_encapsulation_type'), ont_info.get('optical_vendor_name'),
+                ont_info.get('optical_vendor_pn'), ont_info.get('optical_vendor_sn'),
+                ont_info.get('optical_date_code'), ont_info.get('optical_olt_rx_ont_power_dbm'),
+                ont_info.get('ont_voltage_v'), ont_info.get('ont_tx_bias_current_ma'),
+                ont_info.get('optical_rx_power_alarm'), ont_info.get('optical_tx_power_alarm'),
+                ont_info.get('optical_bias_current_alarm'), ont_info.get('optical_temperature_alarm'),
+                ont_info.get('optical_voltage_alarm'),
+                current_time.isoformat()
             )
-            
-            # Log para depuração
-            logging.debug(f"Timestamp sendo inserido: {current_time.isoformat()}")
             
             cursor.execute(sql, params)
             conn.commit()
             
-            # Verifica o timestamp que foi realmente inserido
             cursor.execute("""
                 SELECT collection_time 
                 FROM public.ont_data 
@@ -213,11 +194,11 @@ def save_ont_data(olt_ip, ont_info):
         logging.error(f"Erro ao salvar ONT {ont_info.get('sn', 'N/A')}: {str(e)}", exc_info=True)
         if conn:
             conn.rollback()
-        raise  # <-- ADICIONADO: Força o erro a ser reportado para a GUI
+        raise
     finally:
         if conn:
             conn.close()
-            
+
 def save_pon_status(olt_ip, fsp, online_count, total_count):
     """Salva o status da PON no banco de dados."""
     conn = None
