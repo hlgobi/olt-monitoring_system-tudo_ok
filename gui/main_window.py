@@ -8384,51 +8384,52 @@ class OLTDatabaseGUI(QMainWindow):
                 last_down_time_obj = parse_db_timestamp(data_dict.get('last_down_time'))
                 self.details_last_down_time_value.setText(last_down_time_obj.strftime('%d/%m/%Y %H:%M:%S') if last_down_time_obj else "N/A")
                         
-                # --- INÍCIO DA ADIÇÃO PARA A ABA ÓPTICA ---
-                logging.info("Preenchendo a aba de detalhes ópticos...")
+                # --- INÍCIO DA MODIFICAÇÃO PARA A ABA ÓPTICA ---
+                logging.info("Preenchendo a aba de detalhes ópticos com cores...")
                 optical_table = self.details_optical_table
                 optical_table.setSortingEnabled(False)
                 optical_table.setRowCount(0)
 
-                # Mapeamento do nome na OLT para a coluna no banco e nome simplificado
                 optical_display_map = [
-                    {'olt_name': "Rx optical power(dBm)", 'simple_name': "Sinal recebido (ONU Rx)", 'db_col': 'rx_power', 'threshold_col': 'optical_rx_power_alarm', 'unit': 'dBm'},
-                    {'olt_name': "Tx optical power(dBm)", 'simple_name': "Sinal transmitido (ONU Tx)", 'db_col': 'tx_power', 'threshold_col': 'optical_tx_power_alarm', 'unit': 'dBm'},
-                    {'olt_name': "Laser bias current(mA)", 'simple_name': "Corrente do laser", 'db_col': 'ont_tx_bias_current_ma', 'threshold_col': 'optical_bias_current_alarm', 'unit': 'mA'},
-                    {'olt_name': "Temperature(C)", 'simple_name': "Temperatura", 'db_col': 'temperature', 'threshold_col': 'optical_temperature_alarm', 'unit': '°C'},
-                    {'olt_name': "Voltage(V)", 'simple_name': "Tensão de alimentação", 'db_col': 'ont_voltage_v', 'threshold_col': 'optical_voltage_alarm', 'unit': 'V'},
-                    {'olt_name': "OLT Rx ONT optical power(dBm)", 'simple_name': "Sinal visto pela OLT", 'db_col': 'optical_olt_rx_ont_power_dbm', 'threshold_col': None, 'unit': 'dBm'},
-                    {'olt_name': "Module type", 'simple_name': "Tipo de fibra", 'db_col': 'optical_module_type', 'threshold_col': None, 'unit': ''},
-                    {'olt_name': "Module sub-type", 'simple_name': "Classe do módulo", 'db_col': 'optical_module_subtype', 'threshold_col': None, 'unit': ''},
-                    {'olt_name': "Vendor name", 'simple_name': "Fabricante", 'db_col': 'optical_vendor_name', 'threshold_col': None, 'unit': ''},
-                    {'olt_name': "Vendor PN", 'simple_name': "Modelo", 'db_col': 'optical_vendor_pn', 'threshold_col': None, 'unit': ''},
-                    {'olt_name': "Vendor SN", 'simple_name': "Número de série", 'db_col': 'optical_vendor_sn', 'threshold_col': None, 'unit': ''},
-                    {'olt_name': "Date Code", 'simple_name': "Data de fabricação", 'db_col': 'optical_date_code', 'threshold_col': None, 'unit': ''},
-                ]
-                
+                    {'olt_name': "Rx optical power(dBm)", 'simple_name': "Sinal Recebido (ONU Rx)", 'db_col': 'rx_power', 'threshold_col': 'optical_rx_power_alarm', 'unit': 'dBm', 'param_type': 'rx_power'},
+                    {'olt_name': "Tx optical power(dBm)", 'simple_name': "Sinal Transmitido (ONU Tx)", 'db_col': 'tx_power', 'threshold_col': 'optical_tx_power_alarm', 'unit': 'dBm', 'param_type': 'tx_power'},
+                    {'olt_name': "Laser bias current(mA)", 'simple_name': "Corrente do Laser", 'db_col': 'ont_tx_bias_current_ma', 'threshold_col': 'optical_bias_current_alarm', 'unit': 'mA', 'param_type': 'bias_current'},
+                    {'olt_name': "Temperature(C)", 'simple_name': "Temperatura", 'db_col': 'temperature', 'threshold_col': 'optical_temperature_alarm', 'unit': '°C', 'param_type': 'temperature'},
+                    {'olt_name': "Voltage(V)", 'simple_name': "Tensão de Alimentação", 'db_col': 'ont_voltage_v', 'threshold_col': 'optical_voltage_alarm', 'unit': 'V', 'param_type': 'voltage'},
+                    
+                    # --- LINHA MODIFICADA ---
+                    {'olt_name': "OLT Rx ONT optical power(dBm)", 'simple_name': "Sinal Visto pela OLT", 'db_col': 'optical_olt_rx_ont_power_dbm', 'threshold_col': None, 'unit': 'dBm', 'param_type': 'olt_rx_power'},
+                    # --- FIM DA MODIFICAÇÃO ---
+
+                    {'olt_name': "Module type", 'simple_name': "Tipo de Fibra", 'db_col': 'optical_module_type', 'threshold_col': None, 'unit': '', 'param_type': 'generic'},
+                    {'olt_name': "Module sub-type", 'simple_name': "Classe do Módulo", 'db_col': 'optical_module_subtype', 'threshold_col': None, 'unit': '', 'param_type': 'generic'},
+                    {'olt_name': "Vendor name", 'simple_name': "Fabricante", 'db_col': 'optical_vendor_name', 'threshold_col': None, 'unit': '', 'param_type': 'generic'},
+                    {'olt_name': "Vendor PN", 'simple_name': "Modelo", 'db_col': 'optical_vendor_pn', 'threshold_col': None, 'unit': '', 'param_type': 'generic'},
+                    {'olt_name': "Vendor SN", 'simple_name': "Número de Série (Módulo)", 'db_col': 'optical_vendor_sn', 'threshold_col': None, 'unit': '', 'param_type': 'generic'},
+                    {'olt_name': "Date Code", 'simple_name': "Data de Fabricação", 'db_col': 'optical_date_code', 'threshold_col': None, 'unit': '', 'param_type': 'generic'},
+                ]        
+                        
                 for item_map in optical_display_map:
                     row_pos = optical_table.rowCount()
                     optical_table.insertRow(row_pos)
                     
-                    # Coluna 0: Parâmetro (Nome Simplificado)
+                    # Coluna 0: Parâmetro
                     optical_table.setItem(row_pos, 0, QTableWidgetItem(item_map['simple_name']))
                     
-                    # Coluna 1: Valor Atual
+                    # Coluna 1: Valor Atual (com cor)
                     value = data_dict.get(item_map['db_col'])
-                    value_str = f"{value} {item_map['unit']}" if value is not None else "N/A"
-                    optical_table.setItem(row_pos, 1, QTableWidgetItem(value_str))
+                    value_item = self._create_colored_optical_item(item_map['param_type'], value, item_map['unit'])
+                    optical_table.setItem(row_pos, 1, value_item)
                     
                     # Coluna 2: Faixa Aceitável
                     threshold_str = data_dict.get(item_map['threshold_col']) if item_map['threshold_col'] else "N/A"
-                    optical_table.setItem(row_pos, 2, QTableWidgetItem(threshold_str))
-                    
-                    # Coluna 3: Status (com cor)
-                    status_item = self._get_optical_status_item(value, threshold_str)
-                    optical_table.setItem(row_pos, 3, status_item)
+                    threshold_item = QTableWidgetItem(threshold_str)
+                    threshold_item.setTextAlignment(Qt.AlignCenter)
+                    optical_table.setItem(row_pos, 2, threshold_item)
 
                 optical_table.resizeColumnsToContents()
                 optical_table.setSortingEnabled(True)
-                # --- FIM DA ADIÇÃO ---
+                # --- FIM DA MODIFICAÇÃO ---
                 
                 logging.info("Carregamento de detalhes para a nova interface concluído com sucesso.")
 
@@ -8437,6 +8438,65 @@ class OLTDatabaseGUI(QMainWindow):
                 QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível carregar os dados da ONT: {e}")
                 if 'conn' in locals() and conn and not conn.closed:
                     conn.close()
+
+# Em gui/main_window.py, dentro da classe OLTDatabaseGUI, substitua esta função
+
+    def _create_colored_optical_item(self, param_type, value, unit):
+        """
+        Cria um QTableWidgetItem com cor de fundo baseada no valor do parâmetro
+        e nos novos limiares definidos pelo usuário.
+        """
+        item = QTableWidgetItem("N/A")
+        item.setTextAlignment(Qt.AlignCenter)
+        
+        if value is None:
+            return item
+
+        display_text = f"{value} {unit}".strip()
+        item.setText(display_text)
+
+        try:
+            val = float(value)
+            color = None
+            
+            if param_type == 'rx_power':
+                if val < -30 or val > -7: color = QColor("#FFCDD2")  # Ruim
+                elif (val >= -30 and val < -27) or (val >= -8 and val <= -7): color = QColor("#FFF9C4") # Observar
+                elif val >= -27 and val < -8: color = QColor("#C8E6C9")  # OK
+            
+            elif param_type == 'tx_power':
+                if val < 0 or val > 7: color = QColor("#FFCDD2") # Ruim
+                elif (val >= 0 and val < 1) or (val > 5 and val <= 7): color = QColor("#FFF9C4") # Observar
+                elif val >= 1 and val <= 5: color = QColor("#C8E6C9") # OK
+            
+            elif param_type == 'temperature':
+                if val < -10 or val > 85: color = QColor("#FFCDD2") # Ruim
+                elif (val >= -10 and val < 0) or (val > 65 and val <= 85): color = QColor("#FFF9C4") # Observar
+                elif val >= 0 and val <= 65: color = QColor("#C8E6C9") # OK
+                
+            elif param_type == 'voltage':
+                if val < 3.0 or val > 3.6: color = QColor("#FFCDD2") # Ruim
+                elif (val >= 3.0 and val < 3.1) or (val > 3.5 and val <= 3.6): color = QColor("#FFF9C4") # Observar
+                elif val >= 3.1 and val <= 3.5: color = QColor("#C8E6C9") # OK
+                
+            elif param_type == 'bias_current':
+                if val < 2 or val > 100: color = QColor("#FFCDD2") # Ruim
+                elif (val >= 2 and val < 10) or (val > 80 and val <= 100): color = QColor("#FFF9C4") # Observar
+                elif val >= 10 and val <= 80: color = QColor("#C8E6C9") # OK
+            
+            elif param_type == 'olt_rx_power':
+                if val < -30 or val > -5: color = QColor("#FFCDD2") # Ruim
+                elif (val >= -30 and val < -27) or (val > -8 and val <= -5): color = QColor("#FFF9C4") # Observar
+                elif val >= -27 and val <= -8: color = QColor("#C8E6C9") # OK
+
+            if color:
+                item.setBackground(color)
+        
+        except (ValueError, TypeError):
+            # Se o valor não for numérico, não aplica cor
+            pass
+
+        return item
 
     def apply_styles(self):
             """Aplica um tema visual completo à aplicação, inspirado no logo."""
