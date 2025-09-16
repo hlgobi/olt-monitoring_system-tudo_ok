@@ -8114,269 +8114,268 @@ class OLTDatabaseGUI(QMainWindow):
         # Carregar os dados existentes da ONT
         self.load_ont_details_from_db()
 
-    # Em gui/main_window.py, substitua esta função
-
     def load_ont_details_from_db(self):
-        """Carrega os dados da ONT selecionada a partir do banco e preenche os novos painéis amigáveis."""
-        if not self.selected_ont_for_details:
-            logging.warning("Nenhuma ONT selecionada para carregar detalhes.")
-            return
-            
-        olt_ip = self.selected_ont_for_details['olt_ip']
-        sn = self.selected_ont_for_details['sn']
-        
-        logging.info(f"Carregando detalhes da ONT: OLT={olt_ip}, SN={sn}")
-
-        data_map = {
-            'collection_time': self.details_geral_last_check_value, 'client_name': self.details_client_name_value,
-            'mac_address': self.details_mac_value, 'serial_number': self.details_serial_value,
-            'tx_power': self.details_tx_power_value, 'primaria': self.details_primaria_value,
-            'secundaria': self.details_secundaria_value, 'porta_secundaria': self.details_porta_secundaria_value,
-            'last_dying_gasp_time': self.details_dying_gasp_value,
-            'ont_distance': self.details_distance_value, 'memory_occupation': self.details_memory_value,
-            'cpu_occupation': self.details_cpu_value, 'temperature': self.details_temperature_value,
-            'ont_ip_address': self.details_ip_value, 'connection_code': self.details_connection_code_value,
-            'vendor_id': self.details_fabricante_value, 'ont_version': self.details_versao_hw_value,
-            'product_id': self.details_produto_id_value, 'equipment_id': self.details_equipamento_id_value,
-            'main_software_version': self.details_firmware_ativo_value, 'standby_software_version': self.details_firmware_backup_value,
-            'ont_product_description': self.details_descricao_produto_value, 'support_xml_version': self.details_perfil_gestao_value,
-            'up_traffic_kbps': self.details_upload_value, 'down_traffic_kbps': self.details_download_value,
-            'upstream_frames': self.details_up_frames_value, 'upstream_bytes': self.details_up_bytes_value,
-            'upstream_discarded_frames': self.details_up_discard_value, 'downstream_frames': self.details_down_frames_value,
-            'downstream_bytes': self.details_down_bytes_value, 'downstream_discarded_frames': self.details_down_discard_value,
-            'traffic_collection_time': self.details_traffic_last_check_value,
-            'stats_collection_time': self.details_stats_last_check_value
-        }
-        
-        try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
-            
-            query = """
-                WITH latest_general AS (
-                    SELECT * FROM ont_data WHERE serial_number = %s ORDER BY collection_time DESC LIMIT 1
-                ),
-                latest_traffic AS (
-                    SELECT collection_time as traffic_collection_time, up_traffic_kbps, down_traffic_kbps 
-                    FROM ont_traffic_data 
-                    WHERE olt_ip = (SELECT olt_ip FROM latest_general) 
-                    AND fsp = (SELECT fsp FROM latest_general) 
-                    AND ont_id = (SELECT ont_id FROM latest_general) 
-                    ORDER BY collection_time DESC LIMIT 1
-                ),
-                latest_stats AS (
-                    SELECT collection_time as stats_collection_time, upstream_frames, upstream_bytes, upstream_discarded_frames,
-                        downstream_frames, downstream_bytes, downstream_discarded_frames
-                    FROM ont_statistics_packets
-                    WHERE olt_identifier = (SELECT olt_identifier FROM latest_general) 
-                    AND fsp = (SELECT fsp FROM latest_general) 
-                    AND ont_id = (SELECT ont_id FROM latest_general)
-                    ORDER BY collection_time DESC LIMIT 1
-                )
-                SELECT * FROM latest_general
-                LEFT JOIN latest_traffic ON true
-                LEFT JOIN latest_stats ON true;
-            """
-            cursor.execute(query, (sn,))
-            
-            full_data_row = cursor.fetchone()
-            
-            if not full_data_row:
-                all_labels = list(data_map.values()) + [
-                    self.details_rx_power_value, self.details_last_down_time_value,
-                    self.details_last_down_cause_value, self.details_stability_value,
-                    self.details_daily_drops_value, self.details_flapping_alert_value,
-                    self.details_last_up_time_value, self.details_uptime_value, self.details_status_value,
-                    self.details_status_last_check_value, self.details_outras_last_check_value
-                ]
-                for label_widget in all_labels:
-                    if isinstance(label_widget, QLabel): label_widget.setText("N/A"); label_widget.setStyleSheet("")
-                    elif isinstance(label_widget, QTextEdit): label_widget.setText("N/A")
-                logging.warning(f"Nenhum dado encontrado no banco para a ONT SN {sn}")
-                conn.close()
+            """Carrega os dados da ONT selecionada a partir do banco e preenche os novos painéis amigáveis."""
+            if not self.selected_ont_for_details:
+                logging.warning("Nenhuma ONT selecionada para carregar detalhes.")
                 return
-
-            column_names = [desc[0] for desc in cursor.description]
-            data_dict = dict(zip(column_names, full_data_row))
-
-            def parse_db_timestamp(ts_value):
-                if isinstance(ts_value, datetime): return ts_value
-                if isinstance(ts_value, str):
-                    for fmt in ('%Y-%m-%d %H:%M:%S', '%d/%m/%Y %H:%M:%S'):
-                        try: return datetime.strptime(ts_value.split('.')[0], fmt)
-                        except (ValueError, TypeError): continue
-                    try: return datetime.fromisoformat(ts_value.replace("Z", "+00:00").split('+')[0].strip())
-                    except (ValueError, TypeError): return None
-                return None
-
-            status = data_dict.get('status', 'unknown').lower()
-            last_up = parse_db_timestamp(data_dict.get('last_up_time'))
-            collection_time = parse_db_timestamp(data_dict.get('collection_time'))
-            
-            cursor.execute("""
-                SELECT last_down_cause, COUNT(*) FROM ont_data
-                WHERE serial_number = %s AND last_down_cause IS NOT NULL AND last_down_cause <> 'N/A'
-                AND collection_time >= NOW() - INTERVAL '7 days' GROUP BY last_down_cause ORDER BY COUNT(*) DESC;
-            """, (sn,))
-            weekly_drops_by_cause = cursor.fetchall()
-
-            cursor.execute("""
-                SELECT last_down_cause, COUNT(*) FROM ont_data
-                WHERE serial_number = %s AND last_down_cause IS NOT NULL AND last_down_cause <> 'N/A'
-                AND collection_time >= date_trunc('day', NOW()) GROUP BY last_down_cause ORDER BY COUNT(*) DESC;
-            """, (sn,))
-            daily_drops_by_cause = cursor.fetchall()
-
-            cursor.execute("""
-                SELECT COUNT(*) FROM ont_data WHERE serial_number = %s AND last_down_cause IS NOT NULL 
-                AND last_down_cause <> 'N/A' AND collection_time >= NOW() - INTERVAL '1 hour'
-            """, (sn,))
-            drop_count_last_hour = cursor.fetchone()[0]
-            
-            conn.close()
-
-            # 1. Preenche os campos de dados gerais
-            for key, label_widget in data_map.items():
-                value = data_dict.get(key)
-                display_text = str(value) if value is not None else "N/A"
-                if value is not None:
-                    if 'time' in key:
-                        dt_obj = parse_db_timestamp(value)
-                        if dt_obj: display_text = dt_obj.strftime('%d/%m/%Y %H:%M:%S')
-                    elif key.endswith('_bytes') or key.endswith('_frames'): display_text = f"{value:,}"
-                    elif key.endswith('_kbps'): display_text = f"{value/1000.0:.2f} Mbps ({value:.0f} kbps)" if value > 0 else "0 kbps"
-                    elif key.endswith('_power'): display_text = f"{value} dBm"
-                    elif key == 'ont_distance': display_text = f"{value} metros"
-                    elif key.endswith('_occupation'): display_text = f"{value}%"
-                    elif key == 'temperature': display_text = f"{value}°C"
                 
-                label_widget.setText(display_text)
-                label_widget.setStyleSheet("")
+            olt_ip = self.selected_ont_for_details['olt_ip']
+            sn = self.selected_ont_for_details['sn']
+            
+            logging.info(f"Carregando detalhes da ONT: OLT={olt_ip}, SN={sn}")
 
-            # 2. Preenche manualmente os timestamps que não estão no data_map
-            collection_time_obj = parse_db_timestamp(data_dict.get('collection_time'))
-            formatted_time = collection_time_obj.strftime('%d/%m/%Y %H:%M:%S') if collection_time_obj else "N/A"
-
-            self.details_outras_last_check_value.setText(formatted_time)
-            self.details_status_last_check_value.setText(formatted_time)
-
-            # 3. Status do Modem
-            if hasattr(self.details_status_value, 'animation') and self.details_status_value.animation:
-                self.details_status_value.animation.stop()
-                self.details_status_value.animation = None
-
-            if status == 'online':
-                self.details_status_value.setText("✅ Online")
-                self.details_status_value.setStyleSheet("color: white; background-color: #2E7D32; padding: 3px 8px; border-radius: 5px; font-weight: bold;")
-            elif status == 'offline':
-                self.details_status_value.setText("❌ OFFLINE")
-                self._start_blinking_animation(self.details_status_value)
-            else:
-                self.details_status_value.setText(status.upper())
-                self.details_status_value.setStyleSheet("color: black; background-color: #E0E0E0; padding: 3px 8px; border-radius: 5px; font-weight: bold;")
-
-            # 4. Qualidade do Sinal (Rx)
-            rx_value = data_dict.get('rx_power')
-            rx_display_text = str(rx_value) if rx_value is not None else "N/A"
-            self.details_rx_power_value.setText(rx_display_text); self.details_rx_power_value.setStyleSheet("color: gray;")
+            # Mapeamento completo de chaves do BD para widgets da GUI
+            data_map = {
+                'collection_time': self.details_geral_last_check_value, 'client_name': self.details_client_name_value,
+                'mac_address': self.details_mac_value, 'serial_number': self.details_serial_value,
+                'tx_power': self.details_tx_power_value, 'primaria': self.details_primaria_value,
+                'secundaria': self.details_secundaria_value, 'porta_secundaria': self.details_porta_secundaria_value,
+                'last_dying_gasp_time': self.details_dying_gasp_value,
+                'ont_distance': self.details_distance_value, 'memory_occupation': self.details_memory_value,
+                'cpu_occupation': self.details_cpu_value, 'temperature': self.details_temperature_value,
+                'ont_ip_address': self.details_ip_value, 'connection_code': self.details_connection_code_value,
+                'vendor_id': self.details_fabricante_value, 'ont_version': self.details_versao_hw_value,
+                'product_id': self.details_produto_id_value, 'equipment_id': self.details_equipamento_id_value,
+                'main_software_version': self.details_firmware_ativo_value, 'standby_software_version': self.details_firmware_backup_value,
+                'ont_product_description': self.details_descricao_produto_value, 'support_xml_version': self.details_perfil_gestao_value,
+                'up_traffic_kbps': self.details_upload_value, 'down_traffic_kbps': self.details_download_value,
+                'upstream_frames': self.details_up_frames_value, 'upstream_bytes': self.details_up_bytes_value,
+                'upstream_discarded_frames': self.details_up_discard_value, 'downstream_frames': self.details_down_frames_value,
+                'downstream_bytes': self.details_down_bytes_value, 'downstream_discarded_frames': self.details_down_discard_value,
+                'traffic_collection_time': self.details_traffic_last_check_value,
+                'stats_collection_time': self.details_stats_last_check_value
+            }
+            
             try:
-                rx_float = float(rx_value)
-                if -22.0 <= rx_float: status_text, style = "✅ OK", "color: white; background-color: #2E7D32; padding: 3px; border-radius: 4px; font-weight: bold;"
-                elif -25.0 <= rx_float < -22.0: status_text, style = "⚠️ RUIM", "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
-                else: status_text, style = "🚨 PÉSSIMO", "color: white; background-color: #C62828; padding: 3px; border-radius: 4px; font-weight: bold;"
-                self.details_rx_power_value.setText(f"{rx_display_text} dBm ({status_text})"); self.details_rx_power_value.setStyleSheet(style)
-            except (ValueError, TypeError): pass
+                conn = psycopg2.connect(**DB_CONFIG)
+                cursor = conn.cursor()
+                
+                # Query unificada que busca os dados de todas as tabelas relacionadas
+                query = """
+                    WITH latest_general AS (
+                        SELECT * FROM ont_data WHERE serial_number = %s ORDER BY collection_time DESC LIMIT 1
+                    ),
+                    latest_traffic AS (
+                        SELECT collection_time as traffic_collection_time, up_traffic_kbps, down_traffic_kbps 
+                        FROM ont_traffic_data 
+                        WHERE olt_ip = (SELECT olt_ip FROM latest_general) 
+                        AND fsp = (SELECT fsp FROM latest_general) 
+                        AND ont_id = (SELECT ont_id FROM latest_general) 
+                        ORDER BY collection_time DESC LIMIT 1
+                    ),
+                    latest_stats AS (
+                        SELECT collection_time as stats_collection_time, upstream_frames, upstream_bytes, upstream_discarded_frames,
+                            downstream_frames, downstream_bytes, downstream_discarded_frames
+                        FROM ont_statistics_packets
+                        WHERE olt_identifier = (SELECT olt_identifier FROM latest_general) 
+                        AND fsp = (SELECT fsp FROM latest_general) 
+                        AND ont_id = (SELECT ont_id FROM latest_general)
+                        ORDER BY collection_time DESC LIMIT 1
+                    )
+                    SELECT * FROM latest_general
+                    LEFT JOIN latest_traffic ON true
+                    LEFT JOIN latest_stats ON true;
+                """
+                cursor.execute(query, (sn,))
+                
+                full_data_row = cursor.fetchone()
+                
+                if not full_data_row:
+                    all_labels = list(data_map.values()) + [
+                        self.details_rx_power_value, self.details_last_down_time_value,
+                        self.details_last_down_cause_value, self.details_stability_value,
+                        self.details_daily_drops_value, self.details_flapping_alert_value,
+                        self.details_last_up_time_value, self.details_uptime_value, self.details_status_value,
+                        self.details_status_last_check_value, self.details_outras_last_check_value
+                    ]
+                    for label_widget in all_labels:
+                        if isinstance(label_widget, QLabel): label_widget.setText("N/A"); label_widget.setStyleSheet("")
+                        elif isinstance(label_widget, QTextEdit): label_widget.setText("N/A")
+                    logging.warning(f"Nenhum dado encontrado no banco para a ONT SN {sn}")
+                    conn.close()
+                    return
 
-            # 5. Uptime (com lógica de fallback)
-            uptime_text, uptime_style = "N/A", ""
-            if status == 'online':
-                ont_duration_str = data_dict.get('ont_online_duration')
-                if ont_duration_str and ont_duration_str != 'N/A' and ont_duration_str.strip() != '-':
-                    uptime_text = ont_duration_str
-                    uptime_style = "color: white; background-color: #1B5E20; padding: 3px; border-radius: 4px; font-weight: bold;"
-                else:
-                    uptime_duration = collection_time - last_up if last_up and collection_time else None
-                    if uptime_duration:
-                        uptime_text = self._format_timedelta(uptime_duration)
-                        if uptime_duration.total_seconds() < 3600: uptime_style = "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
-                        elif uptime_duration.days < 7: uptime_style = "color: white; background-color: #4CAF50; padding: 3px; border-radius: 4px; font-weight: bold;"
-                        else: uptime_style = "color: white; background-color: #1B5E20; padding: 3px; border-radius: 4px; font-weight: bold;"
-                    else:
-                        uptime_text, uptime_style = "Online (sem registro de início)", "color: #2E7D32; font-weight: bold;"
-            elif status == 'offline':
-                uptime_text, uptime_style = "OFFLINE", "color: white; background-color: #757575; padding: 3px; border-radius: 4px; font-weight: bold;"
-            self.details_uptime_value.setText(uptime_text)
-            self.details_uptime_value.setStyleSheet(uptime_style)
+                column_names = [desc[0] for desc in cursor.description]
+                data_dict = dict(zip(column_names, full_data_row))
 
-            # 6. Resumo de Quedas (7 dias)
-            if not weekly_drops_by_cause:
-                self.details_stability_value.setHtml("<span style='color: #1B5E20; font-weight: bold;'>✅ Nenhuma queda nos últimos 7 dias</span>")
-            else:
-                total_weekly_drops = sum(count for _, count in weekly_drops_by_cause)
-                weekly_html = f"<p style='margin:0; padding:0; font-weight:bold;'>Total de {total_weekly_drops} quedas:</p>"
-                for cause, count in weekly_drops_by_cause:
-                    raw_cause = cause.lower().strip()
-                    icon, text = "❔", cause
-                    if "losi" in raw_cause or "lobi" in raw_cause: icon, text = "🚨", f"<b>Sem Sinal de Fibra:</b> {count} {'vez' if count == 1 else 'vezes'}"
-                    elif "dying-gasp" in raw_cause: icon, text = "⚡️", f"<b>Sem Energia Elétrica:</b> {count} {'vez' if count == 1 else 'vezes'}"
-                    elif "reset by ont comma" in raw_cause: icon, text = "🛠️", f"<b>Reset pelo Técnico:</b> {count} {'vez' if count == 1 else 'vezes'}"
-                    elif "reset" in raw_cause: icon, text = "🔄", f"<b>Reset (Cliente/Técnico):</b> {count} {'vez' if count == 1 else 'vezes'}"
-                    else: text = f"<b>{cause}:</b> {count} {'vez' if count == 1 else 'vezes'}"
-                    weekly_html += f"<p style='margin:0; padding:0;'>{icon} {text}</p>"
-                self.details_stability_value.setHtml(weekly_html)
+                def parse_db_timestamp(ts_value):
+                    if isinstance(ts_value, datetime): return ts_value
+                    if isinstance(ts_value, str):
+                        for fmt in ('%Y-%m-%d %H:%M:%S', '%d/%m/%Y %H:%M:%S'):
+                            try: return datetime.strptime(ts_value.split('.')[0], fmt)
+                            except (ValueError, TypeError): continue
+                        try: return datetime.fromisoformat(ts_value.replace("Z", "+00:00").split('+')[0].strip())
+                        except (ValueError, TypeError): return None
+                    return None
 
-            # 7. Quedas Hoje
-            if not daily_drops_by_cause:
-                self.details_daily_drops_value.setHtml("<span style='color: #1B5E20; font-weight: bold;'>✅ Nenhuma queda hoje</span>")
-            else:
-                daily_html = ""
-                for cause, count in daily_drops_by_cause:
-                    raw_cause = cause.lower().strip()
-                    icon, text = "❔", cause
-                    if "losi" in raw_cause or "lobi" in raw_cause: icon, text = "🚨", f"<b>Sem Sinal de Fibra:</b> {count} {'vez' if count == 1 else 'vezes'}"
-                    elif "dying-gasp" in raw_cause: icon, text = "⚡️", f"<b>Sem Energia Elétrica:</b> {count} {'vez' if count == 1 else 'vezes'}"
-                    elif "reset by ont comma" in raw_cause: icon, text = "🛠️", f"<b>Reset pelo Técnico:</b> {count} {'vez' if count == 1 else 'vezes'}"
-                    elif "reset" in raw_cause: icon, text = "🔄", f"<b>Reset (Cliente/Técnico):</b> {count} {'vez' if count == 1 else 'vezes'}"
-                    else: text = f"<b>{cause}:</b> {count} {'vez' if count == 1 else 'vezes'}"
-                    daily_html += f"<p style='margin:0; padding:0;'>{icon} {text}</p>"
-                self.details_daily_drops_value.setHtml(daily_html)
-            
-            # 8. Alerta de Flapping (Última Hora)
-            if drop_count_last_hour == 0:
-                flapping_text, flapping_style = "✅ Nenhuma queda recente (última hora)", "color: #1B5E20; font-weight: bold;"
-            elif drop_count_last_hour <= 2:
-                flapping_text, flapping_style = f"⚠️ {drop_count_last_hour} {'queda' if drop_count_last_hour == 1 else 'quedas'} na última hora", "color: #FF6F00; font-weight: bold;"
-            else:
-                flapping_text, flapping_style = f"🚨 ALERTA DE FLAPPING: {drop_count_last_hour} quedas na última hora!", "color: white; background-color: #C62828; padding: 3px; border-radius: 4px; font-weight: bold;"
-            self.details_flapping_alert_value.setText(flapping_text)
-            self.details_flapping_alert_value.setStyleSheet(flapping_style)
-            
-            # 9. Outros campos com formatação condicional
-            down_cause_value = data_dict.get('last_down_cause')
-            dc_display_text = str(down_cause_value) if down_cause_value is not None else "N/A"
-            if dc_display_text != "N/A":
-                raw_value = dc_display_text.lower().strip()
-                icon, translated_text, style = "❔", down_cause_value, ""
-                if "losi" in raw_value or "lobi" in raw_value: icon, translated_text, style = "🚨", "Sem Sinal de Fibra", "color: white; background-color: #C62828; padding: 3px; border-radius: 4px; font-weight: bold;"
-                elif "dying-gasp" in raw_value: icon, translated_text, style = "⚡️", "Sem Energia Elétrica", "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
-                elif "reset by ont comma" in raw_value: icon, translated_text, style = "🛠️", "Técnico Resetou", "color: black; background-color: #81D4FA; padding: 3px; border-radius: 4px; font-weight: bold;"
-                elif "reset" in raw_value: icon, translated_text, style = "🔄", "Modem Resetado", "color: white; background-color: #FF9800; padding: 3px; border-radius: 4px; font-weight: bold;"
-                self.details_last_down_cause_value.setText(f"{icon} {translated_text} ({down_cause_value})")
-                self.details_last_down_cause_value.setStyleSheet(style)
-            else:
-                self.details_last_down_cause_value.setText("N/A")
-                self.details_last_down_cause_value.setStyleSheet("")
+                status = data_dict.get('status', 'unknown').lower()
+                last_up = parse_db_timestamp(data_dict.get('last_up_time'))
+                collection_time = parse_db_timestamp(data_dict.get('collection_time'))
+                
+                cursor.execute("""
+                    SELECT last_down_cause, COUNT(*) FROM ont_data
+                    WHERE serial_number = %s AND last_down_cause IS NOT NULL AND last_down_cause <> 'N/A'
+                    AND collection_time >= NOW() - INTERVAL '7 days' GROUP BY last_down_cause ORDER BY COUNT(*) DESC;
+                """, (sn,))
+                weekly_drops_by_cause = cursor.fetchall()
 
-            last_down_time_obj = parse_db_timestamp(data_dict.get('last_down_time'))
-            self.details_last_down_time_value.setText(last_down_time_obj.strftime('%d/%m/%Y %H:%M:%S') if last_down_time_obj else "N/A")
-            
-            logging.info("Carregamento de detalhes para a nova interface concluído com sucesso.")
+                cursor.execute("""
+                    SELECT last_down_cause, COUNT(*) FROM ont_data
+                    WHERE serial_number = %s AND last_down_cause IS NOT NULL AND last_down_cause <> 'N/A'
+                    AND collection_time >= date_trunc('day', NOW()) GROUP BY last_down_cause ORDER BY COUNT(*) DESC;
+                """, (sn,))
+                daily_drops_by_cause = cursor.fetchall()
 
-        except Exception as e:
-            logging.error(f"Erro ao carregar detalhes da ONT do banco: {e}", exc_info=True)
-            QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível carregar os dados da ONT: {e}")
-            if 'conn' in locals() and conn and not conn.closed:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM ont_data WHERE serial_number = %s AND last_down_cause IS NOT NULL 
+                    AND last_down_cause <> 'N/A' AND collection_time >= NOW() - INTERVAL '1 hour'
+                """, (sn,))
+                drop_count_last_hour = cursor.fetchone()[0]
+                
                 conn.close()
+
+                # 1. Preenche os campos de dados gerais que estão no data_map
+                for key, label_widget in data_map.items():
+                    value = data_dict.get(key)
+                    display_text = str(value) if value is not None else "N/A"
+                    if value is not None:
+                        if 'time' in key:
+                            dt_obj = parse_db_timestamp(value)
+                            if dt_obj: display_text = dt_obj.strftime('%d/%m/%Y %H:%M:%S')
+                        elif key.endswith('_bytes') or key.endswith('_frames'): display_text = f"{value:,}"
+                        elif key.endswith('_kbps'): display_text = f"{value/1000.0:.2f} Mbps ({value:.0f} kbps)" if value > 0 else "0 kbps"
+                        elif key.endswith('_power'): display_text = f"{value} dBm"
+                        elif key == 'ont_distance': display_text = f"{value} metros"
+                        elif key.endswith('_occupation'): display_text = f"{value}%"
+                        elif key == 'temperature': display_text = f"{value}°C"
+                    
+                    label_widget.setText(display_text)
+                    label_widget.setStyleSheet("")
+
+                # 2. Preenche manualmente os labels de timestamp que não estão no data_map
+                collection_time_obj = parse_db_timestamp(data_dict.get('collection_time'))
+                formatted_time = collection_time_obj.strftime('%d/%m/%Y %H:%M:%S') if collection_time_obj else "N/A"
+
+                self.details_outras_last_check_value.setText(formatted_time)
+                self.details_status_last_check_value.setText(formatted_time)
+
+                # 3. Status do Modem
+                if hasattr(self.details_status_value, 'animation') and self.details_status_value.animation:
+                    self.details_status_value.animation.stop()
+                    self.details_status_value.animation = None
+                if status == 'online':
+                    self.details_status_value.setText("✅ Online")
+                    self.details_status_value.setStyleSheet("color: white; background-color: #2E7D32; padding: 3px 8px; border-radius: 5px; font-weight: bold;")
+                elif status == 'offline':
+                    self.details_status_value.setText("❌ OFFLINE")
+                    self._start_blinking_animation(self.details_status_value)
+                else:
+                    self.details_status_value.setText(status.upper())
+                    self.details_status_value.setStyleSheet("color: black; background-color: #E0E0E0; padding: 3px 8px; border-radius: 5px; font-weight: bold;")
+
+                # 4. Qualidade do Sinal (Rx)
+                rx_value = data_dict.get('rx_power')
+                rx_display_text = str(rx_value) if rx_value is not None else "N/A"
+                self.details_rx_power_value.setText(rx_display_text); self.details_rx_power_value.setStyleSheet("color: gray;")
+                try:
+                    rx_float = float(rx_value)
+                    if -22.0 <= rx_float: status_text, style = "✅ OK", "color: white; background-color: #2E7D32; padding: 3px; border-radius: 4px; font-weight: bold;"
+                    elif -25.0 <= rx_float < -22.0: status_text, style = "⚠️ RUIM", "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
+                    else: status_text, style = "🚨 PÉSSIMO", "color: white; background-color: #C62828; padding: 3px; border-radius: 4px; font-weight: bold;"
+                    self.details_rx_power_value.setText(f"{rx_display_text} dBm ({status_text})"); self.details_rx_power_value.setStyleSheet(style)
+                except (ValueError, TypeError): pass
+
+                # 5. Uptime (com lógica de fallback)
+                uptime_text, uptime_style = "N/A", ""
+                if status == 'online':
+                    ont_duration_str = data_dict.get('ont_online_duration')
+                    if ont_duration_str and ont_duration_str != 'N/A' and ont_duration_str.strip() != '-':
+                        uptime_text = ont_duration_str
+                        uptime_style = "color: white; background-color: #1B5E20; padding: 3px; border-radius: 4px; font-weight: bold;"
+                    else:
+                        uptime_duration = collection_time - last_up if last_up and collection_time else None
+                        if uptime_duration:
+                            uptime_text = self._format_timedelta(uptime_duration)
+                            if uptime_duration.total_seconds() < 3600: uptime_style = "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
+                            elif uptime_duration.days < 7: uptime_style = "color: white; background-color: #4CAF50; padding: 3px; border-radius: 4px; font-weight: bold;"
+                            else: uptime_style = "color: white; background-color: #1B5E20; padding: 3px; border-radius: 4px; font-weight: bold;"
+                        else:
+                            uptime_text, uptime_style = "Online (sem registro de início)", "color: #2E7D32; font-weight: bold;"
+                elif status == 'offline':
+                    uptime_text, uptime_style = "OFFLINE", "color: white; background-color: #757575; padding: 3px; border-radius: 4px; font-weight: bold;"
+                self.details_uptime_value.setText(uptime_text)
+                self.details_uptime_value.setStyleSheet(uptime_style)
+
+                # 6. Resumo de Quedas (7 dias)
+                if not weekly_drops_by_cause:
+                    self.details_stability_value.setHtml("<span style='color: #1B5E20; font-weight: bold;'>✅ Nenhuma queda nos últimos 7 dias</span>")
+                else:
+                    total_weekly_drops = sum(count for _, count in weekly_drops_by_cause)
+                    weekly_html = f"<p style='margin:0; padding:0; font-weight:bold;'>Total de {total_weekly_drops} quedas:</p>"
+                    for cause, count in weekly_drops_by_cause:
+                        raw_cause = cause.lower().strip()
+                        icon, text = "❔", cause
+                        if "losi" in raw_cause or "lobi" in raw_cause: icon, text = "🚨", f"<b>Sem Sinal de Fibra:</b> {count} {'vez' if count == 1 else 'vezes'}"
+                        elif "dying-gasp" in raw_cause: icon, text = "⚡️", f"<b>Sem Energia Elétrica:</b> {count} {'vez' if count == 1 else 'vezes'}"
+                        elif "reset by ont comma" in raw_cause: icon, text = "🛠️", f"<b>Reset pelo Técnico:</b> {count} {'vez' if count == 1 else 'vezes'}"
+                        elif "reset" in raw_cause: icon, text = "🔄", f"<b>Reset (Cliente/Técnico):</b> {count} {'vez' if count == 1 else 'vezes'}"
+                        else: text = f"<b>{cause}:</b> {count} {'vez' if count == 1 else 'vezes'}"
+                        weekly_html += f"<p style='margin:0; padding:0;'>{icon} {text}</p>"
+                    self.details_stability_value.setHtml(weekly_html)
+
+                # 7. Quedas Hoje
+                if not daily_drops_by_cause:
+                    self.details_daily_drops_value.setHtml("<span style='color: #1B5E20; font-weight: bold;'>✅ Nenhuma queda hoje</span>")
+                else:
+                    daily_html = ""
+                    for cause, count in daily_drops_by_cause:
+                        raw_cause = cause.lower().strip()
+                        icon, text = "❔", cause
+                        if "losi" in raw_cause or "lobi" in raw_cause: icon, text = "🚨", f"<b>Sem Sinal de Fibra:</b> {count} {'vez' if count == 1 else 'vezes'}"
+                        elif "dying-gasp" in raw_cause: icon, text = "⚡️", f"<b>Sem Energia Elétrica:</b> {count} {'vez' if count == 1 else 'vezes'}"
+                        elif "reset by ont comma" in raw_cause: icon, text = "🛠️", f"<b>Reset pelo Técnico:</b> {count} {'vez' if count == 1 else 'vezes'}"
+                        elif "reset" in raw_cause: icon, text = "🔄", f"<b>Reset (Cliente/Técnico):</b> {count} {'vez' if count == 1 else 'vezes'}"
+                        else: text = f"<b>{cause}:</b> {count} {'vez' if count == 1 else 'vezes'}"
+                        daily_html += f"<p style='margin:0; padding:0;'>{icon} {text}</p>"
+                    self.details_daily_drops_value.setHtml(daily_html)
+                
+                # 8. Alerta de Flapping (Última Hora)
+                if drop_count_last_hour == 0:
+                    flapping_text, flapping_style = "✅ Nenhuma queda recente (última hora)", "color: #1B5E20; font-weight: bold;"
+                elif drop_count_last_hour <= 2:
+                    flapping_text, flapping_style = f"⚠️ {drop_count_last_hour} {'queda' if drop_count_last_hour == 1 else 'quedas'} na última hora", "color: #FF6F00; font-weight: bold;"
+                else:
+                    flapping_text, flapping_style = f"🚨 ALERTA DE FLAPPING: {drop_count_last_hour} quedas na última hora!", "color: white; background-color: #C62828; padding: 3px; border-radius: 4px; font-weight: bold;"
+                self.details_flapping_alert_value.setText(flapping_text)
+                self.details_flapping_alert_value.setStyleSheet(flapping_style)
+                
+                # 9. Outros campos com formatação condicional
+                down_cause_value = data_dict.get('last_down_cause')
+                dc_display_text = str(down_cause_value) if down_cause_value is not None else "N/A"
+                if dc_display_text != "N/A":
+                    raw_value = dc_display_text.lower().strip()
+                    icon, translated_text, style = "❔", down_cause_value, ""
+                    if "losi" in raw_value or "lobi" in raw_value: icon, translated_text, style = "🚨", "Sem Sinal de Fibra", "color: white; background-color: #C62828; padding: 3px; border-radius: 4px; font-weight: bold;"
+                    elif "dying-gasp" in raw_value: icon, translated_text, style = "⚡️", "Sem Energia Elétrica", "color: black; background-color: #FFC107; padding: 3px; border-radius: 4px; font-weight: bold;"
+                    elif "reset by ont comma" in raw_cause: icon, translated_text, style = "🛠️", "Técnico Resetou", "color: black; background-color: #81D4FA; padding: 3px; border-radius: 4px; font-weight: bold;"
+                    elif "reset" in raw_cause: icon, translated_text, style = "🔄", "Modem Resetado", "color: white; background-color: #FF9800; padding: 3px; border-radius: 4px; font-weight: bold;"
+                    self.details_last_down_cause_value.setText(f"{icon} {translated_text} ({down_cause_value})")
+                    self.details_last_down_cause_value.setStyleSheet(style)
+                else:
+                    self.details_last_down_cause_value.setText("N/A")
+                    self.details_last_down_cause_value.setStyleSheet("")
+
+                last_down_time_obj = parse_db_timestamp(data_dict.get('last_down_time'))
+                self.details_last_down_time_value.setText(last_down_time_obj.strftime('%d/%m/%Y %H:%M:%S') if last_down_time_obj else "N/A")
+                
+                logging.info("Carregamento de detalhes para a nova interface concluído com sucesso.")
+
+            except Exception as e:
+                logging.error(f"Erro ao carregar detalhes da ONT do banco: {e}", exc_info=True)
+                QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível carregar os dados da ONT: {e}")
+                if 'conn' in locals() and conn and not conn.closed:
+                    conn.close()
 
     def apply_styles(self):
             """Aplica um tema visual completo à aplicação, inspirado no logo."""

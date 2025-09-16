@@ -136,8 +136,9 @@ def save_ont_data(olt_ip, ont_info):
                     vendor_id, ont_version, product_id, equipment_id,
                     main_software_version, standby_software_version,
                     ont_product_description, support_xml_version,
+                    ont_online_duration,
                     collection_time
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
                     CAST(%s AS TIMESTAMP WITH TIME ZONE))
             """
             
@@ -212,6 +213,7 @@ def save_ont_data(olt_ip, ont_info):
         logging.error(f"Erro ao salvar ONT {ont_info.get('sn', 'N/A')}: {str(e)}", exc_info=True)
         if conn:
             conn.rollback()
+        raise  # <-- ADICIONADO: Força o erro a ser reportado para a GUI
     finally:
         if conn:
             conn.close()
@@ -719,7 +721,7 @@ def save_ont_traffic_bulk(olt_ip, fsp, traffic_list):
         logging.error(f"[{olt_ip}][{fsp}] Erro ao salvar tráfego de ONT em lote: {e}")
         if conn:
             conn.rollback()
-        return 0
+        raise # <-- ADICIONADO: Força o erro a ser reportado para a GUI
     finally:
         if conn:
             conn.close()
@@ -762,7 +764,7 @@ def save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list):
     except Exception as e:
         logging.error(f"Erro ao salvar estatísticas de pacotes de ONT para a PON {fsp}: {e}")
         if conn: conn.rollback()
-        return 0
+        raise # <-- ADICIONADO: Força o erro a ser reportado para a GUI
     finally:
         if conn: conn.close()
 
