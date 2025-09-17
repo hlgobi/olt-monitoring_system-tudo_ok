@@ -160,26 +160,27 @@ def process_ont_details(shell, olt_ip, slot, port, ont_id, info):
     
     mac = "N/A"
     ont_details = {}
+    fsp_log = f"0/{slot}/{port}/{ont_id}"
     
     try:
         # 1. Coleta de MAC (apenas para ONTs online)
         if info.get("run_state", "").lower() == "online":
             try:
                 command_mac = f"display ont wan-info 0/{slot} {port} {ont_id}"
-                # Adicionando o prompt esperado como argumento
+                logging.info(f"[SYSTEM] [{fsp_log}] Executando: {command_mac}")
                 response_mac = send_command_with_pagination(shell, command_mac, "#", timeout=30)
                 mac = extract_service_mac(response_mac)
             except Exception as e:
-                logging.warning(f"Falha ao obter MAC para ONT {ont_id}: {str(e)}")
+                logging.warning(f"[SYSTEM] [{fsp_log}] Falha ao obter MAC: {str(e)}")
 
         # 2. Coleta de Detalhes Adicionais (para TODAS as ONTs)
         command_details = f"display ont info 0 {slot} {port} {ont_id}"
-        # Adicionando o prompt esperado como argumento
+        logging.info(f"[SYSTEM] [{fsp_log}] Executando: {command_details}")
         response_details = send_command_with_pagination(shell, command_details, "#", timeout=45)
-        logging.debug(f"Resposta bruta para '{command_details}':\n---\n{response_details}\n---")
         ont_details = parse_ont_info_details(response_details)
         
         # 3. Busca dados existentes no banco para preservar connection_code e client_name
+        logging.debug(f"[DB] [{fsp_log}] Buscando dados existentes para S/N: {info.get('sn', 'N/A')}")
         existing_data = get_existing_ont_data(olt_ip, info.get("sn", "N/A"))
         
         # 4. Monta o dicionário com os dados básicos.
@@ -192,7 +193,6 @@ def process_ont_details(shell, olt_ip, slot, port, ont_id, info):
             "tx": info.get("tx_power", "N/A"),
             "description": info.get("description", "N/A"),
             "status": info.get("run_state", "offline"),
-            # Preserva valores existentes ou usa "N/A" como padrão
             "connection_code": existing_data.get('connection_code', "N/A") if existing_data else "N/A",
             "client_name": existing_data.get('client_name', "N/A") if existing_data else "N/A"
         }
@@ -203,11 +203,13 @@ def process_ont_details(shell, olt_ip, slot, port, ont_id, info):
             collected_data['services'] = json.dumps(ont_details.get('services', []))
         
         # 6. Salva o dicionário completo no banco de dados.
+        logging.info(f"[DB] [{fsp_log}] Salvando dados na tabela 'ont_data'.")
+        logging.debug(f"[DB] [{fsp_log}] Dados a serem salvos: {json.dumps(collected_data, indent=2)}")
         save_ont_data(olt_ip, collected_data)
         return 1
         
     except Exception as e:
-        logging.error(f"Erro ao processar detalhes da ONT {ont_id}: {str(e)}")
+        logging.error(f"[SYSTEM] [{fsp_log}] Erro ao processar detalhes da ONT: {str(e)}")
         return 0
 
 def collect_port_info(shell, slot, port):
@@ -1047,27 +1049,27 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
     Executa o processo de coleta de dados principal para UMA OLT.
     Esta função roda em uma thread separada para cada OLT selecionada na GUI.
     """
-    log_callback(f"[{olt_ip}] Thread de coleta iniciada.")
+    log_callback(f"[SYSTEM] [{olt_ip}] Thread de coleta iniciada.")
     main_client = None
     cycle_count = 0
     
     NUM_PON_THREADS = 3 
     while gui_window_instance.collection_running:
         cycle_count += 1
-        log_callback(f"[{olt_ip}] Iniciando ciclo de coleta #{cycle_count}")
+        log_callback(f"[SYSTEM] [{olt_ip}] Iniciando ciclo de coleta #{cycle_count}")
         start_cycle_time = time.time()
         
         try:
             # --- Etapa 1: Conectar e obter a lista de placas ativas ---
-            log_callback(f"[{olt_ip}] Conectando para obter placas ativas...")
+            log_callback(f"[SYSTEM] [{olt_ip}] Conectando para obter placas ativas...")
             main_client, main_shell = connect_to_olt(olt_ip, username, password)
             
-            log_callback(f"[{olt_ip}] Conectado. Aguardando estabilização do shell...")
+            log_callback(f"[SYSTEM] [{olt_ip}] Conectado. Aguardando estabilização do shell...")
             time.sleep(3)
             while main_shell.recv_ready():
                 main_shell.recv(4096)
             
-            log_callback(f"[{olt_ip}] Enviando 'enable'...")
+            log_callback(f"[SYSTEM] [{olt_ip}] Enviando 'enable'...")
             main_shell.send("enable\n")
             time.sleep(1)
             
@@ -1079,7 +1081,7 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
                     break
                 time.sleep(0.5)
             if "Password" in response_buffer:
-                log_callback(f"[{olt_ip}] Senha solicitada. Enviando...")
+                log_callback(f"[SYSTEM] [{olt_ip}] Senha solicitada. Enviando...")
                 main_shell.send(f"{password}\n")
                 time.sleep(2)
                 while main_shell.recv_ready(): main_shell.recv(4096)
@@ -1090,14 +1092,14 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
             
             active_boards_info = get_active_gpon_slots(main_shell)
             main_client.close()
-            log_callback(f"[{olt_ip}] Placas ativas encontradas: {len(active_boards_info)}")
+            log_callback(f"[SYSTEM] [{olt_ip}] Placas ativas encontradas: {len(active_boards_info)}")
             if not active_boards_info:
-                log_callback(f"[{olt_ip}] Nenhuma placa GPON/XGPON ativa encontrada. Pulando ciclo.")
+                log_callback(f"[SYSTEM] [{olt_ip}] Nenhuma placa GPON/XGPON ativa encontrada. Pulando ciclo.")
                 time.sleep(30)
                 continue
             # --- Etapa 2: Processar todas as portas PON em paralelo ---
             pon_tasks = [(b['slot'], p) for b in active_boards_info for p in range(b['ports'])]
-            log_callback(f"[{olt_ip}] Total de {len(pon_tasks)} PONs para processar com {NUM_PON_THREADS} threads.")
+            log_callback(f"[SYSTEM] [{olt_ip}] Total de {len(pon_tasks)} PONs para processar com {NUM_PON_THREADS} threads.")
             
             total_onts_processed_cycle = 0
             
@@ -1111,23 +1113,24 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
                 # Verificar se há configuração de uplink para esta OLT
                 if olt_name in UPLINKS:
                     uplink_configs = UPLINKS[olt_name]
-                    log_callback(f"[{olt_ip}] Coletando dados DDM de {len(uplink_configs)} uplinks...")
+                    log_callback(f"[SYSTEM] [{olt_ip}] Coletando dados DDM de {len(uplink_configs)} uplinks...")
                     
                     # Coletar dados DDM
                     ddm_data_list = collect_uplink_ddm_data(olt_ip, username, password, uplink_configs)
                     
                     if ddm_data_list:
                         # Salvar no banco de dados
+                        log_callback(f"[DB] [{olt_ip}] Salvando {len(ddm_data_list)} registros DDM no banco de dados...")
                         save_uplink_ddm_data(olt_ip, ddm_data_list)
-                        log_callback(f"[{olt_ip}] {len(ddm_data_list)} registros DDM salvos.")
+                        log_callback(f"[SYSTEM] [{olt_ip}] {len(ddm_data_list)} registros DDM salvos.")
                     else:
-                        log_callback(f"[{olt_ip}] Nenhum dado DDM coletado.")
+                        log_callback(f"[SYSTEM] [{olt_ip}] Nenhum dado DDM coletado.")
                 else:
-                    log_callback(f"[{olt_ip}] Nenhuma configuração de uplink encontrada.")
+                    log_callback(f"[SYSTEM] [{olt_ip}] Nenhuma configuração de uplink encontrada.")
                     
             except Exception as e:
-                log_callback(f"[{olt_ip}] Erro na coleta DDM: {e}")
-                logging.error(f"[{olt_ip}] Erro na coleta DDM: {e}", exc_info=True)
+                log_callback(f"[SYSTEM] [{olt_ip}] Erro na coleta DDM: {e}")
+                logging.error(f"[SYSTEM] [{olt_ip}] Erro na coleta DDM: {e}", exc_info=True)
 
 
             with ThreadPoolExecutor(max_workers=NUM_PON_THREADS) as executor:
@@ -1141,9 +1144,9 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
                         result = future.result()
                         total_onts_processed_cycle += result
                     except Exception as exc:
-                        log_callback(f'[{olt_ip}] PON {future_to_pon[future]} gerou uma exceção: {exc}')
+                        log_callback(f'[SYSTEM] [{olt_ip}] PON {future_to_pon[future]} gerou uma exceção: {exc}')
             if not gui_window_instance.collection_running:
-                log_callback(f"[{olt_ip}] Coleta interrompida durante o ciclo.")
+                log_callback(f"[SYSTEM] [{olt_ip}] Coleta interrompida durante o ciclo.")
                 break
             # --- Etapa 3: Finalização do ciclo e espera ---
             end_cycle_time = time.time()
@@ -1157,14 +1160,14 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
             db_signals.pon_stats_packets_updated.emit()
             db_signals.ont_traffic_data_updated.emit()
             wait_time_seconds = 60
-            log_callback(f"[{olt_ip}] Aguardando {wait_time_seconds / 60:.1f} minuto(s) para o próximo ciclo.")
+            log_callback(f"[SYSTEM] [{olt_ip}] Aguardando {wait_time_seconds / 60:.1f} minuto(s) para o próximo ciclo.")
             for _ in range(wait_time_seconds):
                 if not gui_window_instance.collection_running: break
                 time.sleep(1)
                 
         except Exception as e:
-            log_callback(f"[{olt_ip}] ERRO CRÍTICO: {e}")
-            logging.critical(f"[{olt_ip}] Erro CRÍTICO no ciclo de coleta: {str(e)}", exc_info=True)
+            log_callback(f"[SYSTEM] [{olt_ip}] ERRO CRÍTICO: {e}")
+            logging.critical(f"[SYSTEM] [{olt_ip}] Erro CRÍTICO no ciclo de coleta: {str(e)}", exc_info=True)
             if main_client:
                 main_client.close()
             break
@@ -1172,7 +1175,7 @@ def run_data_collection(olt_ip, username, password, gui_window_instance, log_cal
 
 
     eth_task_queue.put(None)
-    log_callback(f"[{olt_ip}] Thread de coleta finalizada.")
+    log_callback(f"[SYSTEM] [{olt_ip}] Thread de coleta finalizada.")
 
 def run_temp_monitoring(olt_ip, username, password, gui_window_instance):
     """

@@ -29,7 +29,8 @@ class GuiLogHandler(logging.Handler):
     """Handler que envia logs para a GUI via sinais."""
     def __init__(self):
         super().__init__()
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        # O formato será adicionado diretamente na mensagem para incluir a categoria
+        formatter = logging.Formatter('%(asctime)s - %(message)s', datefmt='%H:%M:%S')
         self.setFormatter(formatter)
         
     def emit(self, record):
@@ -41,48 +42,32 @@ class GuiLogHandler(logging.Handler):
             self.handleError(record)
 
 def setup_logging():
-    """Configura o sistema de logging para lidar com Unicode no Windows."""
+    """Configura o sistema de logging com múltiplos handlers (console, arquivo, GUI)."""
+    # Formato para console e arquivo
+    log_formatter = logging.Formatter('%(asctime)s - %(message)s', datefmt='%H:%M:%S')
+
     # Configurar o logger raiz
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    
-    # Verificar se estamos no Windows
-    if sys.platform == 'win32':
-        # Configurar o handler do console para lidar com Unicode
-        try:
-            # Tentar usar utf-8
-            console_handler = logging.StreamHandler(sys.stdout)
-            console_handler.setFormatter(logging.Formatter('%(asctime)s, %(levelname).1s - %(message)s'))
-            console_handler.stream = sys.stdout  # Usar stdout em vez de stderr
-            logger.addHandler(console_handler)
-            
-            # Tentar configurar o código de página do console para UTF-8
-            import ctypes
-            kernel32 = ctypes.windll.kernel32
-            kernel32.SetConsoleCP(65001)  # CP_UTF8
-            kernel32.SetConsoleOutputCP(65001)  # CP_UTF8
-        except Exception as e:
-            # Se falhar, usar um handler que substitui os caracteres não suportados
-            class UnicodeSafeHandler(logging.StreamHandler):
-                def emit(self, record):
-                    try:
-                        super().emit(record)
-                    except UnicodeEncodeError:
-                        # Substituir caracteres não suportados
-                        msg = self.format(record)
-                        msg = msg.encode('cp1252', errors='replace').decode('cp1252')
-                        stream = self.stream
-                        stream.write(msg + self.terminator)
-                        self.flush()
-            
-            unicode_handler = UnicodeSafeHandler(sys.stdout)
-            unicode_handler.setFormatter(logging.Formatter('%(asctime)s, %(levelname).1s - %(message)s'))
-            logger.addHandler(unicode_handler)
-    else:
-        # Para outros sistemas operacionais, usar a configuração padrão
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(logging.Formatter('%(asctime)s, %(levelname).1s - %(message)s'))
-        logger.addHandler(console_handler)
+    logger.setLevel(logging.DEBUG)  # Nível DEBUG para capturar tudo
+
+    # Limpar handlers existentes para evitar duplicação
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    # 1. Handler para o Console (nível INFO)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(log_formatter)
+    console_handler.setLevel(logging.INFO) # Mostra apenas INFO e acima no console
+    logger.addHandler(console_handler)
+
+    # 2. Handler para o Arquivo (nível DEBUG)
+    # Cria um diretório 'logs' se não existir
+    if not os.path.exists('logs'):
+        os.makedirs('logs')
+    file_handler = logging.FileHandler(f"logs/olt_monitor_{datetime.now().strftime('%Y%m%d')}.log", 'a', 'utf-8')
+    file_handler.setFormatter(log_formatter)
+    file_handler.setLevel(logging.DEBUG) # Salva tudo (incluindo [PARSE]) no arquivo
+    logger.addHandler(file_handler)
     
     return logger
 
@@ -125,30 +110,30 @@ def main():
     logging.getLogger().addHandler(buffer_handler)
     
     # Registrar início da aplicação no log
-    logging.info("Iniciando a aplicação OLT Monitoring System.")
+    logging.info("[SYSTEM] Iniciando a aplicação OLT Monitoring System.")
     
     
     # Registrar uma mensagem informativa no log indicando o início da verificação do banco de dados
-    logging.info("Verificando conexão com o banco de dados...")
+    logging.info("[SYSTEM] Verificando conexão com o banco de dados...")
     
     # Verifica a conexão com o banco de dados
     if not check_db_connection():
-        logging.critical("Falha crítica ao conectar com o banco de dados. A aplicação será encerrada.")
+        logging.critical("[SYSTEM] Falha crítica ao conectar com o banco de dados. A aplicação será encerrada.")
         sys.exit(1)
     
     # Registrar uma mensagem informativa no log indicando que a conexão foi bem-sucedida
-    logging.info("Conexão com o banco de dados verificada com sucesso.")
+    logging.info("[SYSTEM] Conexão com o banco de dados verificada com sucesso.")
     
     # Registrar uma mensagem informativa no log indicando o início da verificação das tabelas
-    logging.info("Verificando e criando tabelas se necessário...")
+    logging.info("[SYSTEM] Verificando e criando tabelas se necessário...")
     
     # Verifica e cria as tabelas do banco de dados
     if not create_tables():
-        logging.critical("Falha crítica ao criar/verificar tabelas do banco de dados. A aplicação será encerrada.")
+        logging.critical("[SYSTEM] Falha crítica ao criar/verificar tabelas do banco de dados. A aplicação será encerrada.")
         sys.exit(1)
     
     # Registrar uma mensagem informativa no log indicando que as tabelas foram verificadas/criadas com sucesso
-    logging.info("Tabelas verificadas/criadas com sucesso.")
+    logging.info("[SYSTEM] Tabelas verificadas/criadas com sucesso.")
     
     # Criar instância do QApplication
     app = QApplication(sys.argv)
@@ -164,7 +149,7 @@ def main():
     
     # Criar e adicionar o handler de GUI ao logger
     gui_handler = GuiLogHandler()
-    gui_handler.setLevel(logging.INFO)
+    gui_handler.setLevel(logging.INFO) # A GUI mostrará INFO e acima
     logging.getLogger().addHandler(gui_handler)
     
     # Remover o handler de buffer, pois não é mais necessário
@@ -175,7 +160,7 @@ def main():
         """
         Função para lidar com o sinal de interrupção (Ctrl+C).
         """
-        logging.warning("Sinal de interrupção (Ctrl+C) recebido. Iniciando desligamento limpo...")
+        logging.warning("[SYSTEM] Sinal de interrupção (Ctrl+C) recebido. Iniciando desligamento limpo...")
         main_window.shutdown_threads()
         app.quit()
     
@@ -191,7 +176,7 @@ def main():
     main_window.show()
     
     # Registrar uma mensagem informativa no log indicando que a janela principal foi exibida
-    logging.info("Janela principal da GUI exibida.")
+    logging.info("[SYSTEM] Janela principal da GUI exibida.")
     
     # Inicia o loop de eventos da aplicação PyQt5 e encerra com o código de saída retornado
     sys.exit(app.exec_())
@@ -214,9 +199,9 @@ if __name__ == '__main__':
     # Tenta carregar as configurações de uplinks
     try:
         from uplinks_config import UPLINKS
-        logging.info("Configurações de uplinks carregadas com sucesso.")
+        logging.info("[SYSTEM] Configurações de uplinks carregadas com sucesso.")
     except ImportError:
-        logging.warning("Arquivo uplinks_config.py não encontrado. A funcionalidade de DDM não estará disponível.")
+        logging.warning("[SYSTEM] Arquivo uplinks_config.py não encontrado. A funcionalidade de DDM não estará disponível.")
         UPLINKS = {}
     
     # Chama a função principal

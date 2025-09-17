@@ -174,6 +174,13 @@ class OLTDatabaseGUI(QMainWindow):
         self.is_ont_session_active = None
         self.olt_checkboxes = {}  # Dicionário para armazenar os checkboxes das OLTs
 
+        # --- CORREÇÃO ADICIONADA AQUI ---
+        # Inicializa os atributos para o filtro de logs
+        self.log_filter_checkboxes = {}
+        self.all_logs = []
+        self.auto_scroll = True # <-- ESTA É A LINHA QUE CORRIGE O ERRO ATUAL
+        # --- FIM DA CORREÇÃO ---
+
         # NOVO: Widget para exibição de logs
         self.log_text_edit = None
         
@@ -587,44 +594,76 @@ class OLTDatabaseGUI(QMainWindow):
             return False
 
     def setup_logs_tab(self):
-        """Configura a aba de logs."""
+        """Configura a aba de logs com filtros de categoria."""
         layout = QVBoxLayout(self.logs_tab)
         
-        # Criar widget para exibição de logs
-        self.log_text_edit = QTextEdit()
-        self.log_text_edit.setReadOnly(True)
-        self.log_text_edit.setFont(QtGui.QFont("Courier New", 9))
+        # --- PAINEL DE CONTROLE E FILTROS ---
+        control_panel = QWidget()
+        control_layout = QHBoxLayout(control_panel)
         
-        # Adicionar botões de controle
-        control_layout = QHBoxLayout()
-        
+        # Botões de Ação
         clear_btn = QPushButton("Limpar Logs")
         clear_btn.clicked.connect(self.clear_logs)
         
         save_btn = QPushButton("Salvar Logs")
         save_btn.clicked.connect(self.save_logs)
         
+        # Checkbox de Rolagem Automática
         auto_scroll_cb = QCheckBox("Rolagem Automática")
         auto_scroll_cb.setChecked(True)
         auto_scroll_cb.stateChanged.connect(self.toggle_auto_scroll)
-        self.auto_scroll = True
         
         control_layout.addWidget(clear_btn)
         control_layout.addWidget(save_btn)
         control_layout.addWidget(auto_scroll_cb)
         control_layout.addStretch()
         
-        layout.addLayout(control_layout)
+        # Filtros de Categoria
+        filter_box = QGroupBox("Filtros de Categoria")
+        filter_layout = QHBoxLayout(filter_box)
+        
+        # Categorias para os filtros
+        categories = ["SYSTEM", "RAW", "PARSE", "DB"]
+        self.log_filter_checkboxes.clear() # Limpa para recriação
+        
+        for category in categories:
+            checkbox = QCheckBox(category)
+            checkbox.setChecked(True) # Começam todos marcados
+            checkbox.stateChanged.connect(self.update_log_display)
+            filter_layout.addWidget(checkbox)
+            self.log_filter_checkboxes[category] = checkbox
+
+        control_layout.addWidget(filter_box)
+        
+        # Adiciona painel de controle ao layout principal
+        layout.addWidget(control_panel)
+        
+        # --- ÁREA DE TEXTO DOS LOGS ---
+        self.log_text_edit = QTextEdit()
+        self.log_text_edit.setReadOnly(True)
+        self.log_text_edit.setFont(QtGui.QFont("Courier New", 9))
         layout.addWidget(self.log_text_edit)
         
         # Adicionar logs iniciais se houver
         if hasattr(self, 'initial_logs'):
             for log_msg in self.initial_logs:
-                self.log_text_edit.append(log_msg)
+                self.log_to_gui(log_msg) # Usa o novo método para processar
     
+# gui/main_window.py
+
     def log_to_gui(self, message):
-        """Adiciona uma mensagem de log ao widget de logs."""
-        if self.log_text_edit:
+        """Adiciona uma mensagem de log à lista principal e atualiza a exibição."""
+        # Extrai a categoria da mensagem (ex: "[SYSTEM]") ou define como "SYSTEM" se não houver
+        # CORREÇÃO: Usar re.search para encontrar a categoria em qualquer lugar da string,
+        # já que a mensagem chega com um timestamp na frente (ex: "09:25:43 - [RAW]...")
+        category_match = re.search(r'\[(\w+)\]', message) # Alterado de re.match para re.search
+        category = category_match.group(1) if category_match else "SYSTEM"
+        
+        # Adiciona a tupla (categoria, mensagem) à lista de todos os logs
+        self.all_logs.append((category, message))
+        
+        # Se a categoria do novo log estiver ativa, adiciona ao QTextEdit
+        if self.log_filter_checkboxes.get(category) and self.log_filter_checkboxes.get(category).isChecked():
             self.log_text_edit.append(message)
             
             # Rolar automaticamente para o final se ativado
@@ -632,19 +671,35 @@ class OLTDatabaseGUI(QMainWindow):
                 scrollbar = self.log_text_edit.verticalScrollBar()
                 scrollbar.setValue(scrollbar.maximum())
     
+    def update_log_display(self):
+        """Limpa e re-popula a exibição de logs com base nos filtros ativos."""
+        self.log_text_edit.clear()
+        
+        # Obtém a lista de categorias ativas
+        active_categories = {cat for cat, cb in self.log_filter_checkboxes.items() if cb.isChecked()}
+        
+        # Filtra e adiciona as mensagens
+        filtered_logs = [msg for cat, msg in self.all_logs if cat in active_categories]
+        self.log_text_edit.setText("\n".join(filtered_logs))
+        
+        # Rola para o final
+        if self.auto_scroll:
+            scrollbar = self.log_text_edit.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
+
     def clear_logs(self):
-        """Limpa o conteúdo do widget de logs."""
-        if self.log_text_edit:
-            self.log_text_edit.clear()
-    
+        """Limpa o conteúdo do widget de logs e a lista interna."""
+        self.all_logs.clear()
+        self.update_log_display()
+
     def save_logs(self):
-        """Salva o conteúdo dos logs em um arquivo."""
+        """Salva o conteúdo dos logs ATUALMENTE VISÍVEIS em um arquivo."""
         if not self.log_text_edit:
             return
             
         filename, _ = QFileDialog.getSaveFileName(
             self, 
-            "Salvar Logs", 
+            "Salvar Logs Visíveis", 
             f"olt_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
             "Arquivos de Texto (*.txt);;Todos os Arquivos (*)"
         )
@@ -660,7 +715,6 @@ class OLTDatabaseGUI(QMainWindow):
     def toggle_auto_scroll(self, state):
         """Ativa/desativa a rolagem automática dos logs."""
         self.auto_scroll = (state == Qt.Checked)
-    
 
     def setup_diag_ont_tab(self):
         """Configura a interface da aba 'Diagnóstico ONT'."""
@@ -9105,7 +9159,7 @@ class OLTDatabaseGUI(QMainWindow):
                 'description': ont_info_dict.get(ont_id, {}).get('description', 'N/A'),
                 'status': ont_info_dict.get(ont_id, {}).get('run_state', 'offline'),
                 'last_down_cause': ont_details.get('last_down_cause'),
-                'last_up_time': ont_details.get('last_up_time'),
+                'last_up_time': ont_details.get('last_up_time', 'N/A') if ont_details.get('last_up_time', 'N/A') != 'N/A' else ont_info_dict.get(ont_id, {}).get('UpTime'),
                 'last_down_time': ont_details.get('last_down_time'),
                 'last_dying_gasp_time': ont_details.get('last_dying_gasp_time'),
                 'services': json.dumps(ont_details.get('services', [])),
