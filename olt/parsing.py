@@ -5,14 +5,18 @@ import logging
 import time
 from datetime import datetime
 from utils.helpers import format_mac 
-import json # <--- ADICIONE ESTA LINHA
+import json
 
 def extract_service_mac(response):
     """
     Extrai o endereço MAC da resposta do comando 'display ont wan-info'.
     Itera linha por linha para maior robustez.
     """
-    logging.info(f"[RAW] Resposta para extração de MAC:\n---\n{response}\n---")
+    # Nível DEBUG: Loga a resposta completa para o arquivo.
+    logging.debug(f"[RAW] Resposta para extração de MAC:\n---\n{response}\n---")
+    # Nível INFO: Loga um resumo para a GUI.
+    logging.info(f"[RAW] [extract_service_mac] Resposta recebida ({len(response)} bytes).")
+    
     from utils.helpers import format_mac
 
     for line in response.splitlines():
@@ -31,7 +35,7 @@ def extract_service_mac(response):
                 logging.debug("[PARSE]   -> Falha: A linha não contém ':'.")
                 continue
                 
-    logging.debug("[PARSE] Endereço MAC não encontrado na resposta.")
+    logging.warning("[PARSE] Endereço MAC não encontrado na resposta.")
     return "N/A"
 
 def extract_ont_info(summary_response):
@@ -39,7 +43,8 @@ def extract_ont_info(summary_response):
     Analisa a saída complexa de 'display ont info summary', que contém duas tabelas
     distintas, e combina as informações em um único dicionário por ONT.
     """
-    logging.info(f"[RAW] Resposta para 'display ont info summary' ({len(summary_response)} bytes):\n---\n{summary_response[:1000]}...\n---")
+    logging.debug(f"[RAW] Resposta para 'display ont info summary' ({len(summary_response)} bytes):\n---\n{summary_response}\n---")
+    logging.info(f"[RAW] [extract_ont_info] Resposta recebida ({len(summary_response)} bytes).")
     
     ont_data = {}
     online_count, total_count = 0, 0
@@ -93,7 +98,7 @@ def extract_ont_info(summary_response):
     if not final_ont_data and total_count > 0:
         logging.error("[PARSE] Falha crítica: Nenhuma ONT foi parseada, mas o cabeçalho indicava ONTs presentes.")
 
-    logging.info(f"[PARSE] [extract_ont_info] Extração concluída. {len(final_ont_data)} ONTs analisadas.")
+    logging.info(f"[PARSE] [extract_ont_info] Extração concluída. {len(final_ont_data)} de {total_count} ONTs analisadas.")
     return final_ont_data, online_count, total_count
 
 def parse_ont_info_details(output_text):
@@ -101,13 +106,14 @@ def parse_ont_info_details(output_text):
     Analisa a saída do comando 'display ont info [f s p] [ont_id] all'
     e extrai informações detalhadas da ONT, limpando os valores.
     """
-    logging.info(f"[RAW] Resposta para 'display ont info all' ({len(output_text)} bytes):\n---\n{output_text[:1000]}...\n---")
+    logging.debug(f"[RAW] Resposta para 'display ont info all' ({len(output_text)} bytes):\n---\n{output_text}\n---")
+    logging.info(f"[RAW] [parse_ont_info_details] Resposta recebida ({len(output_text)} bytes).")
+    
     details = { 'last_down_cause': 'N/A', 'last_up_time': 'N/A', 'last_down_time': 'N/A', 'last_dying_gasp_time': 'N/A', 'ont_online_duration': 'N/A', 'services': [], 'ont_distance': 'N/A', 'memory_occupation': 'N/A', 'cpu_occupation': 'N/A', 'temperature': 'N/A', 'ont_ip_address': 'N/A', 'line_profile_id': 'N/A', 'line_profile_name': 'N/A', 'service_profile_id': 'N/A', 'service_profile_name': 'N/A' }
     lines = output_text.splitlines()
 
     for line in lines:
         clean_line = line.strip()
-        # Este log fica em DEBUG, pois é muito verboso
         logging.debug(f"[PARSE] Processando linha de detalhe: '{clean_line}'") 
         if ":" in clean_line:
             try:
@@ -129,81 +135,62 @@ def parse_ont_info_details(output_text):
                 details['services'].append(service_info)
                 logging.debug(f"[PARSE]   -> Serviço extraído: {service_info}")
 
-    # Este log fica em INFO, pois é o resumo final e importante
-    logging.info(f"[PARSE] [parse_ont_info_details] Resultado final: {json.dumps(details, indent=2)}")
+    logging.debug(f"[PARSE] [parse_ont_info_details] Resultado completo: {json.dumps(details, indent=2)}")
+    logging.info(f"[PARSE] [parse_ont_info_details] Extração concluída. Chaves: {', '.join(k for k, v in details.items() if v != 'N/A' and v != [])}")
     return details
 
 def parse_pon_port_state(response):
     """
     Analisa a saída do comando 'display port state <port>' e extrai as informações.
     """
-    logging.info(f"[RAW] Resposta para 'display port state' ({len(response)} bytes):\n---\n{response}\n---")
+    logging.debug(f"[RAW] Resposta para 'display port state' ({len(response)} bytes):\n---\n{response}\n---")
+    logging.info(f"[RAW] [parse_pon_port_state] Resposta recebida ({len(response)} bytes).")
     state_data = {}
     
-    # Mapeamento de chaves do output para chaves do nosso dicionário
     key_map = {
-        'Port state': 'port_state',
-        'Last down cause': 'last_down_cause',
-        'Last up time': 'last_up_time',
-        'Last down time': 'last_down_time',
-        'Signal detect': 'signal_detect',
-        'Available bandwidth(Kbps)': 'available_bandwidth_kbps',
-        'Illegal rogue ONT': 'illegal_rogue_ont',
-        'Optical Module status': 'optical_module_status',
-        'Laser state': 'laser_state',
-        'TX fault': 'tx_fault',
-        'Temperature(C)': 'temperature_c',
-        'TX Bias current(mA)': 'tx_bias_current_ma',
-        'Supply Voltage(V)': 'supply_voltage_v',
-        'TX power(dBm)': 'tx_power_dbm',
+        'Port state': 'port_state', 'Last down cause': 'last_down_cause',
+        'Last up time': 'last_up_time', 'Last down time': 'last_down_time',
+        'Signal detect': 'signal_detect', 'Available bandwidth(Kbps)': 'available_bandwidth_kbps',
+        'Illegal rogue ONT': 'illegal_rogue_ont', 'Optical Module status': 'optical_module_status',
+        'Laser state': 'laser_state', 'TX fault': 'tx_fault',
+        'Temperature(C)': 'temperature_c', 'TX Bias current(mA)': 'tx_bias_current_ma',
+        'Supply Voltage(V)': 'supply_voltage_v', 'TX power(dBm)': 'tx_power_dbm',
     }
 
     for line in response.splitlines():
         line = line.strip()
-        if not line or line.startswith("-"):
-            continue
-
-        parts = re.split(r'\s{2,}', line, 1) # Divide em chave e valor onde há 2 ou mais espaços
+        if not line or line.startswith("-"): continue
+        parts = re.split(r'\s{2,}', line, 1)
         if len(parts) == 2:
             key, value = parts[0].strip(), parts[1].strip()
-            logging.debug(f"[PARSE] Processando linha de estado PON: '{line}' -> Chave: '{key}', Valor: '{value}'") # LOG ATUALIZADO
+            logging.debug(f"[PARSE] Processando linha de estado PON: '{line}' -> Chave: '{key}', Valor: '{value}'")
             if key in key_map:
                 db_key = key_map[key]
-                
-                # Tratamento especial para cada tipo de dado
-                if value == '-':
-                    state_data[db_key] = None
+                if value == '-': state_data[db_key] = None
                 elif db_key in ['last_up_time', 'last_down_time']:
                     try:
-                        # Formato: 16/08/2025 03:18:39-03:00
                         dt_obj = datetime.strptime(value.split('-')[0], '%d/%m/%Y %H:%M:%S')
                         state_data[db_key] = dt_obj
-                    except (ValueError, IndexError):
-                        state_data[db_key] = None
+                    except (ValueError, IndexError): state_data[db_key] = None
                 elif db_key == 'available_bandwidth_kbps':
-                    try:
-                        state_data[db_key] = int(value)
-                    except ValueError:
-                        state_data[db_key] = None
+                    try: state_data[db_key] = int(value)
+                    except ValueError: state_data[db_key] = None
                 elif db_key in ['temperature_c', 'tx_bias_current_ma', 'supply_voltage_v', 'tx_power_dbm']:
-                    try:
-                        state_data[db_key] = float(value)
-                    except ValueError:
-                        state_data[db_key] = None
-                else:
-                    state_data[db_key] = value
-                
-                logging.debug(f"[PARSE]   -> Mapeado: {db_key} = {state_data[db_key]}") # LOG ATUALIZADO
+                    try: state_data[db_key] = float(value)
+                    except ValueError: state_data[db_key] = None
+                else: state_data[db_key] = value
+                logging.debug(f"[PARSE]   -> Mapeado: {db_key} = {state_data[db_key]}")
 
-    # NOVO LOG: Mostra o resultado final do parsing
-    logging.info(f"[PARSE] [parse_pon_port_state] Resultado final: {json.dumps(state_data, default=str, indent=2)}")
+    logging.debug(f"[PARSE] [parse_pon_port_state] Resultado completo: {json.dumps(state_data, default=str, indent=2)}")
+    logging.info(f"[PARSE] [parse_pon_port_state] Extração concluída. Chaves: {', '.join(state_data.keys())}")
     return state_data
 
 def parse_port_info(response):
     """
     Analisa a saída do comando 'display port info <port>' e extrai informações.
     """
-    logging.info(f"[RAW] Resposta para 'display port info' ({len(response)} bytes):\n---\n{response}\n---")
+    logging.debug(f"[RAW] Resposta para 'display port info' ({len(response)} bytes):\n---\n{response}\n---")
+    logging.info(f"[RAW] [parse_port_info] Resposta recebida ({len(response)} bytes).")
     info_data = {
         'left_guaranteed_bandwidth_kbps': None,
         'admin_state': None
@@ -217,25 +204,23 @@ def parse_port_info(response):
         parts = re.split(r'\s{2,}', line.strip(), 1)
         if len(parts) == 2:
             key, value = parts[0].strip(), parts[1].strip()
-            logging.debug(f"[PARSE] Processando linha de info da porta: '{line.strip()}' -> Chave: '{key}', Valor: '{value}'") # LOG ATUALIZADO
+            logging.debug(f"[PARSE] Processando linha de info da porta: '{line.strip()}' -> Chave: '{key}', Valor: '{value}'")
             if key in key_map:
                 db_key = key_map[key]
                 if db_key == 'left_guaranteed_bandwidth_kbps':
-                    try:
-                        info_data[db_key] = int(value)
-                    except (ValueError, TypeError):
-                        info_data[db_key] = None
-                else:
-                    info_data[db_key] = value
-                
-                logging.debug(f"[PARSE]   -> Mapeado: {db_key} = {info_data[db_key]}") # LOG ATUALIZADO
+                    try: info_data[db_key] = int(value)
+                    except (ValueError, TypeError): info_data[db_key] = None
+                else: info_data[db_key] = value
+                logging.debug(f"[PARSE]   -> Mapeado: {db_key} = {info_data[db_key]}")
 
-    logging.info(f"[PARSE] [parse_port_info] Resultado final: {json.dumps(info_data, indent=2)}")
+    logging.debug(f"[PARSE] [parse_port_info] Resultado completo: {json.dumps(info_data, indent=2)}")
+    logging.info(f"[PARSE] [parse_port_info] Extração concluída. Chaves: {', '.join(info_data.keys())}")
     return info_data
 
 def parse_pon_statistics_packets(response):
     """Analisa a saída do 'display statistics port ethernet' e extrai os contadores."""
-    logging.info(f"[RAW] Resposta para 'display statistics port ethernet' ({len(response)} bytes):\n---\n{response}\n---")
+    logging.debug(f"[RAW] Resposta para 'display statistics port ethernet' ({len(response)} bytes):\n---\n{response}\n---")
+    logging.info(f"[RAW] [parse_pon_statistics_packets] Resposta recebida ({len(response)} bytes).")
     stats_data = {}
     key_map = {
         'Received frames': 'rx_frames', 'Received bytes': 'rx_bytes',
@@ -261,17 +246,17 @@ def parse_pon_statistics_packets(response):
             key, value = line.split(":", 1)
             key = key.strip()
             if key in key_map:
-                logging.debug(f"[PARSE] Processando linha de estatísticas PON: '{line.strip()}'") # LOG ATUALIZADO
+                logging.debug(f"[PARSE] Processando linha de estatísticas PON: '{line.strip()}'")
                 numeric_value = re.search(r'^\s*(\d+)', value.strip())
                 if numeric_value:
                     try:
                         db_key = key_map[key]
                         stats_data[db_key] = int(numeric_value.group(1))
-                        logging.debug(f"[PARSE]   -> Mapeado: {db_key} = {stats_data[db_key]}") # LOG ATUALIZADO
-                    except (ValueError, TypeError):
-                        continue
+                        logging.debug(f"[PARSE]   -> Mapeado: {db_key} = {stats_data[db_key]}")
+                    except (ValueError, TypeError): continue
     
-    logging.info(f"[PARSE] [parse_pon_statistics_packets] Resultado final: {json.dumps(stats_data, indent=2)}")
+    logging.debug(f"[PARSE] [parse_pon_statistics_packets] Resultado completo: {json.dumps(stats_data, indent=2)}")
+    logging.info(f"[PARSE] [parse_pon_statistics_packets] Extração concluída. {len(stats_data)} estatísticas encontradas.")
     return stats_data
 
 def parse_ont_traffic(response, ont_id_target=None):
@@ -279,7 +264,8 @@ def parse_ont_traffic(response, ont_id_target=None):
     Analisa a saída do 'display ont traffic'.
     Lida com o formato de múltiplas ONTs ('all') e de ONT única.
     """
-    logging.info(f"[RAW] Resposta para 'display ont traffic' ({len(response)} bytes):\n---\n{response[:1000]}...\n---")
+    logging.debug(f"[RAW] Resposta para 'display ont traffic' ({len(response)} bytes):\n---\n{response}\n---")
+    logging.info(f"[RAW] [parse_ont_traffic] Resposta recebida ({len(response)} bytes).")
     traffic_list = []
     lines = response.splitlines()
     
@@ -288,59 +274,46 @@ def parse_ont_traffic(response, ont_id_target=None):
         if "ONT ID" in line and "Up traffic" in line and "Down traffic" in line:
             header_found = True
             for data_line in lines[i+1:]:
-                if data_line.strip().startswith("---"):
-                    continue
-                logging.debug(f"[PARSE] Processando linha de tráfego ONT (múltiplo): '{data_line.strip()}'") # LOG ATUALIZADO
+                if data_line.strip().startswith("---"): continue
+                logging.debug(f"[PARSE] Processando linha de tráfego ONT (múltiplo): '{data_line.strip()}'")
                 parts = re.split(r'\s+', data_line.strip())
                 if len(parts) >= 3:
                     try:
-                        data = {
-                            "ont_id": int(parts[0]),
-                            "up_traffic": float(parts[1]),
-                            "down_traffic": float(parts[2])
-                        }
+                        data = { "ont_id": int(parts[0]), "up_traffic": float(parts[1]), "down_traffic": float(parts[2]) }
                         traffic_list.append(data)
-                        logging.debug(f"[PARSE]   -> Tráfego extraído: {data}") # LOG ATUALIZADO
-                    except (ValueError, IndexError):
-                        continue
+                        logging.debug(f"[PARSE]   -> Tráfego extraído: {data}")
+                    except (ValueError, IndexError): continue
             break
     
     if not header_found:
-        logging.info("[PARSE] Cabeçalho de múltiplas ONTs não encontrado, tentando parse de ONT única.")
+        logging.debug("[PARSE] Cabeçalho de múltiplas ONTs não encontrado, tentando parse de ONT única.")
         up_traffic, down_traffic = None, None
         for line in lines:
             logging.debug(f"[PARSE] Processando linha de tráfego ONT (único): '{line.strip()}'")
             if "Up traffic (kbps)" in line:
-                try:
-                    up_traffic = float(line.split(':')[1].strip())
-                except (ValueError, IndexError):
-                    pass
+                try: up_traffic = float(line.split(':')[1].strip())
+                except (ValueError, IndexError): pass
             elif "Down traffic (kbps)" in line:
-                try:
-                    down_traffic = float(line.split(':')[1].strip())
-                except (ValueError, IndexError):
-                    pass
+                try: down_traffic = float(line.split(':')[1].strip())
+                except (ValueError, IndexError): pass
         
         if up_traffic is not None and down_traffic is not None and ont_id_target is not None:
-            data = {
-                "ont_id": ont_id_target,
-                "up_traffic": up_traffic,
-                "down_traffic": down_traffic
-            }
+            data = { "ont_id": ont_id_target, "up_traffic": up_traffic, "down_traffic": down_traffic }
             traffic_list.append(data)
             logging.debug(f"[PARSE]   -> Tráfego (único) extraído: {data}")
-
 
     if not traffic_list:
         logging.warning("[PARSE] [parse_ont_traffic] Nenhum dado de tráfego de ONT pôde ser extraído.")
     else:
-        logging.info(f"[PARSE] [parse_ont_traffic] Resultado final: {json.dumps(traffic_list, indent=2)}")
+        logging.debug(f"[PARSE] [parse_ont_traffic] Resultado completo: {json.dumps(traffic_list, indent=2)}")
+        logging.info(f"[PARSE] [parse_ont_traffic] Extração concluída. {len(traffic_list)} registro(s) de tráfego encontrado(s).")
     
     return traffic_list
 
 def parse_ont_statistics(response):
     """Analisa a saída do 'display statistics ont' e extrai os contadores."""
-    logging.info(f"[RAW] Resposta para 'display statistics ont' ({len(response)} bytes):\n---\n{response}\n---")
+    logging.debug(f"[RAW] Resposta para 'display statistics ont' ({len(response)} bytes):\n---\n{response}\n---")
+    logging.info(f"[RAW] [parse_ont_statistics] Resposta recebida ({len(response)} bytes).")
     stats_data = {}
     
     key_map = {
@@ -358,35 +331,34 @@ def parse_ont_statistics(response):
     
     for line in response.splitlines():
         line = line.strip()
-        if not line:
-            continue
-            
+        if not line: continue
         if ":" in line:
             parts = line.split(":", 1)
             if len(parts) == 2:
                 key, value_str = parts[0].strip(), parts[1].strip()
-                logging.debug(f"[PARSE] Processando linha de estatísticas ONT: '{line.strip()}'") # LOG ATUALIZADO
-                
+                logging.debug(f"[PARSE] Processando linha de estatísticas ONT: '{line.strip()}'")
                 for map_key, db_key in key_map.items():
                     if map_key.lower() in key.lower():
                         try:
                             numeric_match = re.search(r'(\d+)', value_str)
                             if numeric_match:
                                 stats_data[db_key] = int(numeric_match.group(1))
-                                logging.debug(f"[PARSE]   -> Mapeado: {db_key} = {stats_data[db_key]}") # LOG ATUALIZADO
+                                logging.debug(f"[PARSE]   -> Mapeado: {db_key} = {stats_data[db_key]}")
                             break
                         except (ValueError, TypeError) as e:
                             logging.warning(f"[PARSE] Erro ao converter valor '{value_str}' para {db_key}: {e}")
                             break
     
-    logging.info(f"[PARSE] [parse_ont_statistics] Resultado final: {json.dumps(stats_data, indent=2)}")
+    logging.debug(f"[PARSE] [parse_ont_statistics] Resultado completo: {json.dumps(stats_data, indent=2)}")
+    logging.info(f"[PARSE] [parse_ont_statistics] Extração concluída. Chaves: {', '.join(stats_data.keys())}")
     return stats_data
     
 def parse_ont_eth_statistics(response):
     """
     Analisa a saída do comando 'display statistics ont-eth ...' e extrai os contadores.
     """
-    logging.info(f"[RAW] Resposta para 'display statistics ont-eth' ({len(response)} bytes):\n---\n{response}\n---")
+    logging.debug(f"[RAW] Resposta para 'display statistics ont-eth' ({len(response)} bytes):\n---\n{response}\n---")
+    logging.info(f"[RAW] [parse_ont_eth_statistics] Resposta recebida ({len(response)} bytes).")
     stats_data = {}
     
     key_map = {
@@ -406,31 +378,31 @@ def parse_ont_eth_statistics(response):
     
     for line in response.splitlines():
         line = line.strip()
-        if not line or ":" not in line:
-            continue
-            
+        if not line or ":" not in line: continue
         parts = line.split(":", 1)
         if len(parts) == 2:
             key, value_str = parts[0].strip(), parts[1].strip()
-            logging.debug(f"[PARSE] Processando linha de estatísticas ONT ETH: '{line.strip()}'") # LOG ATUALIZADO
+            logging.debug(f"[PARSE] Processando linha de estatísticas ONT ETH: '{line.strip()}'")
             for map_key, db_key in key_map.items():
                 if map_key.lower() in key.lower():
                     try:
                         numeric_match = re.search(r'(\d+)', value_str)
                         if numeric_match:
                             stats_data[db_key] = int(numeric_match.group(1))
-                            logging.debug(f"[PARSE]   -> Mapeado: {db_key} = {stats_data[db_key]}") # LOG ATUALIZADO
+                            logging.debug(f"[PARSE]   -> Mapeado: {db_key} = {stats_data[db_key]}")
                         break
                     except (ValueError, TypeError) as e:
                         logging.warning(f"[PARSE] Erro ao converter valor '{value_str}' para {db_key}: {e}")
                         break
     
-    logging.info(f"[PARSE] [parse_ont_eth_statistics] Resultado final: {json.dumps(stats_data, indent=2)}")
+    logging.debug(f"[PARSE] [parse_ont_eth_statistics] Resultado completo: {json.dumps(stats_data, indent=2)}")
+    logging.info(f"[PARSE] [parse_ont_eth_statistics] Extração concluída. Chaves: {', '.join(stats_data.keys())}")
     return stats_data
 
 def parse_uplink_ddm_response(response):
     """Parseia a saída do comando 'display port ddm-info'"""
-    logging.info(f"[RAW] Resposta para 'display port ddm-info' ({len(response)} bytes):\n---\n{response}\n---")
+    logging.debug(f"[RAW] Resposta para 'display port ddm-info' ({len(response)} bytes):\n---\n{response}\n---")
+    logging.info(f"[RAW] [parse_uplink_ddm_response] Resposta recebida ({len(response)} bytes).")
     ddm_data = {}
     
     try:
@@ -441,7 +413,6 @@ def parse_uplink_ddm_response(response):
                 if len(parts) == 2:
                     key, value = parts[0].strip(), parts[1].strip()
                     logging.debug(f"[PARSE] Processando linha DDM: '{line}'")
-                    
                     if "Temperature(C)" in key:
                         if (m := re.search(r'([-+]?\d*\.?\d+)', value)): ddm_data['temperature_c'] = float(m.group(1))
                     elif "Supply voltage(V)" in key:
@@ -454,7 +425,8 @@ def parse_uplink_ddm_response(response):
                         if (m := re.search(r'([-+]?\d*\.?\d+)', value)): ddm_data['rx_power_dbm'] = float(m.group(1))
         
         if ddm_data:
-            logging.info(f"[PARSE] [parse_uplink_ddm_response] Resultado final: {json.dumps(ddm_data, indent=2)}")
+            logging.debug(f"[PARSE] [parse_uplink_ddm_response] Resultado completo: {json.dumps(ddm_data, indent=2)}")
+            logging.info(f"[PARSE] [parse_uplink_ddm_response] Extração concluída. Chaves: {', '.join(ddm_data.keys())}")
         return ddm_data if ddm_data else None
             
     except Exception as e:
@@ -465,17 +437,15 @@ def parse_ont_version_details(raw_output: str) -> dict:
     """
     Analisa a saída do comando 'display ont version' e extrai os detalhes da ONT.
     """
-    logging.info(f"[RAW] Resposta para 'display ont version' ({len(raw_output)} bytes):\n---\n{raw_output}\n---")
+    logging.debug(f"[RAW] Resposta para 'display ont version' ({len(raw_output)} bytes):\n---\n{raw_output}\n---")
+    logging.info(f"[RAW] [parse_ont_version_details] Resposta recebida ({len(raw_output)} bytes).")
     details = { 'vendor_id': None, 'ont_version': None, 'product_id': None, 'equipment_id': None, 'main_software_version': None, 'standby_software_version': None, 'ont_product_description': None, 'support_xml_version': None }
 
     desc_match = re.search(r"OntProductDescription\s+:\s*(.*?)\s+Support XML Version", raw_output, re.DOTALL)
     if desc_match:
-        # --- LINHAS MODIFICADAS ---
         description_raw = desc_match.group(1).strip()
-        # Remove quebras de linha e carriage returns, depois substitui múltiplos espaços por um só
         description_clean = re.sub(r'\s+', ' ', description_raw.replace('\r', '').replace('\n', ' '))
         details['ont_product_description'] = description_clean
-        # --- FIM DA MODIFICAÇÃO ---
 
     for line in raw_output.splitlines():
         if ':' in line:
@@ -487,14 +457,16 @@ def parse_ont_version_details(raw_output: str) -> dict:
                 details[db_key] = value
                 logging.debug(f"[PARSE]   -> Mapeado: {db_key} = {value}")
 
-    logging.info(f"[PARSE] [parse_ont_version_details] Resultado final: {json.dumps(details, indent=2)}")
+    logging.debug(f"[PARSE] [parse_ont_version_details] Resultado completo: {json.dumps(details, indent=2)}")
+    logging.info(f"[PARSE] [parse_ont_version_details] Extração concluída. Chaves: {', '.join(k for k, v in details.items() if v is not None)}")
     return details
 
 def parse_ont_optical_info(raw_output: str) -> dict:
     """
     Analisa a saída do comando 'display ont optical-info' e extrai os detalhes ópticos.
     """
-    logging.info(f"[RAW] Resposta para 'display ont optical-info' ({len(raw_output)} bytes):\n---\n{raw_output}\n---")
+    logging.debug(f"[RAW] Resposta para 'display ont optical-info' ({len(raw_output)} bytes):\n---\n{raw_output}\n---")
+    logging.info(f"[RAW] [parse_ont_optical_info] Resposta recebida ({len(raw_output)} bytes).")
     details = {}
     key_map = {
         "Module type": "optical_module_type", "Module sub-type": "optical_module_subtype",
@@ -526,8 +498,8 @@ def parse_ont_optical_info(raw_output: str) -> dict:
                         details[db_key] = value
                     
                     logging.debug(f"[PARSE]   -> Mapeado: {db_key} = {details[db_key]}")
-            except (ValueError, IndexError):
-                continue
+            except (ValueError, IndexError): continue
 
-    logging.info(f"[PARSE] [parse_ont_optical_info] Resultado final: {json.dumps(details, indent=2)}")
+    logging.debug(f"[PARSE] [parse_ont_optical_info] Resultado completo: {json.dumps(details, indent=2)}")
+    logging.info(f"[PARSE] [parse_ont_optical_info] Extração concluída. Chaves: {', '.join(details.keys())}")
     return details

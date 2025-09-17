@@ -73,6 +73,7 @@ def save_ont_data(olt_ip, ont_info):
     Salva ou atualiza os dados de uma ONT no banco de dados, incluindo detalhes de status
     e preservando o nome do cliente existente.
     """
+    logging.info(f"[DB] [save_ont_data] Iniciando salvamento para ONT S/N: {ont_info.get('sn', 'N/A')} na OLT {olt_ip}")
     conn = None
     try:
         olt_identifier = olt_ip.split('.')[-1]
@@ -188,7 +189,7 @@ def save_ont_data(olt_ip, ont_info):
             inserted_time = cursor.fetchone()[0]
             logging.info(f"Timestamp inserido no banco: {inserted_time}")
             
-            logging.info(f"Dados da ONT {ont_info['sn']} inseridos com sucesso. Timestamp: {current_time}")
+            logging.info(f"[DB] [save_ont_data] Sucesso ao salvar dados da ONT {ont_info['sn']}.")
             
     except Exception as e:
         logging.error(f"Erro ao salvar ONT {ont_info.get('sn', 'N/A')}: {str(e)}", exc_info=True)
@@ -201,6 +202,7 @@ def save_ont_data(olt_ip, ont_info):
 
 def save_pon_status(olt_ip, fsp, online_count, total_count):
     """Salva o status da PON no banco de dados."""
+    logging.info(f"[DB] [save_pon_status] Salvando status para OLT {olt_ip}, PON {fsp} (Online: {online_count}/{total_count})")
     conn = None
     try:
         olt_identifier = olt_ip.split('.')[-1]
@@ -231,7 +233,7 @@ def save_pon_status(olt_ip, fsp, online_count, total_count):
             ))
             
             conn.commit()
-            logging.info(f"Status da PON {fsp} inserido com sucesso.")
+            logging.info(f"[DB] [save_pon_status] Sucesso ao salvar status da PON {fsp}.")
             
     except Exception as e:
         logging.error(f"Erro ao salvar status da PON {fsp}: {str(e)}")
@@ -242,6 +244,7 @@ def save_pon_status(olt_ip, fsp, online_count, total_count):
             conn.close()
 def save_temp_data(olt_ip, temp_data):
     """Salva dados de temperatura no banco de dados."""
+    logging.info(f"[DB] [save_temp_data] Iniciando salvamento de {len(temp_data)} registros de temperatura para OLT {olt_ip}")
     conn = None
     try:
         olt_identifier = olt_ip.split('.')[-1]
@@ -270,7 +273,7 @@ def save_temp_data(olt_ip, temp_data):
                 )
             
             conn.commit()
-            logging.info(f"{len(temp_data)} registros de temperatura inseridos.")
+            logging.info(f"[DB] [save_temp_data] Sucesso ao salvar {len(temp_data)} registros de temperatura.")
             
             db_signals.temperature_updated.emit()
             return len(temp_data)
