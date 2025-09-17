@@ -286,8 +286,10 @@ def save_temp_data(olt_ip, temp_data):
     finally:
         if conn:
             conn.close()
+
 def save_resource_data(olt_ip, resource_data):
     """Salva dados de monitoramento de recursos no banco de dados."""
+    logging.info(f"[DB] [Recursos] Salvando {len(resource_data)} registros de recursos para OLT {olt_ip}")
     conn = None
     try:
         olt_identifier = olt_ip.split('.')[-1]
@@ -316,7 +318,7 @@ def save_resource_data(olt_ip, resource_data):
                 )
             
             conn.commit()
-            logging.info(f"{len(resource_data)} registros de recurso inseridos.")
+            logging.info(f"[DB] [Recursos] {len(resource_data)} registros de recursos para OLT {olt_ip} salvos com sucesso.")
             return len(resource_data)
             
     except Exception as e:
@@ -488,6 +490,7 @@ def get_paginated_ont_data(olt_ip=None, limit=1000, offset=0):
 
 def save_pon_traffic_data(olt_ip, fsp, traffic_data):
     """Salva os dados de tráfego de uma porta PON no banco de dados."""
+    logging.info(f"[DB] [Tráfego PON] Salvando dados para OLT {olt_ip}, PON {fsp}") #
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         
@@ -518,22 +521,19 @@ def save_pon_traffic_data(olt_ip, fsp, traffic_data):
         ))
         
         conn.commit()
-        # Emitir sinal de status
-        db_signals.pon_traffic_status_changed.emit(olt_ip, fsp, "Dados salvos com sucesso")
+        logging.info(f"[DB] [Tráfego PON] Dados para OLT {olt_ip}, PON {fsp} salvos com sucesso.") #
         return True
     except Exception as e:
-        logging.error(f"Erro ao salvar dados de tráfego PON: {e}")
-        # Emitir sinal de erro
-        db_signals.pon_traffic_status_changed.emit(olt_ip, fsp, f"Erro: {str(e)}")
+        logging.error(f"[DB] [Tráfego PON] Erro ao salvar dados para OLT {olt_ip}, PON {fsp}: {e}") #
         return False
     finally:
         if conn:
             conn.close()
 
-# Em db/operations.py, modifique a função save_pon_port_state
 def save_pon_port_state(olt_ip, fsp, state_data):
     """Salva os dados de estado da porta PON no banco de dados."""
     conn = None
+    logging.info(f"[DB] [Estado PON] Salvando estado da porta para OLT {olt_ip}, PON {fsp}") #
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         
@@ -590,7 +590,7 @@ def save_pon_port_state(olt_ip, fsp, state_data):
             ))
         
         conn.commit()
-        logging.info(f"Dados de estado da porta PON {fsp} salvos com sucesso.")
+        logging.info(f"[DB] [Estado PON] Dados de estado da porta PON {fsp} salvos com sucesso.") #
         return True
     except Exception as e:
         logging.error(f"Erro ao salvar dados de estado da porta PON {fsp}: {e}")
@@ -603,6 +603,7 @@ def save_pon_port_state(olt_ip, fsp, state_data):
 
 def save_pon_statistics_packets(olt_ip, fsp, stats_data):
     """Salva as estatísticas de pacotes de uma porta PON no banco de dados."""
+    logging.info(f"[DB] [Stats PON] Salvando estatísticas de pacotes para OLT {olt_ip}, PON {fsp}")
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
@@ -649,7 +650,7 @@ def save_pon_statistics_packets(olt_ip, fsp, stats_data):
         with conn.cursor() as cursor:
             cursor.execute(query, tuple(values))
             conn.commit()
-            logging.info(f"Estatísticas de pacotes da PON {fsp} salvas com sucesso.")
+            logging.info(f"[DB] [Stats PON] Estatísticas para OLT {olt_ip}, PON {fsp} salvas com sucesso.")
             return True
     except Exception as e:
         logging.error(f"Erro ao salvar estatísticas de pacotes da PON {fsp}: {e}")
@@ -665,8 +666,10 @@ def save_pon_statistics_packets(olt_ip, fsp, stats_data):
 def save_ont_traffic_bulk(olt_ip, fsp, traffic_list):
     """Salva uma lista de registros de tráfego de ONT no banco de dados."""
     if not traffic_list:
-        logging.warning(f"[{olt_ip}][{fsp}] Nenhum dado de tráfego para salvar.")
+        # logging.warning(f"[{olt_ip}][{fsp}] Nenhum dado de tráfego para salvar.") # Opcional: pode ser muito verboso
         return 0
+    
+    logging.info(f"[DB] [Tráfego ONT] Salvando {len(traffic_list)} registros para OLT {olt_ip}, PON {fsp}") #
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
@@ -698,7 +701,7 @@ def save_ont_traffic_bulk(olt_ip, fsp, traffic_list):
         execute_batch(cursor, query, args_list)
         
         conn.commit()
-        logging.info(f"[{olt_ip}][{fsp}] {len(args_list)} registros de tráfego inseridos com sucesso no banco de dados.")
+        logging.info(f"[DB] [Tráfego ONT] {len(args_list)} registros para OLT {olt_ip}, PON {fsp} salvos com sucesso.") #
         return len(args_list)
         
     except Exception as e:
@@ -714,6 +717,7 @@ def save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list):
     """Salva uma lista de registros de estatísticas de pacotes de ONTs."""
     if not stats_list:
         return 0
+    logging.info(f"[DB] [Stats ONT] Salvando {len(stats_list)} registros de estatísticas de pacotes para OLT {olt_ip}, PON {fsp}")
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
@@ -743,7 +747,7 @@ def save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list):
         from psycopg2.extras import execute_batch
         execute_batch(cursor, query, args_list)
         conn.commit()
-        logging.info(f"{len(args_list)} registros de estatísticas de pacotes de ONT para a PON {fsp} salvos.")
+        logging.info(f"[DB] [Stats ONT] {len(args_list)} registros para OLT {olt_ip}, PON {fsp} salvos com sucesso.")
         return len(args_list)
     except Exception as e:
         logging.error(f"Erro ao salvar estatísticas de pacotes de ONT para a PON {fsp}: {e}")
@@ -752,12 +756,11 @@ def save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list):
     finally:
         if conn: conn.close()
 
-# Em operations.py, substitua a função save_ont_eth_statistics_bulk
 def save_ont_eth_statistics_bulk(olt_ip, fsp, ont_id, stats_list_per_port):
     """Salva uma lista de registros de estatísticas de portas Ethernet de uma ONT."""
     if not stats_list_per_port:
-        logging.warning(f"save_ont_eth_statistics_bulk: Nenhum dado para salvar para ONT {fsp}/{ont_id}")
         return 0
+    logging.info(f"[DB] [Stats ETH] Salvando {len(stats_list_per_port)} registros de estatísticas Ethernet para OLT {olt_ip}, PON {fsp}, ONT {ont_id}")
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
@@ -851,7 +854,7 @@ def save_ont_eth_statistics_bulk(olt_ip, fsp, ont_id, stats_list_per_port):
         inserted_time = cursor.fetchone()[0]
         logging.info(f"Timestamp inserido no banco (ont_eth_port_statistics): {inserted_time}")
         
-        logging.info(f"save_ont_eth_statistics_bulk: {len(args_list)} registros de estatísticas ETH para ONT {fsp}/{ont_id} salvos com sucesso.")
+        logging.info(f"[DB] [Stats ETH] {len(args_list)} registros para OLT {olt_ip}, PON {fsp}, ONT {ont_id} salvos com sucesso.")
         
         # Emite sinal para atualizar a GUI
         if 'db_signals' in globals():
@@ -869,6 +872,7 @@ def save_ont_eth_statistics_bulk(olt_ip, fsp, ont_id, stats_list_per_port):
 
 def save_uplink_ddm_data(olt_ip, ddm_data_list):
     """Salva dados DDM de uplink no banco de dados"""
+    logging.info(f"[DB] [DDM Uplink] Salvando {len(ddm_data_list)} registros DDM para OLT {olt_ip}")
     conn = None
     try:
         olt_identifier = olt_ip.split('.')[-1]
@@ -907,7 +911,7 @@ def save_uplink_ddm_data(olt_ip, ddm_data_list):
             execute_batch(cursor, query, args_list)
             conn.commit()
             
-            logging.info(f"[{olt_ip}] {len(args_list)} registros DDM inseridos com sucesso.")
+            logging.info(f"[DB] [DDM Uplink] {len(args_list)} registros DDM para OLT {olt_ip} salvos com sucesso.")
             
             # Emitir o sinal para atualizar a GUI
             try:

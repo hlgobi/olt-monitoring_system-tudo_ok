@@ -242,9 +242,6 @@ class OLTDatabaseGUI(QMainWindow):
         except Exception as e:
             logging.error(f"Erro ao conectar sinal data_updated: {e}")
         
-        # NOVO: Conectar o sinal global de logs
-        db_signals.log_message.connect(self.log_to_gui)
-
 # Em gui/main_window.py, modifique o método init_eth_workers:
 
     def init_eth_workers(self):
