@@ -131,7 +131,6 @@ class ScrollingTabBar(QTabBar):
 
 
 class OLTDatabaseGUI(QMainWindow):
-    log_message_received = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -242,7 +241,6 @@ class OLTDatabaseGUI(QMainWindow):
             logging.info("Sinal data_updated conectado ao método load_uplink_ddm_data com sucesso.")
         except Exception as e:
             logging.error(f"Erro ao conectar sinal data_updated: {e}")
-        self.log_message_received.connect(self.log_to_gui)
         
         # NOVO: Conectar o sinal global de logs
         db_signals.log_message.connect(self.log_to_gui)
@@ -251,21 +249,19 @@ class OLTDatabaseGUI(QMainWindow):
 
     def init_eth_workers(self):
         """Inicializa as filas e threads para coleta Ethernet."""
-        self.log_to_gui("Inicializando worker Ethernet global...")
+        self.log_to_gui("[SYSTEM] Inicializando worker Ethernet global...")
         
-        # Cria uma única fila global para todas as OLTs
         self.eth_task_queue = queue.Queue()
         
-        # Cria e inicia um único worker global
         self.eth_collection_thread = threading.Thread(
             target=process_ont_eth_worker,
-            args=(self.eth_task_queue, self, self.log_message_received.emit),
+            args=(self.eth_task_queue, self, logging.info), # <-- ALTERE AQUI
             daemon=True,
             name="GlobalEthWorker"
         )
         self.eth_collection_thread.start()
         
-        self.log_to_gui("Worker ETH global inicializado")
+        self.log_to_gui("[SYSTEM] Worker ETH global inicializado")
 
     def connect_to_db(self):
         """Estabelece conexão com o banco de dados PostgreSQL."""
@@ -2125,15 +2121,15 @@ class OLTDatabaseGUI(QMainWindow):
                     olt_config['username'], 
                     olt_config['password'], 
                     self, 
-                    self.log_message_received.emit,
-                    self.eth_task_queue  # Passa a fila global para o orquestrador
+                    logging.info, # <-- ALTERE AQUI (de self.log_message_received.emit)
+                    self.eth_task_queue
                 ),
                 daemon=True,
                 name=f"PonWorker-{olt_ip}"
             )
             self.collection_threads[olt_ip] = thread
             thread.start()
-            self.log_to_gui(f"Thread de coleta iniciada para {olt_config['name']} ({olt_ip})")
+            self.log_to_gui(f"[SYSTEM] Thread de coleta iniciada para {olt_config['name']} ({olt_ip})")
 
 
     def toggle_all_olts(self, checked):
