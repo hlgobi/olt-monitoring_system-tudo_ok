@@ -7907,19 +7907,45 @@ class OLTDatabaseGUI(QMainWindow):
         
         # 4. Painel de Informações da ONT Selecionada (Topo - Fixo)
         info_group = QGroupBox("Informações da ONT Selecionada")
-        info_layout = QFormLayout(info_group)
-        info_layout.setSpacing(10)
-        
+        grid_layout = QGridLayout(info_group) # Usando QGridLayout
+        grid_layout.setSpacing(10)
+
+        # Criação dos labels de valor
+        self.ont_details_client_label = QLabel("N/A")
         self.ont_details_olt_label = QLabel("N/A")
         self.ont_details_fsp_label = QLabel("N/A")
         self.ont_details_id_label = QLabel("N/A")
         self.ont_details_sn_label = QLabel("N/A")
-        
-        info_layout.addRow("<b>OLT:</b>", self.ont_details_olt_label)
-        info_layout.addRow("<b>F/S/P:</b>", self.ont_details_fsp_label)
-        info_layout.addRow("<b>ONT ID:</b>", self.ont_details_id_label)
-        info_layout.addRow("<b>Serial:</b>", self.ont_details_sn_label)
-        
+
+        # Estilo para os labels de valor
+        value_style = "background-color: #ECEFF1; color: #37474F; padding: 4px; border-radius: 4px; font-weight: bold;"
+        self.ont_details_client_label.setStyleSheet(value_style)
+        self.ont_details_olt_label.setStyleSheet(value_style)
+        self.ont_details_fsp_label.setStyleSheet(value_style)
+        self.ont_details_id_label.setStyleSheet(value_style)
+        self.ont_details_sn_label.setStyleSheet(value_style)
+
+        # Adicionando widgets ao grid (linha, coluna)
+        grid_layout.addWidget(QLabel("<b>CLIENTE:</b>"), 0, 0)
+        grid_layout.addWidget(self.ont_details_client_label, 0, 1)
+
+        grid_layout.addWidget(QLabel("<b>OLT:</b>"), 1, 0)
+        grid_layout.addWidget(self.ont_details_olt_label, 1, 1)
+
+        grid_layout.addWidget(QLabel("<b>F/S/P:</b>"), 1, 2)
+        grid_layout.addWidget(self.ont_details_fsp_label, 1, 3)
+
+        grid_layout.addWidget(QLabel("<b>ONT ID:</b>"), 1, 4)
+        grid_layout.addWidget(self.ont_details_id_label, 1, 5)
+
+        grid_layout.addWidget(QLabel("<b>Serial:</b>"), 2, 0)
+        grid_layout.addWidget(self.ont_details_sn_label, 2, 1, 1, 5) # Ocupa 5 colunas
+
+        # Garante que as colunas de valor se expandam
+        grid_layout.setColumnStretch(1, 2)
+        grid_layout.setColumnStretch(3, 1)
+        grid_layout.setColumnStretch(5, 1)
+
         main_layout.addWidget(info_group)
         
         # 5. Botão de Atualização (Fixo)
@@ -8116,42 +8142,37 @@ class OLTDatabaseGUI(QMainWindow):
         selected_row = selected_rows[0].row()
         
         # Obter as informações da ONT selecionada com as colunas corretas
-        # Ordem das colunas (baseado na sua descrição):
-        # 0: ID (sequencial)
-        # 1: OLT (último octeto, ex: 89)
-        # 2: Hora
-        # 3: F/S/P
-        # 4: ONT ID
-        # 5: MAC
-        # 6: S/N
-        # 7: CLIENTE
-        # 8: RX (dBm)
-        # 9: TX (dBm)
-        # 10: Status
-        # 11: Primária
-        # 12: Secundária
-        # 13: Porta Sec.
-        # 14: Descrição OLT
-        # 15: Cod.
-        # 16: Mudanças
-        
-        olt_id_item = self.table.item(selected_row, 1)    # Coluna 1: OLT (último octeto)
-        fsp_item = self.table.item(selected_row, 3)       # Coluna 3: F/S/P
-        ont_id_item = self.table.item(selected_row, 4)    # Coluna 4: ONT ID
-        sn_item = self.table.item(selected_row, 6)        # Coluna 6: S/N
+        headers = [self.table.horizontalHeaderItem(c).text() for c in range(self.table.columnCount())]
+        try:
+            # Pega o índice das colunas pelo nome para ser mais robusto
+            olt_col = headers.index("OLT")
+            fsp_col = headers.index("F/S/P")
+            ont_id_col = headers.index("ONT ID")
+            sn_col = headers.index("S/N")
+            cliente_col = headers.index("CLIENTE")
+        except ValueError as e:
+            QMessageBox.critical(self, "Erro de Configuração", f"Coluna não encontrada na tabela principal: {e}")
+            return
+
+        olt_id_item = self.table.item(selected_row, olt_col)
+        fsp_item = self.table.item(selected_row, fsp_col)
+        ont_id_item = self.table.item(selected_row, ont_id_col)
+        sn_item = self.table.item(selected_row, sn_col)
+        cliente_item = self.table.item(selected_row, cliente_col)
         
         if not (olt_id_item and fsp_item and ont_id_item and sn_item):
             QMessageBox.critical(self, "Dados Incompletos", "Não foi possível obter todas as informações da ONT selecionada.")
             return
             
-        olt_id = olt_id_item.text()  # Isso deve ser "89" no seu exemplo
+        olt_id = olt_id_item.text()
         fsp = fsp_item.text()
         ont_id = ont_id_item.text()
         sn = sn_item.text()
+        cliente_name = cliente_item.text() if cliente_item and cliente_item.text() else "Sem nome"
         
-        # Montar o IP completo da OLT
-        olt_ip = f"10.0.0.{olt_id}"
-        
+        # Montar o IP completo da OLT (assumindo que o ID é o último octeto)
+        olt_ip = next((c['ip'] for c in self.olt_configs if c['ip'].endswith(f".{olt_id}")), f"IP_NAO_ENCONTRADO_PARA_ID_{olt_id}")
+
         # Armazenar as informações da ONT selecionada
         self.selected_ont_for_details = {
             'olt_ip': olt_ip,
@@ -8160,11 +8181,12 @@ class OLTDatabaseGUI(QMainWindow):
             'sn': sn
         }
         
-        # Atualizar as labels na aba de detalhes
-        self.ont_details_olt_label.setText(f"OLT: {olt_ip}")
-        self.ont_details_fsp_label.setText(f"F/S/P: {fsp}")
-        self.ont_details_id_label.setText(f"ONT ID: {ont_id}")
-        self.ont_details_sn_label.setText(f"Serial: {sn}")
+        # Atualizar as labels na aba de detalhes (sem texto duplicado)
+        self.ont_details_olt_label.setText(olt_ip)
+        self.ont_details_fsp_label.setText(fsp)
+        self.ont_details_id_label.setText(ont_id)
+        self.ont_details_sn_label.setText(sn)
+        self.ont_details_client_label.setText(cliente_name) # Preenche o novo campo
         
         # Habilitar o botão de atualização
         self.update_ont_details_btn.setEnabled(True)
