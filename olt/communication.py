@@ -95,6 +95,7 @@ def send_command(shell, command, wait_time=3.0, timeout=45): # Define a função
 
 # Em olt/communication.py, modifique a função connect_to_olt:
 
+# olt/communication.py
 def connect_to_olt(olt_ip, username, password, max_retries=3):
     """
     Estabelece uma conexão SSH com a OLT usando paramiko.
@@ -103,7 +104,7 @@ def connect_to_olt(olt_ip, username, password, max_retries=3):
     client = None
     for attempt in range(1, max_retries + 1):
         try:
-            logging.info(f"Tentativa {attempt}: Conectando a {olt_ip}...")
+            logging.info(f"[COMM] Tentativa {attempt}/{max_retries}: Conectando a {olt_ip}...")
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             client.connect(
@@ -114,22 +115,21 @@ def connect_to_olt(olt_ip, username, password, max_retries=3):
                 auth_timeout=15,  # Timeout de autenticação
                 banner_timeout=15  # Timeout para banner
             )
-            logging.info(f"Conectado (versão {client.get_transport().remote_version}, cliente {client.get_transport().local_version})")
             shell = client.invoke_shell()
             shell.settimeout(15)  # Define timeout para operações no shell
-            logging.info(f"Shell invocado com sucesso")
+            logging.info(f"[COMM] Conectado com sucesso a {olt_ip} (Shell OK)")
             return client, shell
         except paramiko.AuthenticationException:
-            logging.error(f"Falha de autenticação para {olt_ip}. Verifique as credenciais.")
-            break  # Se falhar autenticação, não adianta tentar novamente
+            logging.error(f"[COMM] Falha de autenticação para {olt_ip}. Verifique as credenciais.")
+            break
         except paramiko.SSHException as e:
-            logging.error(f"Erro SSH ao conectar a {olt_ip}: {str(e)}")
+            logging.error(f"[COMM] Erro SSH na tentativa {attempt} para {olt_ip}: {str(e)}")
             if attempt == max_retries:
-                logging.error(f"Máximo de tentativas ({max_retries}) atingido para {olt_ip}.")
+                logging.error(f"[COMM] Máximo de tentativas ({max_retries}) atingido para {olt_ip}.")
                 break
-            time.sleep(2)  # Espera antes de tentar novamente
+            time.sleep(2)
         except Exception as e:
-            logging.error(f"Erro inesperado ao conectar a {olt_ip}: {str(e)}")
+            logging.error(f"[COMM] Erro inesperado ao conectar a {olt_ip} na tentativa {attempt}: {str(e)}")
             if attempt == max_retries:
                 break
             time.sleep(2)

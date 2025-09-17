@@ -193,7 +193,6 @@ class OLTDatabaseGUI(QMainWindow):
         self.ont_login_prompt_pass_re = re.compile(r"Password:", re.I)
         self.ont_shell_prompt_re = re.compile(r"(WAP>)\s*$")
         self.ont_root_prompt_re = re.compile(r"(SU_WAP>)\s*$")
-        self.olt_telnet_param_prompt_re = re.compile(r"\{\\s*<cr>.*\}\\s*:\\s*$")
         self.olt_diagnose_prompt_re = re.compile(r"\(diagnose\)\\s*[>#]\\s*$")
         self.olt_standard_prompt_re = re.compile(r"[>#]\\s*$")
         self.diag_sections_config = [
@@ -8744,488 +8743,125 @@ class OLTDatabaseGUI(QMainWindow):
             daemon=True
         )
         self.ont_details_thread.start()
+    # Inserir no arquivo: gui/main_window.py (substituindo a função existente)
+
+    # Inserir no arquivo: gui/main_window.py (substituindo a função inteira)
 
     def _update_ont_details_worker(self, olt_ip, fsp, ont_id, sn):
         """Worker que atualiza os dados da ONT em segundo plano."""
+        logging.info(f"[SYSTEM] Iniciando coleta ao vivo para ONT S/N: {sn} na OLT {olt_ip}")
+        client = None
         try:
-            # Obter credenciais da OLT
-            olt_config = None
-            for config in self.olt_configs:
-                if config['ip'] == olt_ip:
-                    olt_config = config
-                    break
-                    
+            # 1. Obter credenciais da OLT
+            olt_config = next((config for config in self.olt_configs if config['ip'] == olt_ip), None)
             if not olt_config:
                 raise Exception(f"Configuração não encontrada para a OLT {olt_ip}")
-                
+            
             username = olt_config['username']
             password = olt_config['password']
             
-            # Conectar à OLT
+            # 2. Conectar à OLT e navegar para os modos corretos
             client, shell = connect_to_olt(olt_ip, username, password)
             if not client or not shell:
-                raise Exception("Não foi possível conectar à OLT")
+                raise Exception(f"Não foi possível conectar à OLT {olt_ip}")
             
-            # Função auxiliar para esperar pelo prompt
-            def wait_for_prompt(expected_prompts, timeout=15):
-                """
-                Espera por um dos prompts esperados.
-                expected_prompts pode ser uma string ou uma lista de strings.
-                Retorna: (sucesso, resposta_completa, prompt_encontrado)
-                """
-                if isinstance(expected_prompts, str):
-                    expected_prompts = [expected_prompts]
-                    
-                response = ""
-                start_time = time.time()
-                
-                while time.time() - start_time < timeout:
-                    if shell.recv_ready():
-                        chunk = shell.recv(4096).decode('utf-8', errors='ignore')
-                        response += chunk
-                        logging.debug(f"Recebido: {chunk[:100]}...")
-                        
-                        # Verificar se algum dos prompts esperados está na resposta
-                        for prompt in expected_prompts:
-                            if prompt in response:
-                                logging.debug(f"Prompt encontrado: {prompt}")
-                                return True, response, prompt
-                        
-                        # Se receber um prompt de senha, retornar imediatamente
-                        if "Password:" in response:
-                            logging.debug("Prompt de senha encontrado")
-                            return True, response, "Password:"
-                            
-                        # Se receber um erro, retornar imediatamente
-                        if any(error in response for error in ["Error:", "Failure:", "%", "^"]):
-                            logging.debug(f"Erro detectado: {response}")
-                            return False, response, "ERROR"
-                    
-                    time.sleep(1)
-                
-                # Se chegou aqui, o timeout expirou
-                logging.debug(f"Timeout expirado. Resposta recebida: {response}")
-                return False, response, None
+            # Entrar nos modos enable e config
+            shell.send("enable\n"); time.sleep(1)
+            response = shell.recv(4096).decode('utf-8', errors='ignore')
+            if "Password:" in response:
+                shell.send(f"{password}\n"); time.sleep(2)
+            while shell.recv_ready(): shell.recv(4096) # Limpa buffer
+
+            shell.send("config\n"); time.sleep(1)
+            while shell.recv_ready(): shell.recv(4096)
             
-            # Função auxiliar para enviar comando e tratar paginação
-            def send_command_with_pagination(command, expected_prompt, timeout=30):
-                """
-                Envia um comando e trata a paginação até receber o prompt esperado.
-                """
-                logging.info(f"Enviando comando: {command}")
-                shell.send(f"{command}\n")
-                
-                response = ""
-                start_time = time.time()
-                last_chunk_time = time.time()
-                
-                while time.time() - start_time < timeout:
-                    if shell.recv_ready():
-                        chunk = shell.recv(4096).decode('utf-8', errors='ignore')
-                        response += chunk
-                        last_chunk_time = time.time()  # Atualizar o tempo do último chunk recebido
-                        logging.debug(f"Recebido: {chunk[:100]}...")
-                        
-                        # Tratar paginação
-                        if "---- More" in chunk:
-                            logging.debug("Paginação detectada. Enviando espaço.")
-                            shell.send(" ")
-                            time.sleep(3)
-                            start_time = time.time()  # Resetar timeout
-                            continue
-                        
-                        # Verificar se algum dos prompts esperados está na resposta
-                        if isinstance(expected_prompt, str):
-                            if expected_prompt in response:
-                                logging.debug(f"Prompt encontrado: {expected_prompt}")
-                                # Esperar um pouco mais para garantir que não há mais dados
-                                time.sleep(2)
-                                return response
-                        else:
-                            for prompt in expected_prompt:
-                                if prompt in response:
-                                    logging.debug(f"Prompt encontrado: {prompt}")
-                                    # Esperar um pouco mais para garantir que não há mais dados
-                                    time.sleep(2)
-                                    return response
-                        
-                        # Se receber um erro, retornar imediatamente
-                        if any(error in response for error in ["Error:", "Failure:", "%", "^"]):
-                            logging.debug(f"Erro detectado: {response}")
-                            return response
-                    
-                    # Se não receber dados há 2 segundos, considerar que a resposta está completa
-                    elif time.time() - last_chunk_time > 2:
-                        logging.debug("Nenhum dado recebido há 2 segundos, considerando resposta completa")
-                        return response
-                    
-                    time.sleep(2)
-                
-                # Se chegou aqui, o timeout expirou
-                logging.debug(f"Timeout expirado ao executar comando: {command}")
-                return response
-            
-            # Função auxiliar para limpar o buffer
-            def clear_buffer():
-                buffer_content = ""
-                while shell.recv_ready():
-                    chunk = shell.recv(4096).decode('utf-8', errors='ignore')
-                    buffer_content += chunk
-                if buffer_content:
-                    logging.debug(f"Buffer limpo. Conteúdo: {buffer_content[:100]}...")
-                time.sleep(2)
-                return buffer_content
-            
-            # Limpar buffer inicial
-            clear_buffer()
-            
-            # Enviar um Enter para garantir que temos um prompt limpo
-            shell.send("\n")
-            time.sleep(2)
-            clear_buffer()
-            
-            # Enviar enable
-            logging.info("Enviando comando 'enable'...")
-            shell.send("enable\n")
-            time.sleep(5)
-            
-            # Verificar resposta do enable
-            success, response, found_prompt = wait_for_prompt(["#", "Password:"], timeout=30)
-            logging.info(f"Resposta do enable: {response[:300]}..." if len(response) > 300 else f"Resposta do enable: {response}")
-            
-            if not success:
-                if found_prompt == "ERROR":
-                    raise Exception(f"Erro ao executar comando enable. Resposta: {response}")
-                else:
-                    raise Exception(f"Não foi possível entrar no modo enable. Timeout. Resposta recebida: {response}")
-            
-            # Se pediu senha de enable
-            if found_prompt == "Password:":
-                logging.info("Enable pediu senha. Enviando senha...")
-                shell.send(f"{password}\n")
-                time.sleep(3)
-                
-                # Verificar se conseguimos entrar no modo enable
-                success, response, found_prompt = wait_for_prompt("#", timeout=30)
-                if not success:
-                    if found_prompt == "ERROR":
-                        raise Exception(f"Erro ao entrar no modo enable após enviar senha. Resposta: {response}")
-                    else:
-                        raise Exception(f"Não foi possível entrar no modo enable após enviar senha. Timeout. Resposta: {response}")
-            
-            logging.info("Sucesso ao entrar no modo enable")
-            
-            # Enviar config
-            logging.info("Enviando comando 'config'...")
-            clear_buffer()
-            shell.send("config\n")
-            time.sleep(3)
-            
-            # Verificar se estamos no modo config
-            success, response, found_prompt = wait_for_prompt("(config)#", timeout=15)
-            if not success:
-                if found_prompt == "ERROR":
-                    raise Exception(f"Erro ao entrar no modo config. Resposta: {response}")
-                else:
-                    raise Exception(f"Não foi possível entrar no modo config. Timeout. Resposta: {response}")
-            
-            logging.info("Sucesso ao entrar no modo config")
-            
-            # Parsear F/S/P - CORREÇÃO AQUI
-            logging.info(f"FSP recebido: {fsp}")
+            # 3. Executar todos os comandos de coleta
             fsp_parts = fsp.split('/')
-            if len(fsp_parts) != 3:
-                raise Exception(f"Formato de FSP inválido: {fsp}. Esperado: F/S/P")
+            slot, port = fsp_parts[1], fsp_parts[2]
             
-            f_frame = fsp_parts[0]  # Geralmente é 0
-            slot = fsp_parts[1]
-            port = fsp_parts[2]
+            logging.info(f"[SYSTEM] Coletando todos os dados para ONT {fsp}/{ont_id}...")
+
+            # Coleta de dados que precisam do modo de interface
+            shell.send(f"interface gpon 0/{slot}\n"); time.sleep(2)
+            expected_prompt = f"(config-if-gpon-0/{slot})#"
             
-            logging.info(f"Processando ONT: FSP={fsp}, Frame=0, Slot={slot}, Port={port}, ONT ID={ont_id}")
+            response_wan = send_command_with_pagination(shell, f"display ont wan-info {port} {ont_id}", expected_prompt)
+            response_version = send_command_with_pagination(shell, f"display ont version {port} {ont_id}", expected_prompt)
+            response_optical = send_command_with_pagination(shell, f"display ont optical-info {port} {ont_id}", expected_prompt)
+            response_stats = send_command_with_pagination(shell, f"display statistics ont {port} {ont_id}", expected_prompt)
             
-            # Comando 1: display ont wan-info
-            logging.info("Executando comando 1: display ont wan-info...")
-            clear_buffer()
-            interface_cmd = f"interface gpon 0/{slot}"
-            logging.info(f"Entrando na interface: {interface_cmd}")
-            shell.send(f"{interface_cmd}\n")
-            time.sleep(3)
+            # Tratamento interativo para 'display ont traffic'
+            shell.send(f"display ont traffic {port} {ont_id}\n"); time.sleep(1)
+            resp_part1 = shell.recv(4096).decode('utf-8', 'ignore') if shell.recv_ready() else ""
+            if "{ <cr>" in resp_part1:
+                shell.send("\n"); time.sleep(3)
+            resp_part2 = shell.recv(4096).decode('utf-8', 'ignore') if shell.recv_ready() else ""
+            if "Command:" in resp_part2:
+                time.sleep(4)
+            response_traffic_rest = ""
+            while shell.recv_ready():
+                response_traffic_rest += shell.recv(8192).decode('utf-8', 'ignore')
+            full_traffic_response = resp_part1 + resp_part2 + response_traffic_rest
             
-            # Verificar se estamos no modo de interface
-            expected_interface_prompt = f"(config-if-gpon-0/{slot})#"
-            logging.info(f"Aguardando prompt: {expected_interface_prompt}")
-            success, response, found_prompt = wait_for_prompt(expected_interface_prompt, timeout=30)
-            if not success:
-                if found_prompt == "ERROR":
-                    raise Exception(f"Erro ao entrar no modo de interface {interface_cmd}. Resposta: {response}")
-                else:
-                    raise Exception(f"Não foi possível entrar no modo de interface {interface_cmd}. Timeout. Resposta: {response}")
-            
-            # Construir o comando com os parâmetros corretos
-            wan_cmd = f"display ont wan-info {port} {ont_id}"
-            logging.info(f"Comando WAN: {wan_cmd}")
-            
-            # Enviar o comando com tratamento de paginação
-            response_wan = send_command_with_pagination(wan_cmd, expected_interface_prompt, timeout=45)
-            logging.info(f"Resposta WAN-INFO: {response_wan[:500]}..." if len(response_wan) > 500 else f"Resposta WAN-INFO: {response_wan}")
+            # Coleta de dados que precisam do modo config global
+            shell.send("quit\n"); time.sleep(1)
+            response_info = send_command_with_pagination(shell, f"display ont info 0 {slot} {port} {ont_id}", "(config)#")
+            response_summary = send_command_with_pagination(shell, f"display ont info summary 0/{slot}/{port}", "(config)#")
+
+            # 4. Parsing dos dados coletados
+            logging.info(f"[SYSTEM] Processando respostas dos comandos...")
             mac = extract_service_mac(response_wan)
-            logging.info(f"MAC extraído: {mac}")
-            
-            # Comando 2: display ont info
-            logging.info("Executando comando 2: display ont info...")
-            shell.send("quit\n")  # Sair da interface
-            time.sleep(3)
-            
-            # Verificar se estamos de volta no modo config
-            success, response, found_prompt = wait_for_prompt("(config)#", timeout=30)
-            if not success:
-                if found_prompt == "ERROR":
-                    raise Exception("Erro ao voltar ao modo config após sair da interface")
-                else:
-                    raise Exception("Timeout ao voltar ao modo config após sair da interface")
-            
-            info_cmd = f"display ont info 0 {slot} {port} {ont_id}"
-            logging.info(f"Comando INFO: {info_cmd}")
-            
-            # Enviar o comando com tratamento de paginação
-            response_info = send_command_with_pagination(info_cmd, "(config)#", timeout=60)
-            logging.info(f"Resposta INFO: {response_info[:500]}..." if len(response_info) > 500 else f"Resposta INFO: {response_info}")
             ont_details = parse_ont_info_details(response_info)
-            logging.info(f"Detalhes da ONT parseados: {ont_details}")
-            
-            # Comando 3: display ont info summary
-            logging.info("Executando comando 3: display ont info summary...")
-            summary_cmd = f"display ont info summary 0/{slot}/{port}"
-            logging.info(f"Comando SUMMARY: {summary_cmd}")
-            
-            # Enviar o comando com tratamento de paginação
-            response_summary = send_command_with_pagination(summary_cmd, "(config)#", timeout=60)
-            logging.info(f"Resposta SUMMARY: {response_summary[:500]}..." if len(response_summary) > 500 else f"Resposta SUMMARY: {response_summary}")
-            ont_info_dict, online_count, total_count = extract_ont_info(response_summary)
-            logging.info(f"Info extraído: {len(ont_info_dict)} ONTs, Online: {online_count}, Total: {total_count}")
-           
-            # Comando 4: display ont traffic
-            logging.info("Executando comando 4: display ont traffic...")
-            clear_buffer()
-            interface_cmd = f"interface gpon 0/{slot}"
-            logging.info(f"Entrando na interface: {interface_cmd}")
-            shell.send(f"{interface_cmd}\n")
-            time.sleep(3) # Damos um tempo para a OLT processar a entrada na interface
-            
-            # Verificar se estamos no modo de interface
-            expected_interface_prompt = f"(config-if-gpon-0/{slot})#"
-            logging.info(f"Aguardando prompt: {expected_interface_prompt}")
-            success, response, found_prompt = wait_for_prompt(expected_interface_prompt, timeout=30)
-            
-            # SÓ executa os comandos de tráfego SE a entrada na interface foi bem-sucedida
-            # ... (código para entrar na interface) ...
-            if success:
-                traffic_cmd = f"display ont traffic {port} {ont_id}"
-                logging.info(f"Comando TRAFFIC: {traffic_cmd}")
-
-                # --- NOVO BLOCO PARA TRATAR O COMANDO 'display ont traffic' DE FORMA INTERATIVA ---
-                logging.info("Executando 'display ont traffic' com tratamento interativo...")
-                
-                # Limpa qualquer resíduo no buffer antes de começar
-                while shell.recv_ready():
-                    shell.recv(4096)
-                
-                shell.send(traffic_cmd + "\n")
-                time.sleep(1) # Pequena espera para o primeiro prompt aparecer
-                
-                # 1. Lê a primeira resposta, que deve ser o prompt { <cr>... }:
-                response_part1 = ""
-                if shell.recv_ready():
-                    response_part1 = shell.recv(4096).decode('utf-8', errors='ignore')
-                
-                # 2. Se o prompt aparecer, envia Enter e espera 3s
-                if "{ <cr>" in response_part1:
-                    logging.info("Prompt <cr> detectado. Enviando Enter e aguardando 3 segundos.")
-                    shell.send("\n")
-                    time.sleep(3) # Pausa de 3 segundos sugerida por você
-                
-                # 3. Lê a próxima parte da resposta (que deve ser o "Command:")
-                response_part2 = ""
-                if shell.recv_ready():
-                    response_part2 = shell.recv(4096).decode('utf-8', errors='ignore')
-
-                # 4. Se o "Command:" aparecer, espera 4s
-                if "Command:" in response_part2:
-                    logging.info("'Command:' detectado. Aguardando 4 segundos pela tabela de dados.")
-                    time.sleep(4) # Pausa de 4 segundos sugerida por você
-
-                # 5. Lê o restante da resposta (a tabela de dados e o prompt final)
-                response_traffic = ""
-                while shell.recv_ready():
-                    response_traffic += shell.recv(8192).decode('utf-8', errors='ignore')
-                
-                # Junta todas as partes para o parser (caso algo tenha sobrado nos buffers)
-                full_response_for_parser = response_part1 + response_part2 + response_traffic
-                logging.info(f"Resposta final do tráfego recebida ({len(full_response_for_parser)} bytes).")
-                
-                # --- FIM DO NOVO BLOCO ---
-                
-                traffic_data = parse_ont_traffic(full_response_for_parser, ont_id_target=int(ont_id))
-                logging.info(f"Tráfego parseado: {traffic_data}")
-            else:
-                # Se falhou, lança a exceção e PARA
-                if found_prompt == "ERROR":
-                    raise Exception(f"Erro ao entrar no modo de interface {interface_cmd} para tráfego. Resposta: {response}")
-                else:
-                    raise Exception(f"Não foi possível entrar no modo de interface {interface_cmd} para tráfego. Timeout. Resposta: {response}")
-            
-            # Comando 5: display statistics ont
-            logging.info("Executando comando 5: display statistics ont...")
-            clear_buffer()
-            interface_cmd = f"interface gpon 0/{slot}"
-            logging.info(f"Entrando na interface: {interface_cmd}")
-            shell.send(f"{interface_cmd}\n")
-            time.sleep(3)
-
-            # Verificar se estamos no modo de interface
-            expected_interface_prompt = f"(config-if-gpon-0/{slot})#"
-            logging.info(f"Aguardando prompt: {expected_interface_prompt}")
-            success, response, found_prompt = wait_for_prompt(expected_interface_prompt, timeout=30)
-            if not success:
-                if found_prompt == "ERROR":
-                    raise Exception(f"Erro ao entrar no modo de interface {interface_cmd} para tráfego. Resposta: {response}")
-                else:
-                    raise Exception(f"Não foi possível entrar no modo de interface {interface_cmd} para tráfego. Timeout. Resposta: {response}")
-            
-            stats_cmd = f"display statistics ont {port} {ont_id}"
-            logging.info(f"Comando STATS: {stats_cmd}")
-            
-            # Enviar o comando com tratamento de paginação
-            response_stats = send_command_with_pagination(stats_cmd, expected_interface_prompt, timeout=45)
-            logging.info(f"Resposta STATS: {response_stats[:500]}..." if len(response_stats) > 500 else f"Resposta STATS: {response_stats}")
-            stats_data = parse_ont_statistics(response_stats)
-            logging.info(f"Estatísticas parseadas: {stats_data}")
-            
-            # --- INÍCIO DA ADIÇÃO ---
-            # Comando 6: display ont version (NOVO)
-            logging.info("Executando comando 6: display ont version...")
-            version_cmd = f"display ont version {port} {ont_id}"
-            logging.info(f"Comando VERSION: {version_cmd}")
-
-            response_version = send_command_with_pagination(version_cmd, expected_interface_prompt, timeout=45)
-            logging.info(f"Resposta VERSION: {response_version[:500]}..." if len(response_version) > 500 else f"Resposta VERSION: {response_version}")
+            ont_info_dict, _, _ = extract_ont_info(response_summary)
             version_data = parse_ont_version_details(response_version)
-            logging.info(f"Dados de versão parseados: {version_data}")
-            # --- FIM DA ADIÇÃO ---
-
-            # --- INÍCIO DA ADIÇÃO ---
-            # Comando 7: display ont optical-info (NOVO)
-            logging.info("Executando comando 7: display ont optical-info...")
-            optical_info_cmd = f"display ont optical-info {port} {ont_id}"
-            logging.info(f"Comando OPTICAL-INFO: {optical_info_cmd}")
-            
-            # --- LINHA CORRIGIDA ---
-            # Removemos o argumento 'shell' da chamada para corresponder à definição local da função
-            response_optical = send_command_with_pagination(optical_info_cmd, expected_interface_prompt, timeout=45)
-            # --- FIM DA CORREÇÃO ---
-            
-            logging.info(f"Resposta OPTICAL-INFO: {response_optical[:500]}..." if len(response_optical) > 500 else f"Resposta OPTICAL-INFO: {response_optical}")
             optical_data = parse_ont_optical_info(response_optical)
-            logging.info(f"Dados ópticos parseados: {optical_data}")
-            # --- FIM DA ADIÇÃO ---
+            stats_data = parse_ont_statistics(response_stats)
+            traffic_data = parse_ont_traffic(full_traffic_response, ont_id_target=int(ont_id))
 
-            # Sair do modo config
-            logging.info("Saindo do modo config...")
-            shell.send("quit\n")
-            time.sleep(3)
-            shell.send("quit\n")
-            time.sleep(3)
-            
-            # Fechar conexão
-            logging.info("Fechando conexão SSH...")
+            # 5. Desconexão
+            shell.send("quit\n"); time.sleep(0.5)
             client.close()
-            
-            # Preparar dados para salvar
-            # Dados gerais
-            ont_data = {
-                'fsp': fsp,
-                'ont_id': int(ont_id),
-                'mac': mac,
-                'sn': sn,
-                'rx': ont_info_dict.get(ont_id, {}).get('rx_power', 'N/A'), # <--- CORRIGIDO
-                'tx': ont_info_dict.get(ont_id, {}).get('tx_power', 'N/A'), # <--- CORRIGIDO
+            logging.info(f"[COMM] Conexão SSH com {olt_ip} fechada.")
+
+            # 6. Montar o dicionário final CORRETAMENTE e salvar
+            ont_data_to_save = {
+                'fsp': fsp, 'ont_id': int(ont_id), 'mac': mac, 'sn': sn,
+                'rx': ont_info_dict.get(ont_id, {}).get('rx_power', 'N/A'),
+                'tx': ont_info_dict.get(ont_id, {}).get('tx_power', 'N/A'),
                 'description': ont_info_dict.get(ont_id, {}).get('description', 'N/A'),
                 'status': ont_info_dict.get(ont_id, {}).get('run_state', 'offline'),
-                'last_down_cause': ont_details.get('last_down_cause'),
-                'last_up_time': ont_details.get('last_up_time', 'N/A') if ont_details.get('last_up_time', 'N/A') != 'N/A' else ont_info_dict.get(ont_id, {}).get('UpTime'),
-                'last_down_time': ont_details.get('last_down_time'),
-                'last_dying_gasp_time': ont_details.get('last_dying_gasp_time'),
-                'services': json.dumps(ont_details.get('services', [])),
-                'ont_distance': ont_details.get('ont_distance'),
-                'memory_occupation': ont_details.get('memory_occupation'),
-                'cpu_occupation': ont_details.get('cpu_occupation'),
-                'temperature': ont_details.get('temperature'),
-                'ont_ip_address': ont_details.get('ont_ip_address'),
-                'line_profile_id': ont_details.get('line_profile_id'),
-                'line_profile_name': ont_details.get('line_profile_name'),
-                'service_profile_id': ont_details.get('service_profile_id'),
-                'service_profile_name': ont_details.get('service_profile_name'),
             }
             
-            # --- MODIFICAÇÃO: Adicionar os novos dados ao dicionário principal ---
-            # Adiciona os novos dados de versão e ópticos ao dicionário principal
-            if version_data:
-                ont_data.update(version_data)
-            if optical_data:
-                ont_data.update(optical_data)
-            # --- FIM DA MODIFICAÇÃO ---
+            # Passo 1: Mesclar todos os dicionários. 'services' ainda é um objeto Python.
+            ont_data_to_save.update(ont_details)
+            ont_data_to_save.update(version_data)
+            ont_data_to_save.update(optical_data)
 
-            logging.info("Salvando dados gerais da ONT...")
-            # Salvar dados gerais
-            save_ont_data(olt_ip, ont_data)
+            # Passo 2: AGORA, converter a chave 'services' para uma string JSON.
+            # Isso sobrescreve a lista de dicionários com a string formatada.
+            ont_data_to_save['services'] = json.dumps(ont_data_to_save.get('services', []))
+
+            # Passo 3: Salvar no banco. Agora 'services' é uma string.
+            save_ont_data(olt_ip, ont_data_to_save)
             
-            # Em gui/main_window.py, dentro de _update_ont_details_worker
-            # ...
-            # Salvar dados de tráfego
-            if traffic_data: # Verifica se a lista retornada pelo parser não está vazia
-                logging.info("Salvando dados de tráfego...")
-                # Pega o primeiro (e único) dicionário de dentro da lista
-                traffic_dict = traffic_data[0] 
-                
-                traffic_list_to_save = [{
-                    'ont_id': int(ont_id),
-                    'up_traffic': traffic_dict.get('up_traffic', 0),    # <-- CORRIGIDO
-                    'down_traffic': traffic_dict.get('down_traffic', 0) # <-- CORRIGIDO
-                }]
-                save_ont_traffic_bulk(olt_ip, fsp, traffic_list_to_save)
-            else:
-                logging.warning("Dados de tráfego não encontrados, não salvando...")
-            
-            # Salvar dados de estatísticas
+            if traffic_data:
+                save_ont_traffic_bulk(olt_ip, fsp, traffic_data)
             if stats_data:
-                logging.info("Salvando dados de estatísticas...")
-                stats_list = [{
-                    'ont_id': int(ont_id),
-                    'upstream_frames': stats_data.get('upstream_frames', 0),
-                    'upstream_bytes': stats_data.get('upstream_bytes', 0),
-                    'upstream_discarded_frames': stats_data.get('upstream_discarded_frames', 0),
-                    'downstream_frames': stats_data.get('downstream_frames', 0),
-                    'downstream_bytes': stats_data.get('downstream_bytes', 0),
-                    'downstream_discarded_frames': stats_data.get('downstream_discarded_frames', 0)
-                }]
-                save_ont_statistics_packets_bulk(olt_ip, fsp, stats_list)
-            else:
-                logging.warning("Dados de estatísticas não encontrados, não salvando...")
-            
-            logging.info("Atualizando a GUI...")
-            # Atualizar a GUI na thread principal
+                stats_data['ont_id'] = int(ont_id)
+                save_ont_statistics_packets_bulk(olt_ip, fsp, [stats_data])
+                
+            logging.info("[SYSTEM] Atualização ao vivo concluída. Sinalizando GUI para recarregar dados.")
             QTimer.singleShot(0, self.load_ont_details_from_db)
-            
+
         except Exception as e:
-            logging.error(f"Erro ao atualizar detalhes da ONT: {e}", exc_info=True)
-            # Exibir mensagem de erro na GUI
-            error_msg = str(e)
-            QTimer.singleShot(0, lambda: self.show_ont_details_error(error_msg))
+            logging.error(f"[SYSTEM] Erro no worker de atualização de detalhes da ONT: {e}", exc_info=True)
+            QTimer.singleShot(0, lambda: self.show_ont_details_error(str(e)))
         finally:
-            # Reabilitar o botão na GUI
-            logging.info("Reabilitando o botão de atualização...")
+            if client and client.get_transport() and client.get_transport().is_active():
+                client.close()
+            logging.info(f"[SYSTEM] Coleta ao vivo para ONT S/N {sn} finalizada.")
             QTimer.singleShot(0, lambda: self.update_ont_details_btn.setEnabled(True))
-            QTimer.singleShot(0, lambda: self.update_ont_details_btn.setText("Atualizar Dados"))
+            QTimer.singleShot(0, lambda: self.update_ont_details_btn.setText("Atualizar Dados da ONT ao Vivo"))
 
     # Adicione este método auxiliar para colorir as células da nova tabela
     def _get_optical_status_item(self, value, threshold_str):

@@ -118,6 +118,15 @@ def save_ont_data(olt_ip, ont_info):
             
             current_time = get_current_brasilia_time()
             
+            # --- INÍCIO DA CORREÇÃO ---
+            # Garante que o campo 'services' seja uma string JSON antes de inserir
+            services_data = ont_info.get('services')
+            if isinstance(services_data, (list, dict)):
+                services_json = json.dumps(services_data)
+            else:
+                services_json = services_data  # Assume que já é uma string JSON ou None
+            # --- FIM DA CORREÇÃO ---
+
             sql = """
                 INSERT INTO public.ont_data (
                     olt_ip, olt_identifier, fsp, ont_id, mac_address, client_name,

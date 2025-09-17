@@ -14,7 +14,8 @@ import queue
 import psycopg2
 from config import DB_CONFIG
 # --- Importações de Módulos da Aplicação ---
-from olt.communication import send_command, connect_to_olt 
+from olt.communication import send_command, connect_to_olt
+from utils.helpers import clean_response
 # --- INÍCIO DA MODIFICAÇÃO 1: Importações ---
 # Substitua a importação existente por esta que inclui todas as funções
 from olt.parsing import (extract_service_mac, extract_ont_info, parse_ont_info_details, 
@@ -31,6 +32,9 @@ from db.operations import (save_ont_data, save_pon_status, save_temp_data,
                            save_uplink_ddm_data)
 
 from gui.signals import db_signals
+
+olt_telnet_param_prompt_re = re.compile(r"\{\s*<cr>.*\}\s*:\s*$")
+
 
 # Define o número de threads que serão usadas para processar as portas PON em paralelo.
 NUM_THREADS = 4
