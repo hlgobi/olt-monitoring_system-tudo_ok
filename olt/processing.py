@@ -97,13 +97,17 @@ def send_command_with_pagination(shell, command, expected_prompt, timeout=30):
                     continue              # <<--- ADIÇÃO CRUCIAL
 
 
-                elif olt_telnet_param_prompt_re.search(chunk.strip().splitlines()[-1]):
+                # --- INÍCIO DA CORREÇÃO ---
+                # Verifica se o chunk contém alguma linha de texto antes de tentar acessar a última
+                lines_in_chunk = chunk.strip().splitlines()
+                if lines_in_chunk and olt_telnet_param_prompt_re.search(lines_in_chunk[-1]):
+                # --- FIM DA CORREÇÃO ---
                     logging.debug("Prompt <cr> genérico detectado. Enviando Enter e continuando a escuta.")
                     shell.send("\n")
                     time.sleep(3)       # Pequena pausa para a OLT processar o Enter
                     start_time = time.time() # Reseta o timeout
                     continue              # <<--- ADIÇÃO CRUCIAL
-
+                
                 # Verifica marcadores de fim
                 elif expected_prompt in full_response:
                     logging.debug(f"Prompt esperado '{expected_prompt}' detectado.")

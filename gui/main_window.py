@@ -38,7 +38,7 @@ from olt.processing import (run_data_collection, process_ont_eth_worker,
 from gui.signals import db_signals
 from db.connection import create_tables, check_db_connection
 from db.operations import (save_ont_data, save_pon_status, save_temp_data,
-                           save_resource_data, save_ont_diagnostic_data, save_ont_traffic_bulk, save_ont_statistics_packets_bulk)
+                           save_resource_data, save_ont_diagnostic_data, to_db_timestamp, save_ont_traffic_bulk, save_ont_statistics_packets_bulk)
 from olt.communication import connect_to_olt, send_command as send_olt_command
 from utils.helpers import (clean_response, parse_ont_device_info, parse_ont_optic_status, 
                            parse_ont_wan_status, parse_lan_wifi_devices, parse_wifi_neighbors, 
@@ -8296,25 +8296,64 @@ class OLTDatabaseGUI(QMainWindow):
                 last_up = parse_db_timestamp(data_dict.get('last_up_time'))
                 collection_time = parse_db_timestamp(data_dict.get('collection_time'))
                 
+                # Query para quedas nos últimos 7 dias (CORRIGIDA)
                 cursor.execute("""
-                    SELECT last_down_cause, COUNT(*) FROM ont_data
-                    WHERE serial_number = %s AND last_down_cause IS NOT NULL AND last_down_cause <> 'N/A'
-                    AND collection_time >= NOW() - INTERVAL '7 days' GROUP BY last_down_cause ORDER BY COUNT(*) DESC;
+                    WITH distinct_events AS (
+                        SELECT DISTINCT
+                            last_down_cause,
+                            COALESCE(last_down_time, last_dying_gasp_time) as event_time
+                        FROM ont_data
+                        WHERE
+                            serial_number = %s
+                            AND collection_time >= NOW() - INTERVAL '7 days'
+                            AND last_down_cause IS NOT NULL AND last_down_cause <> 'N/A'
+                            AND COALESCE(last_down_time, last_dying_gasp_time) IS NOT NULL
+                    )
+                    SELECT
+                        last_down_cause,
+                        COUNT(*) as event_count
+                    FROM distinct_events
+                    GROUP BY last_down_cause
+                    ORDER BY event_count DESC;
                 """, (sn,))
                 weekly_drops_by_cause = cursor.fetchall()
 
+                # Query para quedas no dia de hoje (CORRIGIDA)
                 cursor.execute("""
-                    SELECT last_down_cause, COUNT(*) FROM ont_data
-                    WHERE serial_number = %s AND last_down_cause IS NOT NULL AND last_down_cause <> 'N/A'
-                    AND collection_time >= date_trunc('day', NOW()) GROUP BY last_down_cause ORDER BY COUNT(*) DESC;
+                    WITH distinct_events AS (
+                        SELECT DISTINCT
+                            last_down_cause,
+                            COALESCE(last_down_time, last_dying_gasp_time) as event_time
+                        FROM ont_data
+                        WHERE
+                            serial_number = %s
+                            AND collection_time >= date_trunc('day', NOW())
+                            AND last_down_cause IS NOT NULL AND last_down_cause <> 'N/A'
+                            AND COALESCE(last_down_time, last_dying_gasp_time) IS NOT NULL
+                    )
+                    SELECT
+                        last_down_cause,
+                        COUNT(*) as event_count
+                    FROM distinct_events
+                    GROUP BY last_down_cause
+                    ORDER BY event_count DESC;
                 """, (sn,))
                 daily_drops_by_cause = cursor.fetchall()
 
+                # Query para quedas na última hora (CORRIGIDA)
                 cursor.execute("""
-                    SELECT COUNT(*) FROM ont_data WHERE serial_number = %s AND last_down_cause IS NOT NULL 
-                    AND last_down_cause <> 'N/A' AND collection_time >= NOW() - INTERVAL '1 hour'
+                    SELECT DISTINCT ON (event_time)
+                        last_down_cause,
+                        COALESCE(last_down_time, last_dying_gasp_time) as event_time
+                    FROM ont_data
+                    WHERE
+                        serial_number = %s
+                        AND collection_time >= NOW() - INTERVAL '1 hour'
+                        AND last_down_cause IS NOT NULL AND last_down_cause <> 'N/A'
+                        AND COALESCE(last_down_time, last_dying_gasp_time) IS NOT NULL
+                    ORDER BY event_time DESC;
                 """, (sn,))
-                drop_count_last_hour = cursor.fetchone()[0]
+                recent_drops = cursor.fetchall() # Pega a lista de eventos
                 
                 conn.close()
 
@@ -8423,13 +8462,45 @@ class OLTDatabaseGUI(QMainWindow):
                         daily_html += f"<p style='margin:0; padding:0;'>{icon} {text}</p>"
                     self.details_daily_drops_value.setHtml(daily_html)
                 
-                # 8. Alerta de Flapping (Última Hora)
+               # 8. Alerta de Flapping (Última Hora) com Detalhes
+                drop_count_last_hour = len(recent_drops)
+                
                 if drop_count_last_hour == 0:
                     flapping_text, flapping_style = "✅ Nenhuma queda recente (última hora)", "color: #1B5E20; font-weight: bold;"
-                elif drop_count_last_hour <= 2:
-                    flapping_text, flapping_style = f"⚠️ {drop_count_last_hour} {'queda' if drop_count_last_hour == 1 else 'quedas'} na última hora", "color: #FF6F00; font-weight: bold;"
                 else:
-                    flapping_text, flapping_style = f"🚨 ALERTA DE FLAPPING: {drop_count_last_hour} quedas na última hora!", "color: white; background-color: #C62828; padding: 3px; border-radius: 4px; font-weight: bold;"
+                    details_html = ""
+                    for cause, event_time_from_db in recent_drops:
+                        # --- INÍCIO DA CORREÇÃO ---
+                        # Garante que temos um objeto datetime, mesmo que o DB retorne uma string
+                        event_time_dt = to_db_timestamp(event_time_from_db) if isinstance(event_time_from_db, str) else event_time_from_db
+
+                        if event_time_dt:
+                            time_str = event_time_dt.strftime('%d/%m %H:%M:%S')
+                        else:
+                            # Fallback caso a conversão falhe ou o dado seja nulo
+                            time_str = str(event_time_from_db)
+                        # --- FIM DA CORREÇÃO ---
+
+                        # O resto da lógica continua igual, usando 'time_str' e 'cause'
+                        raw_cause = cause.lower().strip()
+                        icon, translated_text = "❔", cause
+
+                        if "losi" in raw_cause or "lobi" in raw_cause: icon, translated_text = "🚨", "Sem Sinal de Fibra"
+                        elif "dying-gasp" in raw_cause: icon, translated_text = "⚡️", "Sem Energia Elétrica"
+                        elif "reset by ont comma" in raw_cause: icon, translated_text = "🛠️", "Reset pelo Técnico"
+                        elif "reset" in raw_cause: icon, translated_text = "🔄", "Reset (Cliente/Técnico)"
+                        
+                        details_html += f"<p style='margin:0; padding:0; font-size:9pt;'>{icon} {translated_text} às <b>{time_str}</b></p>"
+                        
+                    if drop_count_last_hour <= 2:
+                        header = f"⚠️ {drop_count_last_hour} {'queda' if drop_count_last_hour == 1 else 'quedas'} na última hora:"
+                        flapping_text = f"<p style='margin:0; padding:0; font-weight:bold;'>{header}</p>{details_html}"
+                        flapping_style = "color: #FF6F00; padding: 5px;"
+                    else:
+                        header = f"🚨 ALERTA DE FLAPPING: {drop_count_last_hour} quedas na última hora!"
+                        flapping_text = f"<p style='margin:0; padding:0; font-weight:bold;'>{header}</p>{details_html}"
+                        flapping_style = "color: white; background-color: #C62828; padding: 5px; border-radius: 4px; font-weight: bold;"
+                
                 self.details_flapping_alert_value.setText(flapping_text)
                 self.details_flapping_alert_value.setStyleSheet(flapping_style)
                 
