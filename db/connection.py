@@ -1,28 +1,67 @@
-# olt_monitoring_system/db/connection.py
-import psycopg2
-import logging
-import time
-from config import DB_CONFIG
+# -*- coding: utf-8 -*-
+
+# ==============================================================================
+# MÓDULO DE CONEXÃO E GERENCIAMENTO DO BANCO DE DADOS
+# ==============================================================================
+# Este arquivo implementa as funcionalidades de conexão com o banco de dados PostgreSQL
+# e criação/manutenção da estrutura de tabelas necessárias para a aplicação OLT
+# Monitoring System.
+#
+# Inclui funções para:
+# - Verificar a conexão com o banco de dados
+# - Criar e atualizar todas as tabelas necessárias
+# - Garantir a configuração adequada de fuso horário
+# - Criar índices para otimizar consultas
+# - Tratar erros de conexão e operações no banco
+
+# ==============================================================================
+# IMPORTAÇÕES DE MÓDULOS
+# ==============================================================================
+import psycopg2  # Adaptador PostgreSQL para Python
+import logging  # Sistema de logging da aplicação
+import time  # Funções de tempo para tratamento de retries
+from config import DB_CONFIG  # Configurações de conexão com o banco de dados
+
+# ==============================================================================
+# FUNÇÕES DE GERENCIAMENTO DO BANCO DE DADOS
+# ==============================================================================
 
 def create_tables():
-    """Cria ou atualiza todas as tabelas necessárias no banco de dados PostgreSQL."""
-    conn = None
+    """
+    Cria ou atualiza todas as tabelas necessárias no banco de dados PostgreSQL.
+    
+    Esta função estabelece uma conexão com o banco de dados e verifica/cria todas
+    as tabelas necessárias para o funcionamento da aplicação. Além disso, garante
+    que as colunas estejam com os tipos de dados corretos e cria índices para
+    otimizar o desempenho das consultas.
+    
+    A função também configura o fuso horário do banco de dados para 'America/Sao_Paulo'
+    para garantir consistência nos registros de data/hora.
+    
+    Returns:
+        bool: True se todas as operações foram concluídas com sucesso, False caso contrário
+    """
+    conn = None  # Inicializa a variável de conexão como None
+    
     try:
+        # Estabelece conexão com o banco de dados usando as configurações
         conn = psycopg2.connect(**DB_CONFIG)
-
-                
-        # Em db/connection.py, na função create_tables, após a conexão
+        
+        # Cria um cursor para executar comandos SQL
         with conn.cursor() as cursor:
-            # Verificar a configuração de fuso horário atual
+            # Verifica e configura o fuso horário do banco de dados
             cursor.execute("SHOW timezone;")
             tz = cursor.fetchone()[0]
             logging.info(f"Fuso horário atual do banco: {tz}")
             
-            # Definir o fuso horário para America/Sao_Paulo
+            # Define o fuso horário para America/Sao_Paulo
             cursor.execute("SET TIME ZONE 'America/Sao_Paulo';")
             logging.info("Fuso horário definido para America/Sao_Paulo")
             
+            # ==================================================================
             # Tabela de Dados ONT (Optical Network Terminal)
+            # ==================================================================
+            # Armazena informações detalhadas sobre as ONTs conectadas ao sistema
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.ont_data (
                     id SERIAL PRIMARY KEY,
@@ -57,9 +96,12 @@ def create_tables():
                     client_name VARCHAR(100)
                 );
             """)
-
             logging.info("Tabela 'public.ont_data' verificada/criada.")
             
+            # ==================================================================
+            # Tabela de Dados de Tráfego PON
+            # ==================================================================
+            # Armazena informações de tráfego das interfaces PON
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.pon_traffic_data (
                     id SERIAL PRIMARY KEY,
@@ -78,11 +120,14 @@ def create_tables():
             """)
             logging.info("Tabela 'public.pon_traffic_data' verificada/criada.")
             
-            # Índices para melhor performance
+            # Índices para melhor performance na tabela pon_traffic_data
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pon_traffic_olt_fsp ON public.pon_traffic_data (olt_ip, fsp);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pon_traffic_time ON public.pon_traffic_data (collection_time);")
             
-            # --- CORREÇÃO: Garante que as colunas de data/hora usem o tipo correto ---
+            # ==================================================================
+            # Atualização da Estrutura da Tabela ONT
+            # ==================================================================
+            # Comandos para adicionar colunas que podem não existir na tabela ont_data
             alter_commands = [
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS olt_ip VARCHAR(15);",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS previous_mac_address VARCHAR(18);",
@@ -91,7 +136,7 @@ def create_tables():
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS previous_fsp VARCHAR(20);",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS previous_ont_id INTEGER;",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS olt_identifier VARCHAR(10);",
-                "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS ont_online_duration VARCHAR(100);", # <-- ADICIONADO
+                "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS ont_online_duration VARCHAR(100);",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS primaria VARCHAR(100);",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS secundaria VARCHAR(100);",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS porta_secundaria VARCHAR(10);",
@@ -112,36 +157,30 @@ def create_tables():
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS line_profile_id VARCHAR(20);",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS service_profile_name VARCHAR(100);",
                 "ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS service_profile_id VARCHAR(20);",
-                # Corrigir o tipo da coluna collection_time se já existir
-                """
-                DO $$
-                BEGIN
-                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ont_data' AND column_name = 'collection_time' AND data_type != 'timestamp with time zone') THEN
-                        ALTER TABLE public.ont_data ALTER COLUMN collection_time TYPE TIMESTAMP WITH TIME ZONE;
-                    END IF;
-                END $$;
-                """,
             ]
-
-                        # Em connection.py, na função create_tables, após a criação da tabela ont_data
+            
+            # Executa todos os comandos de alteração
+            for command in alter_commands:
+                cursor.execute(command)
+            logging.info("Colunas da tabela 'public.ont_data' verificadas/adicionadas.")
+            
+            # Garante que a coluna collection_time use o tipo correto (TIMESTAMP WITH TIME ZONE)
             cursor.execute("""
                 DO $$
                 BEGIN
-                    -- Verifica se a coluna collection_time existe e qual é seu tipo
                     IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ont_data' AND column_name = 'collection_time') THEN
-                        -- Se não for TIMESTAMP WITH TIME ZONE, altera
                         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ont_data' AND column_name = 'collection_time' AND data_type = 'timestamp with time zone') THEN
                             ALTER TABLE public.ont_data ALTER COLUMN collection_time TYPE TIMESTAMP WITH TIME ZONE;
                             RAISE NOTICE 'Coluna collection_time alterada para TIMESTAMP WITH TIME ZONE';
                         END IF;
                     END IF;
                 END $$;
-""")
+            """)
             
-            for command in alter_commands:
-                cursor.execute(command)
-            logging.info("Colunas da tabela 'public.ont_data' verificadas/adicionadas.")
-            
+            # ==================================================================
+            # Índices para a Tabela ONT
+            # ==================================================================
+            # Cria índices para otimizar consultas frequentes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_data_sn ON public.ont_data(serial_number);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_data_fsp ON public.ont_data(fsp);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_data_mac ON public.ont_data(mac_address);")
@@ -149,8 +188,11 @@ def create_tables():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_data_olt ON public.ont_data(olt_identifier);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_data_primaria ON public.ont_data(primaria);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_data_secundaria ON public.ont_data(secundaria);")
-            # --- INÍCIO DA ADIÇÃO ---
-            # Adicionar colunas para os detalhes da versão da ONT
+            
+            # ==================================================================
+            # Adição de Colunas para Detalhes da Versão da ONT
+            # ==================================================================
+            # Adiciona colunas para armazenar informações de versão e firmware
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS vendor_id VARCHAR(50);")
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS ont_version VARCHAR(50);")
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS product_id VARCHAR(50);")
@@ -159,7 +201,11 @@ def create_tables():
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS standby_software_version VARCHAR(100);")
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS ont_product_description TEXT;")
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS support_xml_version VARCHAR(50);")
-            # --- INÍCIO DA ADIÇÃO PARA DADOS ÓPTICOS ---
+            
+            # ==================================================================
+            # Adição de Colunas para Dados Ópticos da ONT
+            # ==================================================================
+            # Adiciona colunas para armazenar informações detalhadas do módulo óptico
             logging.info("Adicionando colunas para detalhes ópticos da ONT...")
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_module_type VARCHAR(50);")
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_module_subtype VARCHAR(50);")
@@ -176,8 +222,11 @@ def create_tables():
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_bias_current_alarm VARCHAR(50);")
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_temperature_alarm VARCHAR(50);")
             cursor.execute("ALTER TABLE public.ont_data ADD COLUMN IF NOT EXISTS optical_voltage_alarm VARCHAR(50);")
-            # --- FIM DA ADIÇÃO ---
-           
+            
+            # ==================================================================
+            # Tabela de Status PON
+            # ==================================================================
+            # Armazena informações de status das interfaces PON
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.pon_status (
                     id SERIAL PRIMARY KEY,
@@ -193,6 +242,10 @@ def create_tables():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pon_status_olt_fsp_time ON public.pon_status(olt_identifier, fsp, collection_time DESC);")
             logging.info("Tabela 'public.pon_status' verificada/criada.")
             
+            # ==================================================================
+            # Tabela de Monitoramento de Temperatura
+            # ==================================================================
+            # Armazena dados de temperatura dos slots das OLTs
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.temperature_monitoring (
                     id SERIAL PRIMARY KEY,
@@ -209,6 +262,10 @@ def create_tables():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_temp_monitoring_olt_slot_time ON public.temperature_monitoring(olt_identifier, slot_id, collection_time DESC);")
             logging.info("Tabela 'public.temperature_monitoring' verificada/criada.")
             
+            # ==================================================================
+            # Tabela de Estado da Porta PON
+            # ==================================================================
+            # Armazena informações detalhadas sobre o estado das portas PON
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.pon_port_state (
                     id SERIAL PRIMARY KEY,
@@ -236,11 +293,16 @@ def create_tables():
             """)
             logging.info("Tabela 'public.pon_port_state' verificada/criada.")
             
+            # Adiciona colunas que podem não existir na tabela pon_port_state
             cursor.execute("ALTER TABLE public.pon_port_state ADD COLUMN IF NOT EXISTS olt_identifier VARCHAR(10);")
             cursor.execute("ALTER TABLE public.pon_port_state ADD COLUMN IF NOT EXISTS left_guaranteed_bandwidth_kbps INTEGER;")
             cursor.execute("ALTER TABLE public.pon_port_state ADD COLUMN IF NOT EXISTS admin_state VARCHAR(20);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pon_port_state_olt_fsp ON public.pon_port_state (olt_ip, fsp);")
             
+            # ==================================================================
+            # Tabela de Monitoramento de Recursos
+            # ==================================================================
+            # Armazena dados de utilização de recursos (CPU, memória) das OLTs
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.resource_monitoring (
                     id SERIAL PRIMARY KEY,
@@ -258,6 +320,10 @@ def create_tables():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_resource_monitoring_olt_slot_type_time ON public.resource_monitoring(olt_identifier, slot_id, resource_type, collection_time DESC);")
             logging.info("Tabela 'public.resource_monitoring' verificada/criada.")
             
+            # ==================================================================
+            # Tabela de Histórico de Diagnóstico de ONT
+            # ==================================================================
+            # Armazena o histórico de diagnósticos realizados nas ONTs
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.ont_diagnostics_history (
                     id SERIAL PRIMARY KEY,
@@ -276,7 +342,11 @@ def create_tables():
                 );
             """)
             logging.info("Tabela 'public.ont_diagnostics_history' verificada/criada.")
-        
+            
+            # ==================================================================
+            # Tabela de Estatísticas de Pacotes da ONT
+            # ==================================================================
+            # Armazena estatísticas de tráfego de pacotes das ONTs
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.ont_statistics_packets (
                     id SERIAL PRIMARY KEY,
@@ -296,6 +366,10 @@ def create_tables():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_stats_packets_fsp_ont_id_time ON public.ont_statistics_packets(fsp, ont_id, collection_time DESC);")
             logging.info("Tabela 'public.ont_statistics_packets' verificada/criada.")
             
+            # ==================================================================
+            # Tabela de Estatísticas de Pacotes da PON
+            # ==================================================================
+            # Armazena estatísticas detalhadas de tráfego das interfaces PON
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.pon_statistics_packets (
                     id SERIAL PRIMARY KEY,
@@ -317,9 +391,11 @@ def create_tables():
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pon_stats_packets_fsp_time ON public.pon_statistics_packets(fsp, collection_time DESC);")
             logging.info("Tabela 'public.pon_statistics_packets' verificada/criada.")
-        
-            # Em db/connection.py, na função create_tables
-
+            
+            # ==================================================================
+            # Tabela de Dados de Tráfego da ONT
+            # ==================================================================
+            # Armazena informações de tráfego (up/down) das ONTs
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.ont_traffic_data (
                     id SERIAL PRIMARY KEY,
@@ -334,9 +410,11 @@ def create_tables():
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_traffic_fsp_ont_id_time ON public.ont_traffic_data(fsp, ont_id, collection_time DESC);")
             logging.info("Tabela 'public.ont_traffic_data' verificada/criada.")
-        
+            
+            # ==================================================================
             # Tabela de Estatísticas de Porta Ethernet por ONT
-            # Para a tabela ont_eth_port_statistics
+            # ==================================================================
+            # Armazena estatísticas das interfaces Ethernet das ONTs
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ont_eth_port_statistics (
                     id SERIAL PRIMARY KEY,
@@ -366,8 +444,8 @@ def create_tables():
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ont_eth_stats_fsp_ont_eth_time ON ont_eth_port_statistics(fsp, ont_id, eth_port_id, collection_time DESC);")
             logging.info("Tabela 'ont_eth_port_statistics' verificada/criada.")
-                        
-            # Faça o mesmo para a tabela ont_eth_port_statistics
+            
+            # Garante que a coluna collection_time use o tipo correto na tabela ont_eth_port_statistics
             cursor.execute("""
                 DO $$
                 BEGIN
@@ -379,8 +457,11 @@ def create_tables():
                     END IF;
                 END $$;
             """)
-
-            # Tabela de dados DDM de uplink
+            
+            # ==================================================================
+            # Tabela de Dados DDM de Uplink
+            # ==================================================================
+            # Armazena informações de monitoramento digital de diagnóstico dos uplinks
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.uplink_ddm_data (
                     id SERIAL PRIMARY KEY,
@@ -401,38 +482,70 @@ def create_tables():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_uplink_ddm_olt_slot_port_time ON public.uplink_ddm_data(olt_identifier, slot, port, collection_time DESC);")
             logging.info("Tabela 'public.uplink_ddm_data' verificada/criada.")
             
+        # Confirma todas as alterações no banco de dados
         conn.commit()
         logging.info("Todas as tabelas e colunas foram verificadas/criadas com sucesso no esquema 'public'.")
         return True
+        
     except Exception as e: 
+        # Em caso de erro, registra no log e desfaz alterações
         logging.error(f"ERRO CRÍTICO: Falha ao criar tabelas: {str(e)}", exc_info=True) 
         if conn:
             conn.rollback()
         return False 
+        
     finally: 
+        # Garante que a conexão seja fechada, mesmo em caso de erro
         if conn: 
             conn.close()
 
-# Em connection.py, modifique a função check_db_connection
 def check_db_connection():
-    """Verifica a conexão com o banco de dados PostgreSQL com lógica de nova tentativa."""
-    max_retries = 3
+    """
+    Verifica a conexão com o banco de dados PostgreSQL com lógica de nova tentativa.
+    
+    Esta função tenta estabelecer uma conexão com o banco de dados usando as
+    configurações definidas em DB_CONFIG. Em caso de falha, realiza novas tentativas
+    até um máximo definido por max_retries, com um intervalo entre as tentativas.
+    
+    Se a conexão for bem-sucedida, também configura o fuso horário da sessão para
+    'America/Sao_Paulo' para garantir consistência nos registros de data/hora.
+    
+    Returns:
+        bool: True se a conexão foi estabelecida com sucesso, False caso contrário
+    """
+    max_retries = 3  # Número máximo de tentativas de conexão
+    
+    # Loop de tentativas de conexão
     for attempt in range(max_retries):
-        conn = None
+        conn = None  # Inicializa a variável de conexão como None
+        
         try:
+            # Tenta estabelecer a conexão com o banco de dados
             conn = psycopg2.connect(**DB_CONFIG)
-            # Definir o fuso horário da sessão para America/Sao_Paulo
+            
+            # Se a conexão for bem-sucedida, configura o fuso horário
             with conn.cursor() as cursor:
                 cursor.execute("SET TIME ZONE 'America/Sao_Paulo';")
                 # Verifica se o fuso foi definido corretamente
                 cursor.execute("SHOW timezone;")
                 tz = cursor.fetchone()[0]
                 logging.info(f"Fuso horário da sessão PostgreSQL: {tz}")
+            
+            # Se chegou aqui, a conexão foi bem-sucedida
             return True
+            
         except Exception as e:
+            # Registra o aviso sobre a falha na tentativa atual
             logging.warning(f"Tentativa {attempt+1}/{max_retries}: Conexão PostgreSQL falhou: {e}")
-            time.sleep(2)
+            
+            # Se não for a última tentativa, aguarda antes de tentar novamente
+            if attempt < max_retries - 1:
+                time.sleep(2)  # Espera 2 segundos antes da próxima tentativa
+            
         finally:
+            # Garante que a conexão seja fechada, mesmo em caso de erro
             if conn is not None:
                 conn.close()
+    
+    # Se todas as tentativas falharam, retorna False
     return False
