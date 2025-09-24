@@ -101,37 +101,26 @@ def to_db_timestamp(ts_str):
 # FUNÇÕES PARA PERSISTÊNCIA DE DADOS DE ONT
 # ==============================================================================
 
+# db/operations.py
+
 def save_ont_data(olt_ip, ont_info):
     """
     Salva ou atualiza os dados de uma ONT no banco de dados, incluindo detalhes de status
     e preservando o nome do cliente existente.
-    
-    Esta função realiza uma inserção completa dos dados da ONT a cada coleta,
-    mantendo um histórico completo de todas as alterações. Ela também verifica
-    se houve mudanças no FSP, ID da ONT ou endereço MAC em relação ao registro
-    anterior e armazena essas informações para rastreamento de mudanças.
-    
-    Args:
-        olt_ip (str): Endereço IP da OLT onde a ONT está conectada
-        ont_info (dict): Dicionário contendo todas as informações da ONT coletadas
     """
     logging.info(f"[DB] [save_ont_data] Iniciando salvamento para ONT S/N: {ont_info.get('sn', 'N/A')} na OLT {olt_ip}")
     conn = None
     try:
-        # Extrai o identificador da OLT a partir do IP
         olt_identifier = olt_ip.split('.')[-1]
         
-        # Processa a descrição para extrair informações estruturadas
         description = ont_info.get('description', 'N/A')
         parsed_desc = parse_descricao_avancada(description)
         primaria = parsed_desc.get('primaria', 'N/A')
         secundaria = parsed_desc.get('secundaria', 'N/A')
         porta_secundaria = parsed_desc.get('porta_secundaria', 'N/A')
         
-        # Estabelece conexão com o banco de dados
         conn = psycopg2.connect(**DB_CONFIG)
         
-        # Configura o fuso horário da sessão
         with conn.cursor() as cursor:
             cursor.execute("SET TIME ZONE 'America/Sao_Paulo';")
             cursor.execute("SHOW timezone;")
@@ -139,7 +128,6 @@ def save_ont_data(olt_ip, ont_info):
             logging.info(f"Fuso horário da sessão PostgreSQL: {tz}")
         
         with conn.cursor() as cursor:
-            # Busca o registro anterior da mesma ONT para detectar mudanças
             cursor.execute("""
                 SELECT fsp, ont_id, mac_address, client_name
                 FROM public.ont_data
@@ -149,7 +137,6 @@ def save_ont_data(olt_ip, ont_info):
             """, (ont_info['sn'],))
             previous_record = cursor.fetchone()
             
-            # Inicializa flags de mudança e variáveis para valores anteriores
             fsp_changed = False
             ont_id_changed = False
             mac_changed = False
@@ -158,14 +145,12 @@ def save_ont_data(olt_ip, ont_info):
             previous_mac = None
             existing_client_name = None
             
-            # Se existe um registro anterior, extrai as informações e compara
             if previous_record:
                 previous_fsp, previous_ont_id, previous_mac, existing_client_name = previous_record
                 fsp_changed = previous_fsp != ont_info['fsp']
                 ont_id_changed = previous_ont_id != int(ont_info['ont_id'])
                 mac_changed = previous_mac and previous_mac != ont_info['mac'] and ont_info['mac'] != 'N/A'
             
-            # Obtém o timestamp atual no fuso de Brasília
             current_time = get_current_brasilia_time()
             
             # Garante que o campo 'services' seja uma string JSON antes de inserir
@@ -173,73 +158,116 @@ def save_ont_data(olt_ip, ont_info):
             if isinstance(services_data, (list, dict)):
                 services_json = json.dumps(services_data)
             else:
-                services_json = services_data  # Assume que já é uma string JSON ou None
+                services_json = services_data
 
-            # SQL para inserção dos dados da ONT
-            sql = """
-                INSERT INTO public.ont_data (
-                    olt_ip, olt_identifier, fsp, ont_id, mac_address, client_name,
-                    previous_mac_address, serial_number, rx_power, tx_power,
-                    description, primaria, secundaria, porta_secundaria, 
-                    fsp_changed, ont_id_changed,
-                    previous_fsp, previous_ont_id, status,
-                    last_down_cause, last_up_time, last_down_time,
-                    last_dying_gasp_time, line_profile_name, services,
-                    ont_distance, memory_occupation, cpu_occupation, temperature,
-                    ont_ip_address, line_profile_id, service_profile_id, service_profile_name,
-                    connection_code,
-                    vendor_id, ont_version, product_id, equipment_id,
-                    main_software_version, standby_software_version,
-                    ont_product_description, support_xml_version,
-                    ont_online_duration,
-                    optical_module_type, optical_module_subtype, optical_encapsulation_type,
-                    optical_vendor_name, optical_vendor_pn, optical_vendor_sn,
-                    optical_date_code, optical_olt_rx_ont_power_dbm, ont_voltage_v,
-                    ont_tx_bias_current_ma, optical_rx_power_alarm, optical_tx_power_alarm,
-                    optical_bias_current_alarm, optical_temperature_alarm, optical_voltage_alarm,
-                    collection_time
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    CAST(%s AS TIMESTAMP WITH TIME ZONE))
+            # Lista de colunas para a query INSERT
+            columns = [
+                'olt_ip', 'olt_identifier', 'fsp', 'ont_id', 'mac_address', 'client_name',
+                'previous_mac_address', 'serial_number', 'rx_power', 'tx_power',
+                'description', 'primaria', 'secundaria', 'porta_secundaria', 
+                'fsp_changed', 'ont_id_changed',
+                'previous_fsp', 'previous_ont_id', 'status',
+                'last_down_cause', 'last_up_time', 'last_down_time',
+                'last_dying_gasp_time', 'line_profile_name', 'services',
+                'ont_distance', 'memory_occupation', 'cpu_occupation', 'temperature',
+                'ont_ip_address', 'line_profile_id', 'service_profile_id', 'service_profile_name',
+                'connection_code',
+                'vendor_id', 'ont_version', 'product_id', 'equipment_id',
+                'main_software_version', 'standby_software_version',
+                'ont_product_description', 'support_xml_version',
+                'ont_online_duration',
+                'optical_module_type', 'optical_module_subtype', 'optical_encapsulation_type',
+                'optical_vendor_name', 'optical_vendor_pn', 'optical_vendor_sn',
+                'optical_date_code', 'optical_olt_rx_ont_power_dbm', 'ont_voltage_v',
+                'ont_tx_bias_current_ma', 'optical_rx_power_alarm', 'optical_tx_power_alarm',
+                'optical_bias_current_alarm', 'optical_temperature_alarm', 'optical_voltage_alarm',
+                'collection_time'
+            ]
+            
+            # Valores correspondentes às colunas (na mesma ordem)
+            values = [
+                olt_ip,  # olt_ip
+                olt_identifier,  # olt_identifier
+                ont_info['fsp'],  # fsp
+                int(ont_info['ont_id']),  # ont_id
+                ont_info['mac'] if ont_info['mac'] != 'N/A' else None,  # mac_address
+                existing_client_name,  # client_name
+                previous_mac if mac_changed else None,  # previous_mac_address
+                ont_info['sn'],  # serial_number
+                float(ont_info['rx']) if ont_info['rx'] not in ['N/A', '-'] else None,  # rx_power
+                float(ont_info['tx']) if ont_info['tx'] not in ['N/A', '-'] else None,  # tx_power
+                ont_info['description'],  # description
+                primaria,  # primaria
+                secundaria,  # secundaria
+                porta_secundaria,  # porta_secundaria
+                fsp_changed,  # fsp_changed
+                ont_id_changed,  # ont_id_changed
+                previous_fsp if fsp_changed else None,  # previous_fsp
+                previous_ont_id if ont_id_changed else None,  # previous_ont_id
+                ont_info['status'],  # status
+                ont_info.get('last_down_cause'),  # last_down_cause
+                to_db_timestamp(ont_info.get('last_up_time')),  # last_up_time
+                to_db_timestamp(ont_info.get('last_down_time')),  # last_down_time
+                to_db_timestamp(ont_info.get('last_dying_gasp_time')),  # last_dying_gasp_time
+                ont_info.get('line_profile_name'),  # line_profile_name
+                services_json,  # services
+                ont_info.get('ont_distance'),  # ont_distance
+                ont_info.get('memory_occupation'),  # memory_occupation
+                ont_info.get('cpu_occupation'),  # cpu_occupation
+                ont_info.get('temperature'),  # temperature
+                ont_info.get('ont_ip_address'),  # ont_ip_address
+                ont_info.get('line_profile_id'),  # line_profile_id
+                ont_info.get('service_profile_id'),  # service_profile_id
+                ont_info.get('service_profile_name'),  # service_profile_name
+                ont_info.get('connection_code'),  # connection_code
+                ont_info.get('vendor_id'),  # vendor_id
+                ont_info.get('ont_version'),  # ont_version
+                ont_info.get('product_id'),  # product_id
+                ont_info.get('equipment_id'),  # equipment_id
+                ont_info.get('main_software_version'),  # main_software_version
+                ont_info.get('standby_software_version'),  # standby_software_version
+                ont_info.get('ont_product_description'),  # ont_product_description
+                ont_info.get('support_xml_version'),  # support_xml_version
+                ont_info.get('ont_online_duration'),  # ont_online_duration
+                ont_info.get('optical_module_type'),  # optical_module_type
+                ont_info.get('optical_module_subtype'),  # optical_module_subtype
+                ont_info.get('optical_encapsulation_type'),  # optical_encapsulation_type
+                ont_info.get('optical_vendor_name'),  # optical_vendor_name
+                ont_info.get('optical_vendor_pn'),  # optical_vendor_pn
+                ont_info.get('optical_vendor_sn'),  # optical_vendor_sn
+                ont_info.get('optical_date_code'),  # optical_date_code
+                ont_info.get('optical_olt_rx_ont_power_dbm'),  # optical_olt_rx_ont_power_dbm
+                ont_info.get('ont_voltage_v'),  # ont_voltage_v
+                ont_info.get('ont_tx_bias_current_ma'),  # ont_tx_bias_current_ma
+                ont_info.get('optical_rx_power_alarm'),  # optical_rx_power_alarm
+                ont_info.get('optical_tx_power_alarm'),  # optical_tx_power_alarm
+                ont_info.get('optical_bias_current_alarm'),  # optical_bias_current_alarm
+                ont_info.get('optical_temperature_alarm'),  # optical_temperature_alarm
+                ont_info.get('optical_voltage_alarm'),  # optical_voltage_alarm
+                current_time  # collection_time
+            ]
+            
+            # Verificação de segurança para garantir que o número de colunas e valores coincide
+            if len(columns) != len(values):
+                logging.error(f"ERRO: Número de colunas ({len(columns)}) não corresponde ao número de valores ({len(values)})")
+                logging.error(f"Colunas: {columns}")
+                logging.error(f"Valores: {values}")
+                raise ValueError("Número de colunas e valores não coincide")
+            
+            # Constrói a query SQL dinamicamente
+            sql = f"""
+                INSERT INTO public.ont_data ({', '.join(columns)})
+                VALUES ({', '.join(['%s'] * len(values))})
             """
             
-            # Prepara os parâmetros para a consulta SQL
-            params = (
-                olt_ip, olt_identifier, ont_info['fsp'], int(ont_info['ont_id']), 
-                ont_info['mac'] if ont_info['mac'] != 'N/A' else None, existing_client_name,
-                previous_mac if mac_changed else None, ont_info['sn'], 
-                float(ont_info['rx']) if ont_info['rx'] not in ['N/A', '-'] else None, 
-                float(ont_info['tx']) if ont_info['tx'] not in ['N/A', '-'] else None,
-                ont_info['description'], primaria, secundaria, porta_secundaria,
-                fsp_changed, ont_id_changed, previous_fsp if fsp_changed else None, 
-                previous_ont_id if ont_id_changed else None, ont_info['status'],
-                ont_info.get('last_down_cause'), to_db_timestamp(ont_info.get('last_up_time')),
-                to_db_timestamp(ont_info.get('last_down_time')), to_db_timestamp(ont_info.get('last_dying_gasp_time')),
-                ont_info.get('line_profile_name'), services_json,
-                ont_info.get('ont_distance'), ont_info.get('memory_occupation'), 
-                ont_info.get('cpu_occupation'), ont_info.get('temperature'),
-                ont_info.get('ont_ip_address'), ont_info.get('line_profile_id'),
-                ont_info.get('service_profile_id'), ont_info.get('service_profile_name'),
-                ont_info.get('connection_code'), ont_info.get('vendor_id'),
-                ont_info.get('ont_version'), ont_info.get('product_id'),
-                ont_info.get('equipment_id'), ont_info.get('main_software_version'),
-                ont_info.get('standby_software_version'), ont_info.get('ont_product_description'),
-                ont_info.get('support_xml_version'), ont_info.get('ont_online_duration'),
-                ont_info.get('optical_module_type'), ont_info.get('optical_module_subtype'),
-                ont_info.get('optical_encapsulation_type'), ont_info.get('optical_vendor_name'),
-                ont_info.get('optical_vendor_pn'), ont_info.get('optical_vendor_sn'),
-                ont_info.get('optical_date_code'), ont_info.get('optical_olt_rx_ont_power_dbm'),
-                ont_info.get('ont_voltage_v'), ont_info.get('ont_tx_bias_current_ma'),
-                ont_info.get('optical_rx_power_alarm'), ont_info.get('optical_tx_power_alarm'),
-                ont_info.get('optical_bias_current_alarm'), ont_info.get('optical_temperature_alarm'),
-                ont_info.get('optical_voltage_alarm'),
-                current_time.isoformat()
-            )
+            # Log para depuração
+            logging.debug(f"SQL Query: {sql}")
+            logging.debug(f"Número de placeholders: {sql.count('%s')}")
+            logging.debug(f"Número de valores: {len(values)}")
             
-            # Executa a inserção
-            cursor.execute(sql, params)
+            cursor.execute(sql, values)
             conn.commit()
             
-            # Verifica o timestamp que foi realmente inserido
             cursor.execute("""
                 SELECT collection_time 
                 FROM public.ont_data 

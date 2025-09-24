@@ -57,7 +57,7 @@ BOARD_PORT_MAP = {
     "H907CGHF": 16,
 }
 
-def send_command_with_pagination(shell, command, expected_prompt, timeout=30):
+def send_command_with_pagination(shell, command, prompt, timeout=60):
     """
     Envia comando SSH com tratamento robusto.
     Retorna a saída do comando limpa.
