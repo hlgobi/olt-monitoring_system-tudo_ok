@@ -1,68 +1,78 @@
-# olt_monitoring_system/config.py
-# Este arquivo centraliza as configurações da aplicação, como as configurações de log,
-# os detalhes de conexão com o banco de dados e a lista de equipamentos OLT a serem monitorados.
+# -*- coding: utf-8 -*-
 
-# --- Bloco de Importações ---
-# Importação do módulo logging para configurar e usar o sistema de logs da aplicação
-import logging
+# ==============================================================================
+# ARQUIVO DE CONFIGURAÇÃO DA APLICAÇÃO
+# ==============================================================================
+# Este arquivo centraliza todas as configurações da aplicação OLT Monitoring System,
+# incluindo as configurações de logging, detalhes de conexão com o banco de dados
+# e a lista de equipamentos OLT a serem monitorados.
+#
+# A centralização das configurações facilita a manutenção e permite alterações
+# sem a necessidade de modificar o código-fonte principal da aplicação.
 
-# Importação do módulo os para interagir com o sistema operacional
-# Embora não seja utilizado diretamente neste arquivo, é uma boa prática tê-lo disponível
-# para possíveis expansões futuras que possam requerer interação com o sistema de arquivos
-import os
+# ==============================================================================
+# IMPORTAÇÕES DE MÓDULOS
+# ==============================================================================
+import logging  # Módulo para configuração e uso do sistema de logs da aplicação
+import os  # Módulo para interações com o sistema operacional (disponível para expansões futuras)
 
-# --- Configuração do Logging ---
-# Configuração do sistema de logs da aplicação
-# Esta seção define como as mensagens de log serão formatadas, filtradas e exibidas
-# O logging é essencial para depuração, monitoramento e auditoria da aplicação
+# ==============================================================================
+# CONFIGURAÇÃO DO SISTEMA DE LOGGING
+# ==============================================================================
+# Configuração do sistema de logs da aplicação, essencial para depuração,
+# monitoramento e auditoria das operações realizadas.
 logging.basicConfig(
     # Define o nível mínimo de severidade para as mensagens que serão registradas
-    # logging.INFO captura mensagens de nível INFO, WARNING, ERROR e CRITICAL
-    # Mensagens de nível DEBUG serão ignoradas
+    # Nível INFO: captura mensagens informativas, avisos, erros e críticos
+    # Mensagens de nível DEBUG serão ignoradas neste ambiente
     level=logging.INFO,
     
-    # Define o formato de cada mensagem de log
+    # Define o formato de cada mensagem de log, incluindo timestamp, nível e mensagem
     # %(asctime)s: Data e hora do evento no formato YYYY-MM-DD HH:MM:SS,mmm
     # %(levelname)s: Nível da mensagem (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     # %(message)s: A mensagem de log em si
     format='%(asctime)s - %(levelname)s - %(message)s',
     
     # Define os destinos para onde as mensagens de log serão enviadas
-    # Pode ser um ou mais handlers, como arquivo, console, email, etc.
     handlers=[
-        # Handler para enviar os logs para um arquivo chamado 'olt_monitoring_debug.log'
-        # Este arquivo será criado no mesmo diretório onde a aplicação está sendo executada
+        # Handler para envio dos logs para arquivo
+        # Cria um arquivo 'olt_monitoring_debug.log' no diretório de execução
         # Útil para análise posterior e histórico de eventos
         logging.FileHandler('olt_monitoring_debug.log'),
         
-        # Handler para enviar os logs também para o console (terminal)
-        # Permite acompanhamento em tempo real durante o desenvolvimento e operação
+        # Handler para envio dos logs também para o console (terminal)
+        # Permite acompanhamento em tempo real durante desenvolvimento e operação
         logging.StreamHandler()
     ]
 )
 
-# --- Configuração do Banco de Dados PostgreSQL ---
-# Dicionário contendo todas as informações necessárias para se conectar ao banco de dados PostgreSQL
-# Centralizar essas configurações facilita a manutenção e alteração sem modificar o código-fonte
+# ==============================================================================
+# CONFIGURAÇÃO DO BANCO DE DADOS POSTGRESQL
+# ==============================================================================
+# Dicionário contendo todas as informações necessárias para se conectar ao banco
+# de dados PostgreSQL. Centralizar essas configurações facilita a manutenção e
+# permite alterações sem modificar o código-fonte da aplicação.
 DB_CONFIG = {
-    'host': '177.8.200.12',
-    'database': 'Olt',
-    'user': 'olt_user132',
-    'password': 'yQAZgvodsWSDm25671&&&',
-    'port': '5432'
+    'host': '177.8.200.12',        # Endereço IP ou hostname do servidor de banco de dados
+    'database': 'Olt',             # Nome do banco de dados a ser utilizado
+    'user': 'olt_user132',         # Nome de usuário para autenticação no banco
+    'password': 'yQAZgvodsWSDm25671&&&',  # Senha do usuário (em produção, considerar uso de variáveis de ambiente)
+    'port': '5432'                 # Porta de conexão com o banco de dados
 }
 
-
-# --- MODIFICAÇÃO: Lista de OLTs definida diretamente no código ---
-# Lista de dicionários contendo as configurações dos equipamentos OLT a serem monitorados
-# Cada dicionário representa uma OLT com suas propriedades de conexão
-# Esta abordagem simplifica a configuração inicial, eliminando a necessidade de arquivos externos
+# ==============================================================================
+# CONFIGURAÇÃO DOS EQUIPAMENTOS OLT
+# ==============================================================================
+# Lista de dicionários contendo as configurações dos equipamentos OLT a serem monitorados.
+# Cada dicionário representa uma OLT com suas propriedades de conexão.
+# Esta abordagem simplifica a configuração inicial, eliminando a necessidade de
+# arquivos externos para armazenar estas informações.
 OLT_CONFIGS = [
     # Configuração da OLT BURITI-95
-    # name: Nome identificador da OLT
+    # name: Nome identificador da OLT (usado para referências internas e exibição na GUI)
     # ip: Endereço IP para conexão via SSH/Telnet
-    # username: Nome de usuário para autenticação
-    # password: Senha para autenticação
+    # username: Nome de usuário para autenticação no equipamento
+    # password: Senha para autenticação no equipamento
     {'name': 'BURITI-95', 'ip': '10.0.0.95', 'username': 'huawei', 'password': 'ccmsai13'},
     
     # Configuração da OLT CARMO-93
@@ -102,7 +112,10 @@ OLT_CONFIGS = [
     {'name': 'URUANA-92', 'ip': '10.0.0.92', 'username': 'huawei', 'password': 'ccmsai13'},
 ]
 
-# --- Função para Acessar as Configurações das OLTs ---
+# ==============================================================================
+# FUNÇÕES DE ACESSO ÀS CONFIGURAÇÕES
+# ==============================================================================
+
 def get_olt_configs():
     """
     Retorna a lista de configurações das OLTs definida estaticamente.
@@ -122,6 +135,9 @@ def get_olt_configs():
     # Retorna a lista completa de configurações das OLTs
     return OLT_CONFIGS
 
+# ==============================================================================
+# INICIALIZAÇÃO E VERIFICAÇÃO DAS CONFIGURAÇÕES
+# ==============================================================================
 # Mensagem de log para indicar que este arquivo de configuração foi carregado com sucesso
 # quando a aplicação inicia. Isso serve como confirmação de que as configurações básicas
 # (banco de dados e OLTs) estão disponíveis para o restante da aplicação
