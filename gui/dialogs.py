@@ -1,465 +1,691 @@
-# 13. olt_monitoring_system/gui/dialogs.py
-# gui/dialogs.py
-# Este arquivo contém as classes para as caixas de diálogo usadas na aplicação,
-# como a de login na OLT e a de limpeza de dados históricos.
+# -*- coding: utf-8 -*-
 
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QGroupBox, QComboBox, # Widgets básicos.
-                           QLabel, QPushButton, QFormLayout, QLineEdit, # Widgets de formulário e botões.
-                           QMessageBox, QHBoxLayout, QTextEdit, QTextEdit,
-                           QTableWidget, QTableWidgetItem,
-                           QTextEdit, QSplitter) # Caixas de mensagem e layouts.
-from PyQt5.QtCore import Qt, QTimer # Importa Qt para constantes (não usado diretamente aqui, mas bom ter).
-from PyQt5.QtGui import QFont # <<< IMPORTAÇÃO MAIS ESPECÍFICA
-from config import DB_CONFIG # Importa a configuração do banco de dados.
-from db.operations import get_ont_diagnostic_history
-from gui.signals import db_signals # Importa os sinais do banco de dados.
-import psycopg2 # Importa o adaptador PostgreSQL.
-import logging # Importa o módulo de logging.
-import json
+# ==============================================================================
+# MÓDULO DE DIÁLOGOS DA INTERFACE GRÁFICA (GUI)
+# ==============================================================================
+# Este arquivo contém as classes para as caixas de diálogo usadas na aplicação OLT
+# Monitoring System. Implementa diálogos para login em equipamentos OLT, limpeza
+# de dados históricos do banco de dados e visualização de histórico de diagnóstico
+# de ONTs.
+#
+# Cada classe de diálogo herda de QDialog do PyQt5 e implementa uma interface
+# específica para sua funcionalidade, com validações de entrada, interação com
+# o banco de dados e emissão de sinais para atualização da interface principal.
 
-class CleanupDialog(QDialog): # Define a classe para o diálogo de limpeza de dados.
+# ==============================================================================
+# IMPORTAÇÕES DE MÓDULOS
+# ==============================================================================
+from PyQt5.QtWidgets import (
+    QDialog, QVBoxLayout, QGroupBox, QComboBox,  # Widgets básicos e layouts
+    QLabel, QPushButton, QFormLayout, QLineEdit,  # Widgets de formulário e botões
+    QMessageBox, QHBoxLayout, QTextEdit,         # Caixas de mensagem e áreas de texto
+    QTableWidget, QTableWidgetItem, QSplitter    # Tabelas e divisores de layout
+)
+from PyQt5.QtCore import Qt, QTimer  # Constantes do Qt e temporizadores
+from PyQt5.QtGui import QFont  # Para manipulação de fontes
+
+# Importações específicas da aplicação
+from config import DB_CONFIG  # Configurações do banco de dados
+from db.operations import get_ont_diagnostic_history  # Função para obter histórico de diagnóstico
+from gui.signals import db_signals  # Sinais para comunicação entre componentes
+import psycopg2  # Adaptador PostgreSQL para Python
+import logging  # Sistema de logging
+import json  # Manipulação de dados JSON
+
+# ==============================================================================
+# CLASSE DE DIÁLOGO PARA LIMPEZA DE DADOS HISTÓRICOS
+# ==============================================================================
+
+class CleanupDialog(QDialog):
     """
     Diálogo para limpar dados históricos do banco de dados.
-    Permite a exclusão seletiva de dados por OLT, slot, PON ou ONT específica.
-    """ # Docstring da classe.
-    def __init__(self, parent=None): # Construtor da classe.
-        super().__init__(parent) # Chama o construtor da classe pai (QDialog).
-        self.setWindowTitle("Limpeza de Dados Históricos") # Define o título da janela.
-        self.setGeometry(300, 300, 600, 500) # Define a posição e o tamanho da janela (x, y, largura, altura).
-        self.parent = parent # Armazena a referência da janela pai (a janela principal da GUI).
-        self.init_ui() # Chama o método para inicializar a interface do usuário do diálogo.
+    
+    Esta classe implementa uma interface que permite ao usuário selecionar diferentes
+    níveis de limpeza de dados históricos, desde todas as OLTs até uma ONT específica.
+    O diálogo inclui filtros dinâmicos que se adaptam conforme a seleção do nível
+    de limpeza, e executa operações de exclusão no banco de dados com confirmação
+    prévia do usuário.
+    
+    Attributes:
+        parent: Referência para a janela principal da aplicação
+        cleanup_level (QComboBox): Widget para seleção do nível de limpeza
+        filter_group (QGroupBox): Grupo de widgets para filtros dinâmicos
+    """
+    
+    def __init__(self, parent=None):
+        """
+        Construtor da classe CleanupDialog.
+        
+        Args:
+            parent: Referência para a janela principal da aplicação (padrão: None)
+        """
+        super().__init__(parent)  # Chama o construtor da classe pai (QDialog)
+        self.setWindowTitle("Limpeza de Dados Históricos")  # Define o título da janela
+        self.setGeometry(300, 300, 600, 500)  # Define posição e tamanho (x, y, largura, altura)
+        self.parent = parent  # Armazena referência para a janela pai
+        self.init_ui()  # Inicializa a interface do usuário
 
-    def init_ui(self): # Método para inicializar os componentes da UI.
-        """Inicializa a interface do usuário para o diálogo de limpeza""" # Docstring do método.
-        layout = QVBoxLayout() # Cria um layout vertical principal para o diálogo.
+    def init_ui(self):
+        """
+        Inicializa a interface do usuário para o diálogo de limpeza.
+        
+        Cria e organiza todos os widgets necessários para o diálogo, incluindo:
+        - Grupo de seleção de nível de limpeza
+        - Grupo de filtros dinâmicos
+        - Grupo de botões de ação
+        """
+        layout = QVBoxLayout()  # Cria layout vertical principal
 
         # Grupo de seleção de nível de limpeza
-        level_group = QGroupBox("Nível de Limpeza") # Cria um QGroupBox para agrupar widgets relacionados ao nível de limpeza.
-        level_layout = QVBoxLayout() # Cria um layout vertical para o QGroupBox.
+        level_group = QGroupBox("Nível de Limpeza")  # Cria grupo para widgets de nível
+        level_layout = QVBoxLayout()  # Layout vertical para o grupo
 
-        self.cleanup_level = QComboBox() # Cria um QComboBox para o usuário selecionar o nível de limpeza.
-        self.cleanup_level.addItems([ # Adiciona os itens (opções) ao QComboBox.
-            "Todas as OLTs", # Opção para limpar dados de todas as OLTs.
-            "OLT Específica", # Opção para limpar dados de uma OLT específica.
-            "Slot Específico", # Opção para limpar dados de um slot específico.
-            "PON Específica", # Opção para limpar dados de uma PON específica.
-            "ONT Específica" # Opção para limpar dados de uma ONT específica.
+        # ComboBox para seleção do nível de limpeza
+        self.cleanup_level = QComboBox()
+        self.cleanup_level.addItems([
+            "Todas as OLTs",      # Opção para limpar dados de todas as OLTs
+            "OLT Específica",    # Opção para limpar dados de uma OLT específica
+            "Slot Específico",    # Opção para limpar dados de um slot específico
+            "PON Específica",     # Opção para limpar dados de uma PON específica
+            "ONT Específica"      # Opção para limpar dados de uma ONT específica
         ])
 
-        level_layout.addWidget(QLabel("Selecione o nível de limpeza:")) # Adiciona um QLabel como rótulo para o QComboBox.
-        level_layout.addWidget(self.cleanup_level) # Adiciona o QComboBox ao layout do grupo.
-        level_group.setLayout(level_layout) # Define o layout para o QGroupBox.
+        level_layout.addWidget(QLabel("Selecione o nível de limpeza:"))  # Rótulo para o ComboBox
+        level_layout.addWidget(self.cleanup_level)  # Adiciona ComboBox ao layout
+        level_group.setLayout(level_layout)  # Define layout para o grupo
 
         # Grupo de filtros (dinâmico com base na seleção)
-        self.filter_group = QGroupBox("Filtros") # Cria um QGroupBox para os filtros, que mudarão dinamicamente.
-        self.filter_layout = QVBoxLayout() # Cria um layout vertical para o grupo de filtros.
-        self.filter_group.setLayout(self.filter_layout) # Define o layout para o grupo de filtros.
+        self.filter_group = QGroupBox("Filtros")  # Grupo para filtros dinâmicos
+        self.filter_layout = QVBoxLayout()  # Layout vertical para filtros
+        self.filter_group.setLayout(self.filter_layout)  # Define layout para o grupo
 
         # Grupo de botões de ação
-        action_group = QGroupBox("Ações") # Cria um QGroupBox para os botões de ação.
-        action_layout = QVBoxLayout() # Cria um layout vertical para o grupo de ações.
+        action_group = QGroupBox("Ações")  # Grupo para botões de ação
+        action_layout = QVBoxLayout()  # Layout vertical para o grupo
 
-        btn_cleanup = QPushButton("Executar Limpeza") # Cria um QPushButton para iniciar a limpeza.
-        btn_cleanup.setStyleSheet("background-color: #ff6666; color: white;") # Define o estilo do botão (cor de fundo e texto).
-        btn_cleanup.clicked.connect(self.execute_cleanup) # Conecta o sinal 'clicked' do botão ao método 'execute_cleanup'.
+        # Botão para executar a limpeza
+        btn_cleanup = QPushButton("Executar Limpeza")
+        btn_cleanup.setStyleSheet("background-color: #ff6666; color: white;")  # Estilo visual
+        btn_cleanup.clicked.connect(self.execute_cleanup)  # Conecta ao método de execução
 
-        action_layout.addWidget(btn_cleanup) # Adiciona o botão ao layout do grupo de ações.
-        action_group.setLayout(action_layout) # Define o layout para o grupo de ações.
+        action_layout.addWidget(btn_cleanup)  # Adiciona botão ao layout
+        action_group.setLayout(action_layout)  # Define layout para o grupo
 
         # Layout principal
-        layout.addWidget(level_group) # Adiciona o grupo de nível de limpeza ao layout principal.
-        layout.addWidget(self.filter_group) # Adiciona o grupo de filtros ao layout principal.
-        layout.addWidget(action_group) # Adiciona o grupo de ações ao layout principal.
+        layout.addWidget(level_group)  # Adiciona grupo de nível ao layout principal
+        layout.addWidget(self.filter_group)  # Adiciona grupo de filtros ao layout principal
+        layout.addWidget(action_group)  # Adiciona grupo de ações ao layout principal
 
-        self.setLayout(layout) # Define o layout principal para o diálogo.
-        self.cleanup_level.currentIndexChanged.connect(self.update_filters) # Conecta a mudança de índice do QComboBox ao método 'update_filters'.
-        self.update_filters() # Chama 'update_filters' para configurar os filtros iniciais.
+        self.setLayout(layout)  # Define layout principal para o diálogo
+        
+        # Conecta mudança de seleção ao método de atualização de filtros
+        self.cleanup_level.currentIndexChanged.connect(self.update_filters)
+        self.update_filters()  # Atualiza filtros inicialmente
 
-    def update_filters(self): # Método para atualizar a UI dos filtros com base no nível de limpeza selecionado.
-        """Atualiza a UI dos filtros com base no nível de limpeza selecionado""" # Docstring do método.
+    def update_filters(self):
+        """
+        Atualiza a interface dos filtros com base no nível de limpeza selecionado.
+        
+        Este método é chamado sempre que o usuário altera a seleção no ComboBox
+        de nível de limpeza. Ele remove todos os filtros existentes e cria novos
+        filtros apropriados para o nível selecionado.
+        """
         # Limpa filtros anteriores
-        while self.filter_layout.count(): # Enquanto houver widgets no layout de filtros.
-            child = self.filter_layout.takeAt(0) # Remove o widget do layout.
-            if child.widget(): # Se o item removido for um widget.
-                child.widget().deleteLater() # Agenda a exclusão do widget para evitar problemas.
+        while self.filter_layout.count():  # Enquanto houver widgets no layout
+            child = self.filter_layout.takeAt(0)  # Remove widget do layout
+            if child.widget():  # Se o item for um widget
+                child.widget().deleteLater()  # Agenda exclusão do widget
 
-        level = self.cleanup_level.currentText() # Obtém o texto do item selecionado no QComboBox de nível.
-        self.filter_group.setTitle(f"Filtros para: {level}") # Define o título do grupo de filtros.
+        level = self.cleanup_level.currentText()  # Obtém nível selecionado
+        self.filter_group.setTitle(f"Filtros para: {level}")  # Atualiza título do grupo
 
-        if level == "OLT Específica": # Se o nível for "OLT Específica".
-            self.setup_olt_filter() # Chama o método para configurar o filtro de OLT.
-        elif level == "Slot Específico": # Se o nível for "Slot Específico".
-            self.setup_slot_filter() # Chama o método para configurar o filtro de slot.
-        elif level == "PON Específica": # Se o nível for "PON Específica".
-            self.setup_pon_filter() # Chama o método para configurar o filtro de PON.
-        elif level == "ONT Específica": # Se o nível for "ONT Específica".
-            self.setup_ont_filter() # Chama o método para configurar o filtro de ONT.
+        # Configura filtros específicos conforme o nível selecionado
+        if level == "OLT Específica":
+            self.setup_olt_filter()  # Configura filtro de OLT
+        elif level == "Slot Específico":
+            self.setup_slot_filter()  # Configura filtro de slot
+        elif level == "PON Específica":
+            self.setup_pon_filter()  # Configura filtro de PON
+        elif level == "ONT Específica":
+            self.setup_ont_filter()  # Configura filtro de ONT
 
-    def setup_olt_filter(self): # Método para configurar a UI para limpeza específica de OLT.
-        """Configura a UI para limpeza específica de OLT""" # Docstring do método.
-        self.olt_combo = QComboBox() # Cria um QComboBox para selecionar a OLT.
-        try: # Inicia um bloco try-except.
-            olts = self.parent.get_all_olts() # Obtém a lista de todas as OLTs da janela pai.
-            self.olt_combo.addItem("Selecione OLT") # Adiciona um item placeholder.
-            self.olt_combo.addItems(olts) # Adiciona as OLTs ao QComboBox.
-            self.filter_layout.addWidget(self.olt_combo) # Adiciona o QComboBox ao layout de filtros.
-        except Exception as e: # Captura exceções.
-            QMessageBox.warning(self, "Erro", f"Falha ao carregar OLTs: {str(e)}") # Mostra uma mensagem de aviso.
+    def setup_olt_filter(self):
+        """
+        Configura a interface para limpeza específica de OLT.
+        
+        Cria um ComboBox para seleção da OLT e o adiciona ao layout de filtros.
+        Carrega a lista de OLTs a partir da janela principal.
+        """
+        self.olt_combo = QComboBox()  # ComboBox para seleção de OLT
+        try:
+            # Obtém lista de OLTs da janela principal
+            olts = self.parent.get_all_olts()
+            self.olt_combo.addItem("Selecione OLT")  # Item placeholder
+            self.olt_combo.addItems(olts)  # Adiciona OLTs ao ComboBox
+            self.filter_layout.addWidget(self.olt_combo)  # Adiciona ao layout
+        except Exception as e:
+            # Exibe mensagem de erro em caso de falha
+            QMessageBox.warning(self, "Erro", f"Falha ao carregar OLTs: {str(e)}")
 
-    def setup_slot_filter(self): # Método para configurar a UI para limpeza específica de slot.
-        """Configura a UI para limpeza específica de slot""" # Docstring do método.
-        self.olt_combo = QComboBox() # Cria um QComboBox para selecionar a OLT.
-        self.slot_combo = QComboBox() # Cria um QComboBox para selecionar o slot.
+    def setup_slot_filter(self):
+        """
+        Configura a interface para limpeza específica de slot.
+        
+        Cria ComboBoxes para seleção de OLT e slot, com atualização dinâmica
+        da lista de slots quando uma OLT é selecionada.
+        """
+        self.olt_combo = QComboBox()  # ComboBox para OLT
+        self.slot_combo = QComboBox()  # ComboBox para slot
 
-        try: # Inicia um bloco try-except.
-            olts = self.parent.get_all_olts() # Obtém a lista de OLTs.
-            self.olt_combo.addItem("Selecione OLT") # Placeholder para OLT.
-            self.olt_combo.addItems(olts) # Adiciona OLTs.
+        try:
+            olts = self.parent.get_all_olts()  # Obtém lista de OLTs
+            self.olt_combo.addItem("Selecione OLT")  # Item placeholder
+            self.olt_combo.addItems(olts)  # Adiciona OLTs
 
-            self.filter_layout.addWidget(QLabel("OLT:")) # Adiciona rótulo "OLT:".
-            self.filter_layout.addWidget(self.olt_combo) # Adiciona QComboBox de OLT.
-            self.filter_layout.addWidget(QLabel("Slot:")) # Adiciona rótulo "Slot:".
-            self.filter_layout.addWidget(self.slot_combo) # Adiciona QComboBox de Slot.
+            # Adiciona widgets ao layout
+            self.filter_layout.addWidget(QLabel("OLT:"))
+            self.filter_layout.addWidget(self.olt_combo)
+            self.filter_layout.addWidget(QLabel("Slot:"))
+            self.filter_layout.addWidget(self.slot_combo)
 
-            # Conecta a mudança de texto do QComboBox de OLT ao método para atualizar a lista de slots.
+            # Conecta mudança de OLT à atualização da lista de slots
             self.olt_combo.currentTextChanged.connect(self.update_slot_list)
-            self.update_slot_list() # Atualiza a lista de slots inicialmente.
-        except Exception as e: # Captura exceções.
-            QMessageBox.warning(self, "Erro", f"Falha ao carregar slots: {str(e)}") # Mensagem de aviso.
+            self.update_slot_list()  # Atualiza lista inicial
+        except Exception as e:
+            QMessageBox.warning(self, "Erro", f"Falha ao carregar slots: {str(e)}")
 
-    def setup_pon_filter(self): # Método para configurar a UI para limpeza específica de PON.
-        """Configura a UI para limpeza específica de PON""" # Docstring do método.
-        self.olt_combo = QComboBox() # QComboBox para OLT.
-        self.slot_combo = QComboBox() # QComboBox para Slot.
-        self.pon_combo = QComboBox() # QComboBox para PON.
+    def setup_pon_filter(self):
+        """
+        Configura a interface para limpeza específica de PON.
+        
+        Cria ComboBoxes para seleção de OLT, slot e PON, com atualização dinâmica
+        das listas de slots e PONs quando os itens anteriores são selecionados.
+        """
+        self.olt_combo = QComboBox()  # ComboBox para OLT
+        self.slot_combo = QComboBox()  # ComboBox para slot
+        self.pon_combo = QComboBox()  # ComboBox para PON
 
-        try: # Inicia um bloco try-except.
-            olts = self.parent.get_all_olts() # Obtém lista de OLTs.
-            self.olt_combo.addItem("Selecione OLT") # Placeholder OLT.
-            self.olt_combo.addItems(olts) # Adiciona OLTs.
+        try:
+            olts = self.parent.get_all_olts()  # Obtém lista de OLTs
+            self.olt_combo.addItem("Selecione OLT")  # Item placeholder
+            self.olt_combo.addItems(olts)  # Adiciona OLTs
 
-            self.filter_layout.addWidget(QLabel("OLT:")) # Rótulo OLT.
-            self.filter_layout.addWidget(self.olt_combo) # QComboBox OLT.
-            self.filter_layout.addWidget(QLabel("Slot:")) # Rótulo Slot.
-            self.filter_layout.addWidget(self.slot_combo) # QComboBox Slot.
-            self.filter_layout.addWidget(QLabel("PON:")) # Rótulo PON.
-            self.filter_layout.addWidget(self.pon_combo) # QComboBox PON.
+            # Adiciona widgets ao layout
+            self.filter_layout.addWidget(QLabel("OLT:"))
+            self.filter_layout.addWidget(self.olt_combo)
+            self.filter_layout.addWidget(QLabel("Slot:"))
+            self.filter_layout.addWidget(self.slot_combo)
+            self.filter_layout.addWidget(QLabel("PON:"))
+            self.filter_layout.addWidget(self.pon_combo)
 
-            # Conecta sinais para atualizar as listas dinamicamente.
-            self.olt_combo.currentTextChanged.connect(self.update_slot_list) # OLT -> Slot.
-            self.slot_combo.currentTextChanged.connect(self.update_pon_list) # Slot -> PON.
-            self.update_slot_list() # Atualiza slots inicialmente.
-        except Exception as e: # Captura exceções.
-            QMessageBox.warning(self, "Erro", f"Falha ao carregar PONs: {str(e)}") # Mensagem de aviso.
+            # Conecta mudanças para atualização dinâmica das listas
+            self.olt_combo.currentTextChanged.connect(self.update_slot_list)  # OLT -> Slot
+            self.slot_combo.currentTextChanged.connect(self.update_pon_list)   # Slot -> PON
+            self.update_slot_list()  # Atualiza lista inicial
+        except Exception as e:
+            QMessageBox.warning(self, "Erro", f"Falha ao carregar PONs: {str(e)}")
 
-    def setup_ont_filter(self): # Método para configurar a UI para limpeza específica de ONT.
-        """Configura a UI para limpeza específica de ONT""" # Docstring do método.
-        self.serial_input = QLineEdit() # Cria um QLineEdit para o usuário inserir o número de série da ONT.
-        self.serial_input.setPlaceholderText("Digite o número de série da ONT") # Define um texto placeholder.
+    def setup_ont_filter(self):
+        """
+        Configura a interface para limpeza específica de ONT.
+        
+        Cria um campo de texto para inserção do número de série da ONT.
+        """
+        self.serial_input = QLineEdit()  # Campo de texto para número de série
+        self.serial_input.setPlaceholderText("Digite o número de série da ONT")  # Texto de ajuda
 
-        self.filter_layout.addWidget(QLabel("Número de Série da ONT:")) # Adiciona um rótulo.
-        self.filter_layout.addWidget(self.serial_input) # Adiciona o QLineEdit.
+        # Adiciona widgets ao layout
+        self.filter_layout.addWidget(QLabel("Número de Série da ONT:"))
+        self.filter_layout.addWidget(self.serial_input)
 
-    def update_slot_list(self): # Método para atualizar a lista de slots com base na OLT selecionada.
-        """Atualiza a lista de slots com base na OLT selecionada""" # Docstring do método.
-        self.slot_combo.clear() # Limpa os itens atuais do QComboBox de slots.
-        # Verifica se o nível de limpeza requer seleção de slot.
+    def update_slot_list(self):
+        """
+        Atualiza a lista de slots com base na OLT selecionada.
+        
+        Este método é chamado quando o usuário seleciona uma OLT no ComboBox
+        correspondente. Ele limpa a lista atual de slots e a preenche com os
+        slots disponíveis para a OLT selecionada.
+        """
+        self.slot_combo.clear()  # Limpa itens atuais
+        
+        # Verifica se o nível de limpeza requer seleção de slot
         if self.cleanup_level.currentText() in ["Slot Específico", "PON Específica"]:
-            olt = self.olt_combo.currentText() # Obtém a OLT selecionada.
-            if olt != "Selecione OLT": # Se uma OLT válida foi selecionada.
-                try: # Inicia um bloco try-except.
-                    slots = self.parent.get_slots_for_olt(olt) # Obtém os slots para a OLT selecionada.
-                    self.slot_combo.addItem("Selecione slot") # Adiciona um placeholder.
-                    self.slot_combo.addItems(slots) # Adiciona os slots ao QComboBox.
-                except Exception as e: # Captura exceções.
-                    QMessageBox.warning(self, "Erro", f"Falha ao carregar slots: {str(e)}") # Mensagem de aviso.
+            olt = self.olt_combo.currentText()  # Obtém OLT selecionada
+            if olt != "Selecione OLT":  # Se uma OLT válida foi selecionada
+                try:
+                    # Obtém slots para a OLT selecionada
+                    slots = self.parent.get_slots_for_olt(olt)
+                    self.slot_combo.addItem("Selecione slot")  # Item placeholder
+                    self.slot_combo.addItems(slots)  # Adiciona slots
+                except Exception as e:
+                    QMessageBox.warning(self, "Erro", f"Falha ao carregar slots: {str(e)}")
 
-    def update_pon_list(self): # Método para atualizar a lista de PONs com base no slot selecionado.
-        """Atualiza a lista de PONs com base no slot selecionado""" # Docstring do método.
-        self.pon_combo.clear() # Limpa os itens atuais do QComboBox de PONs.
-        if self.cleanup_level.currentText() == "PON Específica": # Se o nível de limpeza for "PON Específica".
-            olt = self.olt_combo.currentText() # Obtém a OLT selecionada.
-            slot = self.slot_combo.currentText() # Obtém o slot selecionado.
-            if olt != "Selecione OLT" and slot != "Selecione slot": # Se OLT e slot válidos foram selecionados.
-                try: # Inicia um bloco try-except.
-                    pons = self.parent.get_pons_for_slot(olt, slot) # Obtém as PONs para o slot.
-                    self.pon_combo.addItem("Selecione PON") # Adiciona placeholder.
-                    self.pon_combo.addItems(pons) # Adiciona as PONs ao QComboBox.
-                except Exception as e: # Captura exceções.
-                    QMessageBox.warning(self, "Erro", f"Falha ao carregar PONs: {str(e)}") # Mensagem de aviso.
+    def update_pon_list(self):
+        """
+        Atualiza a lista de PONs com base no slot selecionado.
+        
+        Este método é chamado quando o usuário seleciona um slot no ComboBox
+        correspondente. Ele limpa a lista atual de PONs e a preenche com as
+        PONs disponíveis para o slot selecionado.
+        """
+        self.pon_combo.clear()  # Limpa itens atuais
+        
+        # Verifica se o nível de limpeza requer seleção de PON
+        if self.cleanup_level.currentText() == "PON Específica":
+            olt = self.olt_combo.currentText()  # Obtém OLT selecionada
+            slot = self.slot_combo.currentText()  # Obtém slot selecionado
+            
+            # Se OLT e slot válidos foram selecionados
+            if olt != "Selecione OLT" and slot != "Selecione slot":
+                try:
+                    # Obtém PONs para o slot selecionado
+                    pons = self.parent.get_pons_for_slot(olt, slot)
+                    self.pon_combo.addItem("Selecione PON")  # Item placeholder
+                    self.pon_combo.addItems(pons)  # Adiciona PONs
+                except Exception as e:
+                    QMessageBox.warning(self, "Erro", f"Falha ao carregar PONs: {str(e)}")
 
-    def execute_cleanup(self): # Método para executar a operação de limpeza.
-        """Executa a operação de limpeza com base nas opções selecionadas""" # Docstring do método.
-        level = self.cleanup_level.currentText() # Obtém o nível de limpeza selecionado.
-        conn = None # Inicializa a variável de conexão com o banco de dados como None.
-        try: # Inicia um bloco try-except para tratamento de erros durante a conexão e execução SQL.
-            conn = psycopg2.connect(**DB_CONFIG) # Conecta ao banco de dados usando as configurações globais.
-            if level == "Todas as OLTs": # Se a opção for limpar todas as OLTs.
-                self.cleanup_all_olts(conn) # Chama o método específico.
-            elif level == "OLT Específica": # Se for para uma OLT específica.
-                self.cleanup_specific_olt(conn) # Chama o método específico.
-            elif level == "Slot Específico": # Se for para um slot específico.
-                self.cleanup_specific_slot(conn) # Chama o método específico.
-            elif level == "PON Específica": # Se for para uma PON específica.
-                self.cleanup_specific_pon(conn) # Chama o método específico.
-            elif level == "ONT Específica": # Se for para uma ONT específica.
-                self.cleanup_specific_ont(conn) # Chama o método específico.
+    def execute_cleanup(self):
+        """
+        Executa a operação de limpeza com base nas opções selecionadas.
+        
+        Este método é chamado quando o usuário clica no botão "Executar Limpeza".
+        Ele estabelece conexão com o banco de dados e chama o método específico
+        para o nível de limpeza selecionado, tratando possíveis erros.
+        """
+        level = self.cleanup_level.currentText()  # Obtém nível selecionado
+        conn = None  # Inicializa variável de conexão
+        
+        try:
+            # Conecta ao banco de dados
+            conn = psycopg2.connect(**DB_CONFIG)
+            
+            # Chama método específico conforme o nível selecionado
+            if level == "Todas as OLTs":
+                self.cleanup_all_olts(conn)
+            elif level == "OLT Específica":
+                self.cleanup_specific_olt(conn)
+            elif level == "Slot Específico":
+                self.cleanup_specific_slot(conn)
+            elif level == "PON Específica":
+                self.cleanup_specific_pon(conn)
+            elif level == "ONT Específica":
+                self.cleanup_specific_ont(conn)
+                
+        except Exception as e:
+            # Exibe mensagem de erro em caso de falha
+            QMessageBox.critical(self, "Erro", f"Limpeza falhou: {str(e)}")
+            if conn:
+                conn.rollback()  # Desfaz alterações em caso de erro
+        finally:
+            # Fecha conexão se existir
+            if conn:
+                conn.close()
 
-        except Exception as e: # Captura qualquer exceção durante o processo.
-            QMessageBox.critical(self, "Erro", f"Limpeza falhou: {str(e)}") # Exibe uma mensagem de erro crítica.
-            if conn: conn.rollback() # Se a conexão existir, desfaz quaisquer alterações (rollback).
-        finally: # Bloco finally, executado sempre.
-            if conn: conn.close() # Se a conexão existir, fecha-a.
-
-
-    def cleanup_all_olts(self, conn): # Método para limpar dados de todas as OLTs.
-        """Limpa dados de todas as OLTs""" # Docstring do método.
-        # Pede confirmação ao usuário.
+    def cleanup_all_olts(self, conn):
+        """
+        Limpa dados de todas as OLTs do banco de dados.
+        
+        Args:
+            conn: Conexão ativa com o banco de dados PostgreSQL
+        """
+        # Solicita confirmação do usuário
         confirm = QMessageBox.question(
-            self, "Confirmar", # Título da caixa de diálogo de confirmação.
-            "Tem certeza que deseja excluir TODOS os dados históricos de TODAS as OLTs?\nIsso não pode ser desfeito!", # Mensagem de confirmação.
-            QMessageBox.Yes | QMessageBox.No # Botões Yes e No.
+            self, "Confirmar",
+            "Tem certeza que deseja excluir TODOS os dados históricos de TODAS as OLTs?\nIsso não pode ser desfeito!",
+            QMessageBox.Yes | QMessageBox.No
         )
-        if confirm == QMessageBox.Yes: # Se o usuário confirmar.
-            with conn.cursor() as cursor: # Cria um cursor para executar comandos SQL.
-                # Executa o comando TRUNCATE para remover todos os dados das tabelas e reiniciar as sequências de ID.
+        
+        if confirm == QMessageBox.Yes:  # Se o usuário confirmar
+            with conn.cursor() as cursor:
+                # Executa comando TRUNCATE para limpar todas as tabelas
                 cursor.execute("TRUNCATE TABLE ont_data, pon_status, temperature_monitoring, resource_monitoring RESTART IDENTITY")
-                conn.commit() # Confirma a transação.
-                QMessageBox.information(self, "Sucesso", "Todos os dados foram excluídos!") # Mensagem de sucesso.
-                db_signals.data_updated.emit() # Emite um sinal para atualizar a GUI.
+                conn.commit()  # Confirma a transação
+                QMessageBox.information(self, "Sucesso", "Todos os dados foram excluídos!")
+                db_signals.data_updated.emit()  # Emite sinal para atualizar a GUI
 
-    def cleanup_specific_olt(self, conn): # Método para limpar dados de uma OLT específica.
-        """Limpa dados de uma OLT específica""" # Docstring do método.
-        olt = self.olt_combo.currentText() # Obtém a OLT selecionada no QComboBox.
-        if olt != "Selecione OLT": # Se uma OLT válida foi selecionada.
-            # Pede confirmação.
+    def cleanup_specific_olt(self, conn):
+        """
+        Limpa dados de uma OLT específica do banco de dados.
+        
+        Args:
+            conn: Conexão ativa com o banco de dados PostgreSQL
+        """
+        olt = self.olt_combo.currentText()  # Obtém OLT selecionada
+        
+        if olt != "Selecione OLT":  # Se uma OLT válida foi selecionada
+            # Solicita confirmação do usuário
             confirm = QMessageBox.question(
-                self, "Confirmar", # Título.
-                f"Tem certeza que deseja excluir todos os dados de {olt}?\nIsso não pode ser desfeito!", # Mensagem.
-                QMessageBox.Yes | QMessageBox.No # Botões.
+                self, "Confirmar",
+                f"Tem certeza que deseja excluir todos os dados de {olt}?\nIsso não pode ser desfeito!",
+                QMessageBox.Yes | QMessageBox.No
             )
-            if confirm == QMessageBox.Yes: # Se confirmado.
-                olt_num = olt.split()[-1] # Extrai o número identificador da OLT (ex: "OLT 192" -> "192").
-                with conn.cursor() as cursor: # Cria um cursor.
-                    # Executa comandos DELETE para cada tabela, filtrando pelo identificador da OLT.
+            
+            if confirm == QMessageBox.Yes:  # Se o usuário confirmar
+                olt_num = olt.split()[-1]  # Extrai número identificador da OLT
+                
+                with conn.cursor() as cursor:
+                    # Executa comandos DELETE para cada tabela, filtrando pela OLT
                     cursor.execute("DELETE FROM ont_data WHERE olt_identifier = %s", (olt_num,))
                     cursor.execute("DELETE FROM pon_status WHERE olt_identifier = %s", (olt_num,))
                     cursor.execute("DELETE FROM temperature_monitoring WHERE olt_identifier = %s", (olt_num,))
                     cursor.execute("DELETE FROM resource_monitoring WHERE olt_identifier = %s", (olt_num,))
-                    conn.commit() # Confirma a transação.
-                    QMessageBox.information(self, "Sucesso", f"Dados de {olt} excluídos com sucesso!") # Mensagem de sucesso.
-                    db_signals.data_updated.emit() # Emite sinal para atualizar a GUI.
+                    conn.commit()  # Confirma a transação
+                    QMessageBox.information(self, "Sucesso", f"Dados de {olt} excluídos com sucesso!")
+                    db_signals.data_updated.emit()  # Emite sinal para atualizar a GUI
 
-    def cleanup_specific_slot(self, conn): # Método para limpar dados de um slot específico.
-        """Limpa dados de um slot específico""" # Docstring do método.
-        olt = self.olt_combo.currentText() # Obtém a OLT selecionada.
-        slot = self.slot_combo.currentText() # Obtém o slot selecionado.
-        if olt != "Selecione OLT" and slot != "Selecione slot": # Se OLT e slot válidos foram selecionados.
-            # Pede confirmação.
+    def cleanup_specific_slot(self, conn):
+        """
+        Limpa dados de um slot específico do banco de dados.
+        
+        Args:
+            conn: Conexão ativa com o banco de dados PostgreSQL
+        """
+        olt = self.olt_combo.currentText()  # Obtém OLT selecionada
+        slot = self.slot_combo.currentText()  # Obtém slot selecionado
+        
+        # Se OLT e slot válidos foram selecionados
+        if olt != "Selecione OLT" and slot != "Selecione slot":
+            # Solicita confirmação do usuário
             confirm = QMessageBox.question(
-                self, "Confirmar", # Título.
-                f"Tem certeza que deseja excluir dados do slot {slot} em {olt}?\nIsso não pode ser desfeito!", # Mensagem.
-                QMessageBox.Yes | QMessageBox.No # Botões.
+                self, "Confirmar",
+                f"Tem certeza que deseja excluir dados do slot {slot} em {olt}?\nIsso não pode ser desfeito!",
+                QMessageBox.Yes | QMessageBox.No
             )
-            if confirm == QMessageBox.Yes: # Se confirmado.
-                olt_num = olt.split()[-1] # Extrai o número da OLT.
-                slot_num = int(slot) # Converte o número do slot para inteiro.
-                with conn.cursor() as cursor: # Cria um cursor.
-                    # Deleta de ont_data onde olt_identifier e fsp (usando LIKE para o slot) correspondem.
-                    cursor.execute("DELETE FROM ont_data WHERE olt_identifier = %s AND fsp LIKE %s", (olt_num, f"0/{slot_num}/%"))
-                    # Deleta de pon_status onde olt_identifier e fsp (usando LIKE para o slot) correspondem.
-                    cursor.execute("DELETE FROM pon_status WHERE olt_identifier = %s AND fsp LIKE %s", (olt_num, f"0/{slot_num}/%"))
-                    # Deleta de temperature_monitoring onde olt_identifier e slot_id correspondem.
-                    cursor.execute("DELETE FROM temperature_monitoring WHERE olt_identifier = %s AND slot_id = %s", (olt_num, slot_num))
-                    # Deleta de resource_monitoring onde olt_identifier e slot_id correspondem.
-                    cursor.execute("DELETE FROM resource_monitoring WHERE olt_identifier = %s AND slot_id = %s", (olt_num, slot_num))
-                    conn.commit() # Confirma a transação.
-                    QMessageBox.information(self, "Sucesso", f"Dados do slot {slot} excluídos com sucesso!") # Mensagem de sucesso.
-                    db_signals.data_updated.emit() # Emite sinal para atualizar a GUI.
+            
+            if confirm == QMessageBox.Yes:  # Se o usuário confirmar
+                olt_num = olt.split()[-1]  # Extrai número da OLT
+                slot_num = int(slot)  # Converte número do slot para inteiro
+                
+                with conn.cursor() as cursor:
+                    # Executa comandos DELETE com filtros apropriados
+                    cursor.execute("DELETE FROM ont_data WHERE olt_identifier = %s AND fsp LIKE %s", 
+                                 (olt_num, f"0/{slot_num}/%"))
+                    cursor.execute("DELETE FROM pon_status WHERE olt_identifier = %s AND fsp LIKE %s", 
+                                 (olt_num, f"0/{slot_num}/%"))
+                    cursor.execute("DELETE FROM temperature_monitoring WHERE olt_identifier = %s AND slot_id = %s", 
+                                 (olt_num, slot_num))
+                    cursor.execute("DELETE FROM resource_monitoring WHERE olt_identifier = %s AND slot_id = %s", 
+                                 (olt_num, slot_num))
+                    conn.commit()  # Confirma a transação
+                    QMessageBox.information(self, "Sucesso", f"Dados do slot {slot} excluídos com sucesso!")
+                    db_signals.data_updated.emit()  # Emite sinal para atualizar a GUI
 
-    def cleanup_specific_pon(self, conn): # Método para limpar dados de uma PON específica.
-        """Limpa dados de uma PON específica""" # Docstring do método.
-        olt = self.olt_combo.currentText() # Obtém a OLT selecionada.
-        slot = self.slot_combo.currentText() # Obtém o slot selecionado.
-        pon = self.pon_combo.currentText() # Obtém a PON selecionada.
-        if olt != "Selecione OLT" and slot != "Selecione slot" and pon != "Selecione PON": # Se todos os campos válidos foram selecionados.
-            # Pede confirmação.
+    def cleanup_specific_pon(self, conn):
+        """
+        Limpa dados de uma PON específica do banco de dados.
+        
+        Args:
+            conn: Conexão ativa com o banco de dados PostgreSQL
+        """
+        olt = self.olt_combo.currentText()  # Obtém OLT selecionada
+        slot = self.slot_combo.currentText()  # Obtém slot selecionado
+        pon = self.pon_combo.currentText()  # Obtém PON selecionada
+        
+        # Se todos os campos válidos foram selecionados
+        if olt != "Selecione OLT" and slot != "Selecione slot" and pon != "Selecione PON":
+            # Solicita confirmação do usuário
             confirm = QMessageBox.question(
-                self, "Confirmar", # Título.
-                f"Tem certeza que deseja excluir dados da PON {slot}/{pon} em {olt}?\nIsso não pode ser desfeito!", # Mensagem.
-                QMessageBox.Yes | QMessageBox.No # Botões.
+                self, "Confirmar",
+                f"Tem certeza que deseja excluir dados da PON {slot}/{pon} em {olt}?\nIsso não pode ser desfeito!",
+                QMessageBox.Yes | QMessageBox.No
             )
-            if confirm == QMessageBox.Yes: # Se confirmado.
-                olt_num = olt.split()[-1] # Extrai o número da OLT.
-                fsp_val = f"0/{slot}/{pon}" # Constrói o valor FSP completo.
-                with conn.cursor() as cursor: # Cria um cursor.
-                    # Deleta de ont_data onde olt_identifier e fsp exato correspondem.
-                    cursor.execute("DELETE FROM ont_data WHERE olt_identifier = %s AND fsp = %s", (olt_num, fsp_val))
-                    # Deleta de pon_status onde olt_identifier e fsp exato correspondem.
-                    cursor.execute("DELETE FROM pon_status WHERE olt_identifier = %s AND fsp = %s", (olt_num, fsp_val))
-                    conn.commit() # Confirma a transação.
-                    QMessageBox.information(self, "Sucesso", f"Dados da PON {slot}/{pon} excluídos com sucesso!") # Mensagem de sucesso.
-                    db_signals.data_updated.emit() # Emite sinal para atualizar a GUI.
+            
+            if confirm == QMessageBox.Yes:  # Se o usuário confirmar
+                olt_num = olt.split()[-1]  # Extrai número da OLT
+                fsp_val = f"0/{slot}/{pon}"  # Constrói valor FSP completo
+                
+                with conn.cursor() as cursor:
+                    # Executa comandos DELETE com filtros apropriados
+                    cursor.execute("DELETE FROM ont_data WHERE olt_identifier = %s AND fsp = %s", 
+                                 (olt_num, fsp_val))
+                    cursor.execute("DELETE FROM pon_status WHERE olt_identifier = %s AND fsp = %s", 
+                                 (olt_num, fsp_val))
+                    conn.commit()  # Confirma a transação
+                    QMessageBox.information(self, "Sucesso", f"Dados da PON {slot}/{pon} excluídos com sucesso!")
+                    db_signals.data_updated.emit()  # Emite sinal para atualizar a GUI
 
-    def cleanup_specific_ont(self, conn): # Método para limpar dados de uma ONT específica.
-        """Limpa dados de uma ONT específica""" # Docstring do método.
-        serial = self.serial_input.text().strip() # Obtém o número de série do QLineEdit e remove espaços extras.
-        if serial: # Se um número de série foi inserido.
-            # Pede confirmação.
+    def cleanup_specific_ont(self, conn):
+        """
+        Limpa dados de uma ONT específica do banco de dados.
+        
+        Args:
+            conn: Conexão ativa com o banco de dados PostgreSQL
+        """
+        serial = self.serial_input.text().strip()  # Obtém número de série inserido
+        
+        if serial:  # Se um número de série foi inserido
+            # Solicita confirmação do usuário
             confirm = QMessageBox.question(
-                self, "Confirmar", # Título.
-                f"Tem certeza que deseja excluir o histórico da ONT {serial}?\nIsso não pode ser desfeito!", # Mensagem.
-                QMessageBox.Yes | QMessageBox.No # Botões.
+                self, "Confirmar",
+                f"Tem certeza que deseja excluir o histórico da ONT {serial}?\nIsso não pode ser desfeito!",
+                QMessageBox.Yes | QMessageBox.No
             )
-            if confirm == QMessageBox.Yes: # Se confirmado.
-                with conn.cursor() as cursor: # Cria um cursor.
-                    # Deleta de ont_data onde serial_number corresponde.
+            
+            if confirm == QMessageBox.Yes:  # Se o usuário confirmar
+                with conn.cursor() as cursor:
+                    # Executa comando DELETE filtrando pelo número de série
                     cursor.execute("DELETE FROM ont_data WHERE serial_number = %s", (serial,))
-                    conn.commit() # Confirma a transação.
-                    QMessageBox.information(self, "Sucesso", f"Histórico da ONT {serial} excluído com sucesso!") # Mensagem de sucesso.
-                    db_signals.data_updated.emit() # Emite sinal para atualizar a GUI.
+                    conn.commit()  # Confirma a transação
+                    QMessageBox.information(self, "Sucesso", f"Histórico da ONT {serial} excluído com sucesso!")
+                    db_signals.data_updated.emit()  # Emite sinal para atualizar a GUI
 
 
-class OLTLoginDialog(QDialog): # Define a classe para o diálogo de login da OLT.
+# ==============================================================================
+# CLASSE DE DIÁLOGO PARA LOGIN EM OLT
+# ==============================================================================
+
+class OLTLoginDialog(QDialog):
     """
     Diálogo de login para conectar a uma OLT.
-    Coleta IP, nome de usuário e senha para conexão SSH.
-    """ # Docstring da classe.
-    def __init__(self, parent=None): # Construtor da classe.
-        super().__init__(parent) # Chama o construtor da classe pai.
-        self.setWindowTitle("Conectar à OLT") # Define o título da janela.
-        self.setGeometry(300, 300, 400, 200) # Define a posição e o tamanho da janela.
-        self.init_ui() # Chama o método para inicializar a UI.
+    
+    Esta classe implementa uma interface simples para coleta de credenciais
+    (IP, nome de usuário e senha) para estabelecimento de conexão SSH com
+    equipamentos OLT. Os campos possuem valores padrão para facilitar o uso.
+    """
+    
+    def __init__(self, parent=None):
+        """
+        Construtor da classe OLTLoginDialog.
+        
+        Args:
+            parent: Referência para a janela principal da aplicação (padrão: None)
+        """
+        super().__init__(parent)  # Chama o construtor da classe pai
+        self.setWindowTitle("Conectar à OLT")  # Define o título da janela
+        self.setGeometry(300, 300, 400, 200)  # Define posição e tamanho
+        self.init_ui()  # Inicializa a interface do usuário
 
-    def init_ui(self): # Método para inicializar os componentes da UI.
-        """Inicializa a UI do diálogo de login""" # Docstring do método.
-        layout = QVBoxLayout() # Cria um layout vertical principal.
+    def init_ui(self):
+        """
+        Inicializa a interface do usuário do diálogo de login.
+        
+        Cria campos para entrada de IP, usuário e senha, com valores padrão
+        para os campos de usuário e senha, e botões para conectar ou cancelar.
+        """
+        layout = QVBoxLayout()  # Layout vertical principal
+        form_layout = QFormLayout()  # Layout de formulário para organização
 
-        form_layout = QFormLayout() # Cria um layout de formulário para organizar rótulos e campos de entrada.
+        # Campo para entrada do IP da OLT
+        self.olt_ip_input = QLineEdit()
+        self.olt_ip_input.setPlaceholderText("Exemplo: 192.168.1.100")  # Texto de ajuda
+        form_layout.addRow("IP da OLT:", self.olt_ip_input)  # Adiciona ao formulário
 
-        self.olt_ip_input = QLineEdit() # Cria um QLineEdit para a entrada do IP da OLT.
-        self.olt_ip_input.setPlaceholderText("Exemplo: 192.168.1.100") # Define um texto placeholder.
-        form_layout.addRow("IP da OLT:", self.olt_ip_input) # Adiciona uma linha ao formulário com rótulo e campo de entrada.
+        # Campo para entrada do nome de usuário
+        self.username_input = QLineEdit()
+        self.username_input.setText("huawei")  # Valor padrão
+        form_layout.addRow("Usuário:", self.username_input)  # Adiciona ao formulário
 
-        self.username_input = QLineEdit() # Cria um QLineEdit para o nome de usuário.
-        self.username_input.setText("huawei")  # Define um valor padrão para o nome de usuário.
-        form_layout.addRow("Usuário:", self.username_input) # Adiciona a linha ao formulário.
+        # Campo para entrada da senha
+        self.password_input = QLineEdit()
+        self.password_input.setText("ccmsai13")  # Valor padrão
+        self.password_input.setEchoMode(QLineEdit.Password)  # Modo de senha (oculta caracteres)
+        form_layout.addRow("Senha:", self.password_input)  # Adiciona ao formulário
 
-        self.password_input = QLineEdit() # Cria um QLineEdit para a senha.
-        self.password_input.setText("ccmsai13")  # Define um valor padrão para a senha.
-        self.password_input.setEchoMode(QLineEdit.Password) # Define o modo de eco para ocultar a senha (mostrar asteriscos).
-        form_layout.addRow("Senha:", self.password_input) # Adiciona a linha ao formulário.
+        layout.addLayout(form_layout)  # Adiciona formulário ao layout principal
 
-        layout.addLayout(form_layout) # Adiciona o layout de formulário ao layout principal.
+        # Layout para botões
+        button_box = QHBoxLayout()
+        
+        # Botão para conectar
+        self.connect_btn = QPushButton("Conectar")
+        self.connect_btn.clicked.connect(self.accept)  # Conecta ao método accept do QDialog
+        
+        # Botão para cancelar
+        self.cancel_btn = QPushButton("Cancelar")
+        self.cancel_btn.clicked.connect(self.reject)  # Conecta ao método reject do QDialog
 
-        button_box = QHBoxLayout() # Cria um layout horizontal para os botões.
-        self.connect_btn = QPushButton("Conectar") # Cria o botão "Conectar".
-        self.connect_btn.clicked.connect(self.accept) # Conecta o clique do botão ao método 'accept' do QDialog (fecha com resultado Accepted).
-        self.cancel_btn = QPushButton("Cancelar") # Cria o botão "Cancelar".
-        self.cancel_btn.clicked.connect(self.reject) # Conecta o clique do botão ao método 'reject' do QDialog (fecha com resultado Rejected).
+        button_box.addWidget(self.connect_btn)  # Adiciona botão ao layout
+        button_box.addWidget(self.cancel_btn)  # Adiciona botão ao layout
+        layout.addLayout(button_box)  # Adiciona layout de botões ao layout principal
+        
+        self.setLayout(layout)  # Define layout principal para o diálogo
 
-        button_box.addWidget(self.connect_btn) # Adiciona o botão "Conectar" ao layout de botões.
-        button_box.addWidget(self.cancel_btn) # Adiciona o botão "Cancelar" ao layout de botões.
-
-        layout.addLayout(button_box) # Adiciona o layout de botões ao layout principal.
-        self.setLayout(layout) # Define o layout principal para o diálogo.
-
-    def get_credentials(self): # Método para obter as credenciais inseridas pelo usuário.
-        """Retorna as credenciais inseridas como um dicionário""" # Docstring do método.
-        return { # Retorna um dicionário.
-            'ip': self.olt_ip_input.text().strip(), # Obtém o texto do campo de IP, removendo espaços extras.
-            'username': self.username_input.text().strip(), # Obtém o texto do campo de usuário, removendo espaços extras.
-            'password': self.password_input.text().strip() # Obtém o texto do campo de senha, removendo espaços extras.
+    def get_credentials(self):
+        """
+        Retorna as credenciais inseridas pelo usuário como um dicionário.
+        
+        Returns:
+            dict: Dicionário contendo as chaves 'ip', 'username' e 'password'
+                  com os valores inseridos nos campos correspondentes
+        """
+        return {
+            'ip': self.olt_ip_input.text().strip(),      # IP da OLT
+            'username': self.username_input.text().strip(), # Nome de usuário
+            'password': self.password_input.text().strip()  # Senha
         }
 
+
+# ==============================================================================
+# CLASSE DE DIÁLOGO PARA HISTÓRICO DE DIAGNÓSTICO DE ONT
+# ==============================================================================
+
 class OntDiagnosticsHistoryDialog(QDialog):
+    """
+    Diálogo para exibir histórico de diagnóstico de uma ONT específica.
+    
+    Esta classe implementa uma interface que permite visualizar o histórico de
+    diagnósticos realizados em uma ONT, incluindo saídas brutas de comandos e
+    dados parseados. A interface é organizada em uma tabela de registros e áreas
+    para visualização detalhada dos dados.
+    
+    Attributes:
+        ont_serial_number (str): Número de série da ONT
+        olt_identifier (str): Identificador da OLT
+        fsp (str): Identificador Frame/Slot/Porta da PON
+        ont_id_on_pon (str): ID da ONT na PON
+        history_table (QTableWidget): Tabela para exibição do histórico
+        detail_view_raw (QTextEdit): Área para exibição de saída bruta
+        detail_view_parsed (QTextEdit): Área para exibição de dados parseados
+    """
+    
     def __init__(self, ont_serial_number, olt_identifier, fsp, ont_id_on_pon, parent=None):
+        """
+        Construtor da classe OntDiagnosticsHistoryDialog.
+        
+        Args:
+            ont_serial_number (str): Número de série da ONT
+            olt_identifier (str): Identificador da OLT
+            fsp (str): Identificador Frame/Slot/Porta da PON
+            ont_id_on_pon (str): ID da ONT na PON
+            parent: Referência para a janela principal (padrão: None)
+        """
         super().__init__(parent)
+        
+        # Armazena informações da ONT
         self.ont_serial_number = ont_serial_number
         self.olt_identifier = olt_identifier
         self.fsp = fsp
         self.ont_id_on_pon = ont_id_on_pon
 
+        # Configura título e tamanho da janela
         self.setWindowTitle(f"Histórico de Diagnóstico - ONT S/N: {self.ont_serial_number} ({self.fsp} ID:{self.ont_id_on_pon} OLT:{self.olt_identifier})")
-        self.setGeometry(150, 150, 1000, 1000) # Tamanho maior para o histórico
+        self.setGeometry(150, 150, 1000, 1000)
         
+        # Inicializa layout principal
         self.layout = QVBoxLayout(self)
 
+        # Cria tabela para exibição do histórico
         self.history_table = QTableWidget()
-        self.history_table.setColumnCount(5) # Timestamp, Seção, Fabricante, Modelo, Uptime (Exemplo inicial)
-                                            # Podemos adicionar mais ou um visualizador de detalhes
+        self.history_table.setColumnCount(5)  # Número de colunas
         self.history_table.setHorizontalHeaderLabels([
             "Data/Hora", "Seção", "Detalhes Principais", "Ver Saída Bruta", "Ver Dados Parseados"
         ])
-        self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.history_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.history_table.setSelectionMode(QTableWidget.SingleSelection)
-        self.history_table.doubleClicked.connect(self.show_detail_view) # Ou um botão por linha
+        self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)  # Desabilita edição
+        self.history_table.setSelectionBehavior(QTableWidget.SelectRows)  # Seleção por linha
+        self.history_table.setSelectionMode(QTableWidget.SingleSelection)  # Seleção única
+        self.history_table.doubleClicked.connect(self.show_detail_view)  # Conecta duplo clique
 
-        # Área para exibir detalhes da saída bruta ou parseada
+        # Cria áreas para exibição de detalhes
         self.detail_view_raw = QTextEdit()
         self.detail_view_raw.setReadOnly(True)
         self.detail_view_raw.setPlaceholderText("Selecione um registro e clique em 'Ver Saída Bruta' ou dê duplo clique na linha.")
-        self.detail_view_raw.setFont(QFont("Courier New", 9)) # <<< USA QFont DIRETAMENTE
+        self.detail_view_raw.setFont(QFont("Courier New", 9))  # Fonte monoespaçada
 
         self.detail_view_parsed = QTextEdit()
         self.detail_view_parsed.setReadOnly(True)
         self.detail_view_parsed.setPlaceholderText("Selecione um registro e clique em 'Ver Dados Parseados'.")
-        self.detail_view_parsed.setFont(QFont("Courier New", 9)) # <<< USA QFont DIRETAMENTE
+        self.detail_view_parsed.setFont(QFont("Courier New", 9))  # Fonte monoespaçada
 
+        # Cria divisores para organização do layout
         splitter = QSplitter(Qt.Vertical)
         splitter.addWidget(self.history_table)
         
-        detail_splitter = QSplitter(Qt.Horizontal) # Para mostrar raw e parsed lado a lado
+        detail_splitter = QSplitter(Qt.Horizontal)  # Divisor horizontal para detalhes
         detail_splitter.addWidget(self.detail_view_raw)
         detail_splitter.addWidget(self.detail_view_parsed)
-        detail_splitter.setSizes([500,500]) # Tamanhos iniciais
+        detail_splitter.setSizes([500, 500])  # Tamanhos iniciais
 
         splitter.addWidget(detail_splitter)
-        splitter.setSizes([400, 300]) # Tamanhos iniciais para tabela e área de detalhes
+        splitter.setSizes([400, 300])  # Tamanhos iniciais
 
-        self.layout.addWidget(splitter)
+        self.layout.addWidget(splitter)  # Adiciona divisor ao layout
 
-        self.load_history()
+        self.load_history()  # Carrega histórico de diagnóstico
 
     def load_history(self):
+        """
+        Carrega o histórico de diagnóstico da ONT do banco de dados.
+        
+        Consulta o banco de dados para obter todos os registros de diagnóstico
+        para a ONT específica e os exibe na tabela.
+        """
+        # Obtém registros do banco de dados
         records = get_ont_diagnostic_history(self.ont_serial_number, self.olt_identifier)
-        self.history_table.setRowCount(len(records))
-        self.history_table.setSortingEnabled(False)
+        self.history_table.setRowCount(len(records))  # Define número de linhas
+        self.history_table.setSortingEnabled(False)  # Desabilita ordenação durante carregamento
 
+        # Processa cada registro
         for row_idx, record_tuple in enumerate(records):
-            # (diag_timestamp, diag_section_id, raw_output, parsed_data, manufacturer, model_name, uptime, firmware_version)
+            # Desestrutura a tupla do registro
             diag_timestamp, diag_section_id, raw_output, parsed_data_json, manuf, model, upt, fw = record_tuple
             
+            # Formata timestamp
             timestamp_str = diag_timestamp.strftime('%d/%m/%Y %H:%M:%S') if diag_timestamp else "N/A"
             
-            # Cria um resumo para "Detalhes Principais"
+            # Cria resumo para "Detalhes Principais"
             details_summary = []
             if diag_section_id == "device_info":
                 if manuf: details_summary.append(f"Fabr: {manuf}")
                 if model: details_summary.append(f"Modelo: {model}")
                 if upt: details_summary.append(f"Uptime: {upt}")
                 if fw: details_summary.append(f"FW: {fw}")
-            # Adicione mais resumos para outras seções se desejar
             
+            # Preenche células da tabela
             self.history_table.setItem(row_idx, 0, QTableWidgetItem(timestamp_str))
             self.history_table.setItem(row_idx, 1, QTableWidgetItem(diag_section_id))
             self.history_table.setItem(row_idx, 2, QTableWidgetItem("; ".join(details_summary) if details_summary else "N/A"))
 
-            # Botões ou apenas armazena os dados para visualização por duplo clique
-            # Por simplicidade, vamos usar o duplo clique na linha para popular as textEdits
-            # ou podemos adicionar botões "Ver" em cada linha se preferir
-            # Para o exemplo, vamos armazenar os dados completos no item da primeira coluna
-            # para recuperá-los no duplo clique.
+            # Armazena dados completos no item para recuperação posterior
             item_data_payload = {
                 "raw": raw_output,
-                "parsed": parsed_data_json # Vem como string JSON do BD, ou dict se o driver converter
+                "parsed": parsed_data_json  # String JSON ou dict (se o driver converter)
             }
             self.history_table.item(row_idx, 0).setData(Qt.UserRole, item_data_payload)
             
-            # Adiciona botões de visualização (opcional, se não usar duplo clique)
+            # Adiciona botões de visualização
             btn_raw = QPushButton("Ver Bruto")
-            btn_raw.setProperty("row_data", item_data_payload) # Passa os dados para o botão
+            btn_raw.setProperty("row_data", item_data_payload)  # Passa dados para o botão
             btn_raw.clicked.connect(self.show_raw_data_from_button)
             self.history_table.setCellWidget(row_idx, 3, btn_raw)
 
@@ -468,54 +694,75 @@ class OntDiagnosticsHistoryDialog(QDialog):
             btn_parsed.clicked.connect(self.show_parsed_data_from_button)
             self.history_table.setCellWidget(row_idx, 4, btn_parsed)
 
-
+        # Ajusta colunas e habilita ordenação
         self.history_table.resizeColumnsToContents()
         self.history_table.setSortingEnabled(True)
 
     def show_detail_view(self, model_index):
-        """Chamado por duplo clique na tabela."""
-        row = model_index.row()
-        item_data = self.history_table.item(row, 0).data(Qt.UserRole)
+        """
+        Exibe os detalhes de um registro quando o usuário dá duplo clique na tabela.
+        
+        Args:
+            model_index: Índice do modelo que representa a célula clicada
+        """
+        row = model_index.row()  # Obtém linha clicada
+        item_data = self.history_table.item(row, 0).data(Qt.UserRole)  # Obtém dados armazenados
+        
         if item_data:
+            # Exibe dados brutos
             self.detail_view_raw.setText(item_data.get("raw", "Saída bruta não disponível."))
+            
+            # Processa e exibe dados parseados
             parsed_content = item_data.get("parsed")
             if parsed_content:
                 try:
-                    # Se parsed_content é uma string JSON, carrega. Se já é dict, usa direto.
+                    # Se for string JSON, converte para dicionário
                     if isinstance(parsed_content, str):
                         parsed_dict = json.loads(parsed_content)
-                    else: # Assume que já é um dict (psycopg2 pode converter JSONB para dict)
+                    else:  # Se já for dicionário (conversão automática do psycopg2)
                         parsed_dict = parsed_content
                     self.detail_view_parsed.setText(json.dumps(parsed_dict, indent=4, ensure_ascii=False))
                 except json.JSONDecodeError:
                     self.detail_view_parsed.setText(f"Erro ao decodificar dados parseados (JSON inválido):\n{str(parsed_content)}")
                 except Exception as e:
                     self.detail_view_parsed.setText(f"Erro ao processar dados parseados:\n{str(e)}\n\nDados: {str(parsed_content)}")
-
             else:
                 self.detail_view_parsed.setText("Dados parseados não disponíveis.")
 
     def show_raw_data_from_button(self):
-        button = self.sender()
+        """
+        Exibe os dados brutos quando o usuário clica no botão correspondente.
+        
+        Este método é chamado quando o usuário clica em um botão "Ver Bruto"
+        na tabela de histórico.
+        """
+        button = self.sender()  # Obtém o botão que enviou o sinal
         if button:
-            item_data = button.property("row_data")
+            item_data = button.property("row_data")  # Obtém dados armazenados
             if item_data:
                 self.detail_view_raw.setText(item_data.get("raw", "Saída bruta não disponível."))
 
     def show_parsed_data_from_button(self):
-        button = self.sender()
+        """
+        Exibe os dados parseados quando o usuário clica no botão correspondente.
+        
+        Este método é chamado quando o usuário clica em um botão "Ver Parseado"
+        na tabela de histórico.
+        """
+        button = self.sender()  # Obtém o botão que enviou o sinal
         if button:
-            item_data = button.property("row_data")
+            item_data = button.property("row_data")  # Obtém dados armazenados
             if item_data:
                 parsed_content = item_data.get("parsed")
                 if parsed_content:
                     try:
-                        if isinstance(parsed_content, str): parsed_dict = json.loads(parsed_content)
-                        else: parsed_dict = parsed_content
+                        # Se for string JSON, converte para dicionário
+                        if isinstance(parsed_content, str):
+                            parsed_dict = json.loads(parsed_content)
+                        else:  # Se já for dicionário
+                            parsed_dict = parsed_content
                         self.detail_view_parsed.setText(json.dumps(parsed_dict, indent=4, ensure_ascii=False))
                     except Exception as e:
                         self.detail_view_parsed.setText(f"Erro ao processar dados parseados:\n{str(e)}\n\nDados: {str(parsed_content)}")
                 else:
                     self.detail_view_parsed.setText("Dados parseados não disponíveis.")
-
-# >>> FIM DA NOVA CLASSE DE DIÁLOGO <<<
