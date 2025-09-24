@@ -57,7 +57,7 @@ BOARD_PORT_MAP = {
     "H907CGHF": 16,
 }
 
-def send_command_with_pagination(shell, command, prompt, timeout=60):
+def send_command_with_pagination(shell, command, expected_prompt="#", timeout=60):
     """
     Envia comando SSH com tratamento robusto.
     Retorna a saída do comando limpa.
@@ -95,7 +95,6 @@ def send_command_with_pagination(shell, command, prompt, timeout=60):
                     time.sleep(3)
                     start_time = time.time()  # Reseta o timeout na interação.
                     continue              # <<--- ADIÇÃO CRUCIAL
-
 
                 # --- INÍCIO DA CORREÇÃO ---
                 # Verifica se o chunk contém alguma linha de texto antes de tentar acessar a última
@@ -142,19 +141,23 @@ def send_command_with_pagination(shell, command, prompt, timeout=60):
                     break
                     
         if found_error:
-             if not any(ok_msg in cleaned for ok_msg in ["No ONT online", "board does not exist", "PON port does not exist"]):
-                 raise Exception(f"Comando retornou um erro: {error_lines_found if error_lines_found else cleaned.strip().splitlines()[-2:]}")
+            # Verifica se é uma mensagem de erro esperada que não deve interromper o processamento
+            if any(ok_msg in cleaned for ok_msg in ["No ONT online", "board does not exist", "PON port does not exist", "The ONT does not exist"]):
+                logging.warning(f"Comando retornou uma mensagem esperada: {error_lines_found}")
+                return ""  # Retorna resposta vazia em vez de levantar exceção
+            else:
+                # Para outros erros, levanta exceção
+                raise Exception(f"Comando retornou um erro: {error_lines_found if error_lines_found else cleaned.strip().splitlines()[-2:]}")
 
         if not cleaned.strip():
-             raise Exception("Resposta vazia recebida")
+            logging.warning("Resposta vazia recebida")
+            return ""
 
         return cleaned
 
     except Exception as e:
         logging.warning(f"Erro no comando '{command}': {str(e)}")
         raise
-
-# Em olt/processing.py, substitua a função process_ont_details por esta versão corrigida:
 
 def process_ont_details(shell, olt_ip, slot, port, ont_id, info):
     """
@@ -182,14 +185,22 @@ def process_ont_details(shell, olt_ip, slot, port, ont_id, info):
                 logging.warning(f"[SYSTEM] [{fsp_log}] Falha ao obter MAC: {str(e)}")
 
         # 2. Coleta de Detalhes Adicionais (para TODAS as ONTs)
-        command_details = f"display ont info 0 {slot} {port} {ont_id}"
-        logging.info(f"[SYSTEM] [{fsp_log}] Executando: {command_details}")
-        response_details = send_command_with_pagination(shell, command_details, "#", timeout=45)
-        ont_details = parse_ont_info_details(response_details)
+        try:
+            command_details = f"display ont info 0 {slot} {port} {ont_id}"
+            logging.info(f"[SYSTEM] [{fsp_log}] Executando: {command_details}")
+            response_details = send_command_with_pagination(shell, command_details, "#", timeout=45)
+            ont_details = parse_ont_info_details(response_details)
+        except Exception as e:
+            logging.error(f"[SYSTEM] [{fsp_log}] Erro ao coletar detalhes da ONT: {str(e)}")
+            # Continua mesmo se falhar a coleta de detalhes
         
         # 3. Busca dados existentes no banco para preservar connection_code e client_name
-        logging.debug(f"[DB] [{fsp_log}] Buscando dados existentes para S/N: {info.get('sn', 'N/A')}")
-        existing_data = get_existing_ont_data(olt_ip, info.get("sn", "N/A"))
+        try:
+            logging.debug(f"[DB] [{fsp_log}] Buscando dados existentes para S/N: {info.get('sn', 'N/A')}")
+            existing_data = get_existing_ont_data(olt_ip, info.get("sn", "N/A"))
+        except Exception as e:
+            logging.warning(f"[DB] [{fsp_log}] Erro ao buscar dados existentes: {str(e)}")
+            existing_data = {}
         
         # 4. Monta o dicionário com os dados básicos.
         collected_data = {
@@ -211,10 +222,14 @@ def process_ont_details(shell, olt_ip, slot, port, ont_id, info):
             collected_data['services'] = json.dumps(ont_details.get('services', []))
         
         # 6. Salva o dicionário completo no banco de dados.
-        logging.info(f"[DB] [{fsp_log}] Salvando dados na tabela 'ont_data'.")
-        logging.debug(f"[DB] [{fsp_log}] Dados a serem salvos: {json.dumps(collected_data, indent=2)}")
-        save_ont_data(olt_ip, collected_data)
-        return 1
+        try:
+            logging.info(f"[DB] [{fsp_log}] Salvando dados na tabela 'ont_data'.")
+            logging.debug(f"[DB] [{fsp_log}] Dados a serem salvos: {json.dumps(collected_data, indent=2)}")
+            save_ont_data(olt_ip, collected_data)
+            return 1
+        except Exception as e:
+            logging.error(f"[DB] [{fsp_log}] Erro ao salvar dados da ONT: {str(e)}")
+            return 0
         
     except Exception as e:
         logging.error(f"[SYSTEM] [{fsp_log}] Erro ao processar detalhes da ONT: {str(e)}")
@@ -721,8 +736,16 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
     
     try:
         client, shell = connect_to_olt(olt_ip, username, password, max_retries=2)
+        
+        # Verificação adicional para garantir que o shell não é None
+        if not shell:
+            log_callback(f"{log_prefix} Falha ao obter shell após conexão. Abortando.")
+            return 0
+            
         log_callback(f"{log_prefix} Conectado. Preparando para coleta...")
         time.sleep(2)
+        
+        # Limpar o buffer antes de prosseguir
         while shell.recv_ready(): 
             shell.recv(4096)
         
@@ -737,6 +760,7 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
             if "Password" in response_buffer or "#" in response_buffer:
                 break
             time.sleep(0.5)
+            
         if "Password" in response_buffer:
             shell.send(f"{password}\n")
             time.sleep(2)
@@ -745,32 +769,45 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
         
         # --- Etapa 2: Coleta de dados no prompt global (antes de entrar em 'config') ---
         summary_cmd = f"display ont info summary 0/{slot}/{port}"
-        # Adicionando o prompt esperado como argumento
-        summary_response = send_command_with_pagination(shell, summary_cmd, "#", timeout=120)
         
-        if "Failure: This board does not exist" in summary_response or not summary_response.strip() or "Parameter error" in summary_response:
-            log_callback(f"{log_prefix} Placa não existe ou PON vazia. Pulando.")
-            save_pon_status(olt_ip, pon_fsp, 0, 0)
-            return 0
+        try:
+            # Adicionando o prompt esperado como argumento
+            summary_response = send_command_with_pagination(shell, summary_cmd, "#", timeout=120)
             
-        ont_info_dict, online_count, total_count = extract_ont_info(summary_response)
-        log_callback(f"{log_prefix} Encontradas {total_count} ONTs ({online_count} online).")
-        save_pon_status(olt_ip, pon_fsp, online_count, total_count)
-        
-        # Adiciona tarefas para as ONTs online na fila de coleta ETH
-        for ont_id_str, info in ont_info_dict.items():
-            if info.get("run_state", "").lower() == "online":
-                task = {
-                    "olt_ip": olt_ip,
-                    "username": username,
-                    "password": password,
-                    "slot": slot,
-                    "port": port,
-                    "ont_id": int(ont_id_str),
-                    "eth_ports": [1, 2, 3, 4] # Coleta das 4 portas padrão
-                }
-                eth_task_queue.put(task)
-                logging.info(f"{log_prefix} Tarefa ETH adicionada à fila para ONT ID {ont_id_str}")
+            if "Failure: This board does not exist" in summary_response or not summary_response.strip() or "Parameter error" in summary_response:
+                log_callback(f"{log_prefix} Placa não existe ou PON vazia. Pulando.")
+                save_pon_status(olt_ip, pon_fsp, 0, 0)
+                return 0
+                
+            ont_info_dict, online_count, total_count = extract_ont_info(summary_response)
+            log_callback(f"{log_prefix} Encontradas {total_count} ONTs ({online_count} online).")
+            save_pon_status(olt_ip, pon_fsp, online_count, total_count)
+            
+            # Adiciona tarefas para as ONTs online na fila de coleta ETH
+            for ont_id_str, info in ont_info_dict.items():
+                if info.get("run_state", "").lower() == "online":
+                    task = {
+                        "olt_ip": olt_ip,
+                        "username": username,
+                        "password": password,
+                        "slot": slot,
+                        "port": port,
+                        "ont_id": int(ont_id_str),
+                        "eth_ports": [1, 2, 3, 4] # Coleta das 4 portas padrão
+                    }
+                    eth_task_queue.put(task)
+                    logging.info(f"{log_prefix} Tarefa ETH adicionada à fila para ONT ID {ont_id_str}")
+            
+        except Exception as e:
+            # Verifica se o erro é sobre ONT não existente
+            if "does not exist" in str(e):
+                log_callback(f"{log_prefix} ONT não existe ou PON vazia. Pulando.")
+                save_pon_status(olt_ip, pon_fsp, 0, 0)
+                return 0
+            else:
+                # Para outros erros, registra e continua
+                log_callback(f"{log_prefix} Erro ao obter resumo: {str(e)}")
+                return 0
         
         # --- Etapa 3: Navegação para os modos de configuração com verificação ---
         log_callback(f"{log_prefix} Entrando nos modos de configuração...")
@@ -855,40 +892,55 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
                 log_callback(f"{log_prefix} Entrou no modo de interface corretamente")
         
         # Agora coletar o tráfego
-        ont_traffic_list = collect_ont_traffic(shell, slot, port)
-        if ont_traffic_list:
-            logging.info(f"{log_prefix} Dados de tráfego coletados: {len(ont_traffic_list)} ONTs")
-            # Logar os primeiros 3 registros para depuração
-            for i, item in enumerate(ont_traffic_list[:3]):
-                logging.info(f"{log_prefix} ONT {item['ont_id']}: Up={item['up_traffic']} kbps, Down={item['down_traffic']} kbps")
-            save_ont_traffic_bulk(olt_ip, pon_fsp, ont_traffic_list)
-        else:
-            logging.warning(f"{log_prefix} Nenhum dado de tráfego coletado")
+        try:
+            ont_traffic_list = collect_ont_traffic(shell, slot, port)
+            if ont_traffic_list:
+                logging.info(f"{log_prefix} Dados de tráfego coletados: {len(ont_traffic_list)} ONTs")
+                # Logar os primeiros 3 registros para depuração
+                for i, item in enumerate(ont_traffic_list[:3]):
+                    logging.info(f"{log_prefix} ONT {item['ont_id']}: Up={item['up_traffic']} kbps, Down={item['down_traffic']} kbps")
+                save_ont_traffic_bulk(olt_ip, pon_fsp, ont_traffic_list)
+            else:
+                logging.warning(f"{log_prefix} Nenhum dado de tráfego coletado")
+        except Exception as e:
+            logging.error(f"{log_prefix} Erro ao coletar tráfego: {str(e)}")
         
         # Coletar outros dados (estado, info, estatísticas)
-        traffic_data = collect_pon_traffic(shell, slot, port)
-        if traffic_data: 
-            save_pon_traffic_data(olt_ip, pon_fsp, traffic_data)
+        try:
+            traffic_data = collect_pon_traffic(shell, slot, port)
+            if traffic_data: 
+                save_pon_traffic_data(olt_ip, pon_fsp, traffic_data)
+        except Exception as e:
+            logging.error(f"{log_prefix} Erro ao coletar tráfego PON: {str(e)}")
         
-        state_data = collect_pon_state(shell, slot, port)
-        info_data = collect_port_info(shell, slot, port)
-        if state_data and info_data: 
-            state_data.update(info_data)
-        if state_data: 
-            save_pon_port_state(olt_ip, pon_fsp, state_data)
+        try:
+            state_data = collect_pon_state(shell, slot, port)
+            info_data = collect_port_info(shell, slot, port)
+            if state_data and info_data: 
+                state_data.update(info_data)
+            if state_data: 
+                save_pon_port_state(olt_ip, pon_fsp, state_data)
+        except Exception as e:
+            logging.error(f"{log_prefix} Erro ao coletar estado da porta: {str(e)}")
         
-        stats_data = collect_pon_statistics_packets(shell, slot, port)
-        if stats_data: 
-            save_pon_statistics_packets(olt_ip, pon_fsp, stats_data)
+        try:
+            stats_data = collect_pon_statistics_packets(shell, slot, port)
+            if stats_data: 
+                save_pon_statistics_packets(olt_ip, pon_fsp, stats_data)
+        except Exception as e:
+            logging.error(f"{log_prefix} Erro ao coletar estatísticas de pacotes: {str(e)}")
             
         # Coleta as estatísticas de pacotes para cada ONT individualmente
-        ont_ids_list = [int(ont_id) for ont_id in ont_info_dict.keys()]
-        ont_statistics_list = collect_ont_statistics(shell, slot, port, ont_ids_list, log_callback)
-        
-        if ont_statistics_list:
-            save_ont_statistics_packets_bulk(olt_ip, pon_fsp, ont_statistics_list)
-        else:
-            log_callback(f"{log_prefix} Falha ao coletar estatísticas de pacotes das ONTs.")
+        try:
+            ont_ids_list = [int(ont_id) for ont_id in ont_info_dict.keys()]
+            ont_statistics_list = collect_ont_statistics(shell, slot, port, ont_ids_list, log_callback)
+            
+            if ont_statistics_list:
+                save_ont_statistics_packets_bulk(olt_ip, pon_fsp, ont_statistics_list)
+            else:
+                log_callback(f"{log_prefix} Falha ao coletar estatísticas de pacotes das ONTs.")
+        except Exception as e:
+            logging.error(f"{log_prefix} Erro ao coletar estatísticas das ONTs: {str(e)}")
         
         # --- Etapa 5: Saída dos modos de configuração ---
         log_callback(f"{log_prefix} Saindo dos modos de configuração...")
@@ -901,7 +953,10 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
         for ont_id_str, info_dict in ont_info_dict.items():
             if not gui_window_instance.collection_running: 
                 break
-            processed_count += process_ont_details(shell, olt_ip, slot, port, ont_id_str, info_dict)
+            try:
+                processed_count += process_ont_details(shell, olt_ip, slot, port, ont_id_str, info_dict)
+            except Exception as e:
+                logging.error(f"{log_prefix} Erro ao processar ONT {ont_id_str}: {str(e)}")
             time.sleep(0.1)
         return processed_count
     except Exception as e:
@@ -910,7 +965,10 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
         return 0
     finally:
         if client:
-            client.close()
+            try:
+                client.close()
+            except:
+                pass
 
 def parse_ont_ethernet_stats(output, eth_port):
     """

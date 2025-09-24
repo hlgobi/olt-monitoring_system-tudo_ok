@@ -103,6 +103,8 @@ def to_db_timestamp(ts_str):
 
 # db/operations.py
 
+# db/operations.py
+
 def save_ont_data(olt_ip, ont_info):
     """
     Salva ou atualiza os dados de uma ONT no banco de dados, incluindo detalhes de status
@@ -185,6 +187,14 @@ def save_ont_data(olt_ip, ont_info):
             ]
             
             # Valores correspondentes às colunas (na mesma ordem)
+            # Função para truncar valores se necessário
+            def truncate_value(value, max_length):
+                if value is None:
+                    return None
+                if isinstance(value, str) and len(value) > max_length:
+                    return value[:max_length]
+                return value
+            
             values = [
                 olt_ip,  # olt_ip
                 olt_identifier,  # olt_identifier
@@ -196,54 +206,54 @@ def save_ont_data(olt_ip, ont_info):
                 ont_info['sn'],  # serial_number
                 float(ont_info['rx']) if ont_info['rx'] not in ['N/A', '-'] else None,  # rx_power
                 float(ont_info['tx']) if ont_info['tx'] not in ['N/A', '-'] else None,  # tx_power
-                ont_info['description'],  # description
-                primaria,  # primaria
-                secundaria,  # secundaria
-                porta_secundaria,  # porta_secundaria
+                truncate_value(ont_info['description'], 200),  # description - truncado para 200 caracteres
+                truncate_value(primaria, 100),  # primaria - truncado para 100 caracteres
+                truncate_value(secundaria, 100),  # secundaria - truncado para 100 caracteres
+                truncate_value(porta_secundaria, 10),  # porta_secundaria - truncado para 10 caracteres
                 fsp_changed,  # fsp_changed
                 ont_id_changed,  # ont_id_changed
                 previous_fsp if fsp_changed else None,  # previous_fsp
                 previous_ont_id if ont_id_changed else None,  # previous_ont_id
-                ont_info['status'],  # status
-                ont_info.get('last_down_cause'),  # last_down_cause
+                truncate_value(ont_info['status'], 20),  # status - truncado para 20 caracteres
+                truncate_value(ont_info.get('last_down_cause'), 100),  # last_down_cause - truncado para 100 caracteres
                 to_db_timestamp(ont_info.get('last_up_time')),  # last_up_time
                 to_db_timestamp(ont_info.get('last_down_time')),  # last_down_time
                 to_db_timestamp(ont_info.get('last_dying_gasp_time')),  # last_dying_gasp_time
-                ont_info.get('line_profile_name'),  # line_profile_name
+                truncate_value(ont_info.get('line_profile_name'), 100),  # line_profile_name - truncado para 100 caracteres
                 services_json,  # services
-                ont_info.get('ont_distance'),  # ont_distance
-                ont_info.get('memory_occupation'),  # memory_occupation
-                ont_info.get('cpu_occupation'),  # cpu_occupation
-                ont_info.get('temperature'),  # temperature
-                ont_info.get('ont_ip_address'),  # ont_ip_address
-                ont_info.get('line_profile_id'),  # line_profile_id
-                ont_info.get('service_profile_id'),  # service_profile_id
-                ont_info.get('service_profile_name'),  # service_profile_name
-                ont_info.get('connection_code'),  # connection_code
-                ont_info.get('vendor_id'),  # vendor_id
-                ont_info.get('ont_version'),  # ont_version
-                ont_info.get('product_id'),  # product_id
-                ont_info.get('equipment_id'),  # equipment_id
-                ont_info.get('main_software_version'),  # main_software_version
-                ont_info.get('standby_software_version'),  # standby_software_version
-                ont_info.get('ont_product_description'),  # ont_product_description
-                ont_info.get('support_xml_version'),  # support_xml_version
-                ont_info.get('ont_online_duration'),  # ont_online_duration
-                ont_info.get('optical_module_type'),  # optical_module_type
-                ont_info.get('optical_module_subtype'),  # optical_module_subtype
-                ont_info.get('optical_encapsulation_type'),  # optical_encapsulation_type
-                ont_info.get('optical_vendor_name'),  # optical_vendor_name
-                ont_info.get('optical_vendor_pn'),  # optical_vendor_pn
-                ont_info.get('optical_vendor_sn'),  # optical_vendor_sn
-                ont_info.get('optical_date_code'),  # optical_date_code
+                truncate_value(ont_info.get('ont_distance'), 20),  # ont_distance - truncado para 20 caracteres
+                truncate_value(ont_info.get('memory_occupation'), 20),  # memory_occupation - truncado para 20 caracteres
+                truncate_value(ont_info.get('cpu_occupation'), 20),  # cpu_occupation - truncado para 20 caracteres
+                truncate_value(ont_info.get('temperature'), 20),  # temperature - truncado para 20 caracteres
+                truncate_value(ont_info.get('ont_ip_address'), 50),  # ont_ip_address - truncado para 50 caracteres
+                truncate_value(ont_info.get('line_profile_id'), 20),  # line_profile_id - truncado para 20 caracteres
+                truncate_value(ont_info.get('service_profile_id'), 20),  # service_profile_id - truncado para 20 caracteres
+                truncate_value(ont_info.get('service_profile_name'), 100),  # service_profile_name - truncado para 100 caracteres
+                truncate_value(ont_info.get('connection_code'), 50),  # connection_code - truncado para 50 caracteres
+                truncate_value(ont_info.get('vendor_id'), 50),  # vendor_id - truncado para 50 caracteres
+                truncate_value(ont_info.get('ont_version'), 50),  # ont_version - truncado para 50 caracteres
+                truncate_value(ont_info.get('product_id'), 50),  # product_id - truncado para 50 caracteres
+                truncate_value(ont_info.get('equipment_id'), 50),  # equipment_id - truncado para 50 caracteres
+                truncate_value(ont_info.get('main_software_version'), 100),  # main_software_version - truncado para 100 caracteres
+                truncate_value(ont_info.get('standby_software_version'), 100),  # standby_software_version - truncado para 100 caracteres
+                truncate_value(ont_info.get('ont_product_description'), 200),  # ont_product_description - truncado para 200 caracteres
+                truncate_value(ont_info.get('support_xml_version'), 50),  # support_xml_version - truncado para 50 caracteres
+                truncate_value(ont_info.get('ont_online_duration'), 100),  # ont_online_duration - truncado para 100 caracteres
+                truncate_value(ont_info.get('optical_module_type'), 50),  # optical_module_type - truncado para 50 caracteres
+                truncate_value(ont_info.get('optical_module_subtype'), 50),  # optical_module_subtype - truncado para 50 caracteres
+                truncate_value(ont_info.get('optical_encapsulation_type'), 50),  # optical_encapsulation_type - truncado para 50 caracteres
+                truncate_value(ont_info.get('optical_vendor_name'), 50),  # optical_vendor_name - truncado para 50 caracteres
+                truncate_value(ont_info.get('optical_vendor_pn'), 50),  # optical_vendor_pn - truncado para 50 caracteres
+                truncate_value(ont_info.get('optical_vendor_sn'), 50),  # optical_vendor_sn - truncado para 50 caracteres
+                truncate_value(ont_info.get('optical_date_code'), 20),  # optical_date_code - truncado para 20 caracteres
                 ont_info.get('optical_olt_rx_ont_power_dbm'),  # optical_olt_rx_ont_power_dbm
                 ont_info.get('ont_voltage_v'),  # ont_voltage_v
                 ont_info.get('ont_tx_bias_current_ma'),  # ont_tx_bias_current_ma
-                ont_info.get('optical_rx_power_alarm'),  # optical_rx_power_alarm
-                ont_info.get('optical_tx_power_alarm'),  # optical_tx_power_alarm
-                ont_info.get('optical_bias_current_alarm'),  # optical_bias_current_alarm
-                ont_info.get('optical_temperature_alarm'),  # optical_temperature_alarm
-                ont_info.get('optical_voltage_alarm'),  # optical_voltage_alarm
+                truncate_value(ont_info.get('optical_rx_power_alarm'), 50),  # optical_rx_power_alarm - truncado para 50 caracteres
+                truncate_value(ont_info.get('optical_tx_power_alarm'), 50),  # optical_tx_power_alarm - truncado para 50 caracteres
+                truncate_value(ont_info.get('optical_bias_current_alarm'), 50),  # optical_bias_current_alarm - truncado para 50 caracteres
+                truncate_value(ont_info.get('optical_temperature_alarm'), 50),  # optical_temperature_alarm - truncado para 50 caracteres
+                truncate_value(ont_info.get('optical_voltage_alarm'), 50),  # optical_voltage_alarm - truncado para 50 caracteres
                 current_time  # collection_time
             ]
             
