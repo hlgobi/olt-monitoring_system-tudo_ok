@@ -1,46 +1,48 @@
-# 10. olt_monitoring_system/olt/processing.py
-# Este módulo contém a lógica principal para processar os dados coletados das OLTs.
-# Ele é responsável por orquestrar a coleta de dados em paralelo (usando threads),
-# enviar comandos, processar as respostas e salvar os resultados no banco de dados.
+# -*- coding: utf-8 -*-
 
-import time
-import logging
-import re
-from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed # Para executar tarefas em paralelo.
-import random # Usado para adicionar um pequeno atraso aleatório e evitar que todas as threads iniciem exatamente ao mesmo tempo.
-import json
-import queue
-import psycopg2
-from config import DB_CONFIG
+# ==============================================================================
+# IMPORTAÇÕES DE MÓDULOS
+# ==============================================================================
+import time  # Módulo para funções relacionadas a tempo, como pausas e medições.
+import logging  # Módulo para registrar eventos, erros e informações durante a execução.
+import re  # Módulo para expressões regulares, usado para parsear respostas da OLT.
+from datetime import datetime  # Módulo para manipulação de datas e horas.
+from concurrent.futures import ThreadPoolExecutor, as_completed  # Para execução paralela de tarefas.
+import random  # Usado para adicionar atrasos aleatórios e evitar sincronização de threads.
+import json  # Para serialização e desserialização de dados JSON.
+import queue  # Para implementação de filas, usado na comunicação entre threads.
+import psycopg2  # Adaptador de banco de dados PostgreSQL para Python.
+from config import DB_CONFIG  # Configurações do banco de dados.
+
 # --- Importações de Módulos da Aplicação ---
-from olt.communication import send_command, connect_to_olt
-from utils.helpers import clean_response
-# --- INÍCIO DA MODIFICAÇÃO 1: Importações ---
-# Substitua a importação existente por esta que inclui todas as funções
+from olt.communication import send_command, connect_to_olt  # Funções para comunicação com OLTs.
+from utils.helpers import clean_response  # Funções utilitárias para limpar respostas.
+
+# Importações de funções de parsing (extração de dados das respostas)
 from olt.parsing import (extract_service_mac, extract_ont_info, parse_ont_info_details, 
                          parse_pon_port_state, parse_port_info, parse_pon_statistics_packets, 
                          parse_ont_traffic, parse_ont_statistics, parse_ont_eth_statistics,
                          parse_uplink_ddm_response, parse_ont_optical_info)
 
-# Substitua a importação de operations para incluir a nova função
-# Substitua a importação existente por esta que inclui todas as funções
+# Importações de funções de operações no banco de dados
 from db.operations import (save_ont_data, save_pon_status, save_temp_data, 
                            save_resource_data, save_pon_traffic_data, save_pon_port_state, 
                            save_pon_statistics_packets, save_ont_traffic_bulk, 
                            save_ont_statistics_packets_bulk, save_ont_eth_statistics_bulk,
                            save_uplink_ddm_data)
 
-from gui.signals import db_signals
+from gui.signals import db_signals  # Sinais personalizados para comunicação com a GUI.
 
+# ==============================================================================
+# CONSTANTES E VARIÁVEIS GLOBAIS
+# ==============================================================================
+
+# Expressão regular para detectar prompts de parâmetro da OLT
 olt_telnet_param_prompt_re = re.compile(r"\{\s*<cr>.*\}\s*:\s*$")
-
 
 # Define o número de threads que serão usadas para processar as portas PON em paralelo.
 NUM_THREADS = 4
 
-
-# --- Mapeamento de Placas e Portas ---
 # Dicionário que mapeia o nome de uma placa (board) ao seu número de portas.
 # Essencial para saber quantas portas PON devem ser verificadas em cada slot.
 # MODIFICADO: Foram adicionadas novas placas para suportar o modelo MA5800.
@@ -57,10 +59,30 @@ BOARD_PORT_MAP = {
     "H907CGHF": 16,
 }
 
+# ==============================================================================
+# FUNÇÕES DE COMUNICAÇÃO E ENVIO DE COMANDOS
+# ==============================================================================
+
 def send_command_with_pagination(shell, command, expected_prompt="#", timeout=60):
     """
-    Envia comando SSH com tratamento robusto.
-    Retorna a saída do comando limpa.
+    Envia comando SSH com tratamento robusto e paginação.
+    
+    Esta função envia um comando para a OLT via shell SSH e lida com:
+    - Paginação automática (quando a OLT exibe "---- More")
+    - Prompts de confirmação (quando a OLT exibe "{ <cr>||<K> }:")
+    - Detecção de erros na resposta
+    
+    Args:
+        shell: Objeto de conexão SSH com a OLT
+        command (str): Comando a ser enviado
+        expected_prompt (str): Prompt esperado após a execução do comando
+        timeout (int): Tempo máximo de espera em segundos
+        
+    Returns:
+        str: Resposta do comando limpa e formatada
+        
+    Raises:
+        Exception: Se o comando retornar um erro ou se ocorrer algum problema na comunicação
     """
     full_response = ""
     start_time = time.time()
@@ -96,11 +118,9 @@ def send_command_with_pagination(shell, command, expected_prompt="#", timeout=60
                     start_time = time.time()  # Reseta o timeout na interação.
                     continue              # <<--- ADIÇÃO CRUCIAL
 
-                # --- INÍCIO DA CORREÇÃO ---
                 # Verifica se o chunk contém alguma linha de texto antes de tentar acessar a última
                 lines_in_chunk = chunk.strip().splitlines()
                 if lines_in_chunk and olt_telnet_param_prompt_re.search(lines_in_chunk[-1]):
-                # --- FIM DA CORREÇÃO ---
                     logging.debug("Prompt <cr> genérico detectado. Enviando Enter e continuando a escuta.")
                     shell.send("\n")
                     time.sleep(3)       # Pequena pausa para a OLT processar o Enter
@@ -159,10 +179,32 @@ def send_command_with_pagination(shell, command, expected_prompt="#", timeout=60
         logging.warning(f"Erro no comando '{command}': {str(e)}")
         raise
 
+# ==============================================================================
+# FUNÇÕES DE COLETA DE DADOS ESPECÍFICOS
+# ==============================================================================
+
 def process_ont_details(shell, olt_ip, slot, port, ont_id, info):
     """
     Processa os detalhes de uma ÚNICA ONT, coletando MAC (se online)
     e todas as informações detalhadas de status.
+    
+    Esta função é responsável por:
+    1. Coletar o endereço MAC da ONT (se estiver online)
+    2. Coletar informações detalhadas sobre a ONT
+    3. Buscar dados existentes no banco para preservar informações
+    4. Combinar todas as informações em um dicionário
+    5. Salvar os dados no banco de dados
+    
+    Args:
+        shell: Objeto de conexão SSH com a OLT
+        olt_ip (str): Endereço IP da OLT
+        slot (int): Número do slot onde a ONT está conectada
+        port (int): Número da porta PON onde a ONT está conectada
+        ont_id (int): ID da ONT
+        info (dict): Informações básicas da ONT já coletadas
+        
+    Returns:
+        int: 1 se o processamento foi bem-sucedido, 0 caso contrário
     """
     # Importações necessárias dentro da função para evitar dependências circulares
     from olt.parsing import extract_service_mac, parse_ont_info_details
@@ -236,7 +278,20 @@ def process_ont_details(shell, olt_ip, slot, port, ont_id, info):
         return 0
 
 def collect_port_info(shell, slot, port):
-    """(VERSÃO SIMPLIFICADA) Apenas executa o comando de info e faz o parse da saída."""
+    """
+    Coleta informações básicas sobre uma porta PON.
+    
+    Esta função executa o comando 'display port info' na OLT
+    e parseia a resposta para extrair informações sobre a porta.
+    
+    Args:
+        shell: Objeto de conexão SSH com a OLT
+        slot (int): Número do slot da porta
+        port (int): Número da porta PON
+        
+    Returns:
+        dict: Informações da porta parseadas ou None em caso de erro
+    """
     fsp = f"0/{slot}/{port}"
     log_prefix = f"[PON Info {fsp}]"
 
@@ -262,10 +317,21 @@ def collect_port_info(shell, slot, port):
         logging.error(f"{log_prefix} Erro durante coleta de info: {e}", exc_info=True)
         return None
 
-# Em olt/processing.py, adicione esta função antes de process_pon_worker
-
 def collect_pon_statistics_packets(shell, slot, port):
-    """Apenas executa o comando de estatísticas de pacotes e faz o parse da saída."""
+    """
+    Coleta estatísticas de pacotes de uma porta PON.
+    
+    Esta função executa o comando 'display statistics port ethernet' na OLT
+    e parseia a resposta para extrair estatísticas de pacotes.
+    
+    Args:
+        shell: Objeto de conexão SSH com a OLT
+        slot (int): Número do slot da porta
+        port (int): Número da porta PON
+        
+    Returns:
+        dict: Estatísticas de pacotes parseadas ou None em caso de erro
+    """
     fsp = f"0/{slot}/{port}"
     log_prefix = f"[PON Stats {fsp}]"
 
@@ -291,10 +357,21 @@ def collect_pon_statistics_packets(shell, slot, port):
         logging.error(f"{log_prefix} Erro durante coleta de estatísticas: {e}", exc_info=True)
         return None
 
-# Em olt/processing.py, substitua a função collect_ont_traffic por esta versão corrigida:
-
 def collect_ont_traffic(shell, slot, port):
-    """Coleta dados de tráfego de todas as ONTs em uma porta PON."""
+    """
+    Coleta dados de tráfego de todas as ONTs em uma porta PON.
+    
+    Esta função executa o comando 'display ont traffic' na OLT
+    e parseia a resposta para extrair informações de tráfego de cada ONT.
+    
+    Args:
+        shell: Objeto de conexão SSH com a OLT
+        slot (int): Número do slot da porta
+        port (int): Número da porta PON
+        
+    Returns:
+        list: Lista de dicionários com dados de tráfego por ONT ou None em caso de erro
+    """
     fsp = f"0/{slot}/{port}"
     log_prefix = f"[ONT Traffic {fsp}]"
     
@@ -411,9 +488,24 @@ def collect_ont_traffic(shell, slot, port):
     except Exception as e:
         logging.error(f"{log_prefix} Erro durante coleta de tráfego de ONT: {e}", exc_info=True)
         return None
-    
+
 def collect_ont_statistics(shell, slot, port, ont_ids, log_callback):
-    """Coleta estatísticas de pacotes para uma lista de ONTs em uma PON, uma por uma."""
+    """
+    Coleta estatísticas de pacotes para uma lista de ONTs em uma PON, uma por uma.
+    
+    Esta função executa o comando 'display statistics ont' para cada ONT
+    e parseia a resposta para extrair estatísticas de pacotes.
+    
+    Args:
+        shell: Objeto de conexão SSH com a OLT
+        slot (int): Número do slot da porta
+        port (int): Número da porta PON
+        ont_ids (list): Lista de IDs das ONTs para coletar estatísticas
+        log_callback (function): Função para registrar logs na GUI
+        
+    Returns:
+        list: Lista de dicionários com estatísticas por ONT
+    """
     fsp = f"0/{slot}/{port}"
     log_prefix = f"[ONT Stats {fsp}]"
     all_stats = []
@@ -456,8 +548,109 @@ def collect_ont_statistics(shell, slot, port, ont_ids, log_callback):
     log_callback(f"{log_prefix} Coleta de estatísticas finalizada. {len(all_stats)} ONTs processadas.")
     return all_stats
 
+def collect_pon_state(shell, slot, port):
+    """
+    Coleta o estado de uma porta PON.
+    
+    Esta função executa o comando 'display port state' na OLT
+    e parseia a resposta para extrair informações sobre o estado da porta.
+    
+    Args:
+        shell: Objeto de conexão SSH com a OLT
+        slot (int): Número do slot da porta
+        port (int): Número da porta PON
+        
+    Returns:
+        dict: Informações de estado da porta parseadas ou None em caso de erro
+    """
+    fsp = f"0/{slot}/{port}"
+    log_prefix = f"[PON State {fsp}]"
+    
+    try:
+        # 1. Executa o comando, assumindo que já está no modo de interface
+        command = f"display port state {port}\n"
+        logging.info(f"{log_prefix} Executando comando: {command.strip()}")
+        shell.send(command)
+        time.sleep(1)
+
+        # 2. Lê a resposta completa, lidando com a paginação
+        response = ""
+        timeout = time.time() + 45
+        while time.time() < timeout:
+            if shell.recv_ready():
+                chunk = shell.recv(8192).decode('utf-8', errors='ignore')
+                response += chunk
+                if "---- More" in chunk:
+                    shell.send(" ")
+                    time.sleep(0.8)
+            
+            # Sai se o prompt da interface for encontrado e não houver mais dados
+            elif f"(config-if-gpon-0/{slot})" in response and not shell.recv_ready():
+                break
+            time.sleep(0.2)
+            
+        logging.info(f"{log_prefix} Resposta completa recebida ({len(response)} bytes)")
+
+        # 3. Faz o parsing da resposta
+        return parse_pon_port_state(response)
+        
+    except Exception as e:
+        logging.error(f"{log_prefix} Erro CRÍTICO durante coleta de estado: {e}", exc_info=True)
+        return None
+
+def get_active_gpon_slots(shell):
+    """
+    Executa 'display board 0' para descobrir quais slots têm placas ativas
+    e retorna uma lista com suas informações (slot, nome da placa, nº de portas).
+    
+    Args:
+        shell: Objeto de conexão SSH com a OLT
+        
+    Returns:
+        list: Lista de dicionários com informações das placas ativas
+    """
+    active_boards_info = []
+    try:
+        # Executa o comando para listar todas as placas no chassi 0.
+        board_output = send_command_with_pagination(shell, "display board 0", "#", timeout=30)
+        
+        # Regex para encontrar linhas que representam uma placa em estado normal/ativo.
+        pattern = re.compile(r'^\s*(\d+)\s+([A-Z0-9]+)\s+(Normal|Active_normal|Standby_normal)', re.IGNORECASE)
+        
+        for line in board_output.splitlines():
+            match = pattern.search(line.strip())
+            if match:
+                slot_id, board_name = int(match.group(1)), match.group(2).upper()
+                # Verifica se a placa encontrada está no nosso dicionário de placas conhecidas.
+                if board_name in BOARD_PORT_MAP:
+                    # Adiciona as informações da placa à lista de placas ativas.
+                    active_boards_info.append({
+                        "slot": slot_id, 
+                        "board_name": board_name, 
+                        "ports": BOARD_PORT_MAP[board_name] # Pega o nº de portas do dicionário.
+                    })
+        return active_boards_info
+    except Exception as e:
+        logging.error(f"Falha crítica ao obter informações das placas: {e}. Nenhum slot será processado.")
+        return [] # Retorna uma lista vazia em caso de erro.
+
+# ==============================================================================
+# FUNÇÕES DE PROCESSAMENTO DE WORKERS
+# ==============================================================================
+
 def process_ont_eth_worker(task_queue, main_window, log_callback):
-    """Worker global que processa tarefas de coleta de estatísticas Ethernet das ONTs."""
+    """
+    Worker global que processa tarefas de coleta de estatísticas Ethernet das ONTs.
+    
+    Esta função é executada em uma thread separada e fica aguardando tarefas
+    na fila. Quando uma tarefa é recebida, ela conecta à OLT, coleta as
+    estatísticas Ethernet da ONT especificada e salva no banco de dados.
+    
+    Args:
+        task_queue (queue.Queue): Fila de tarefas a serem processadas
+        main_window: Instância da janela principal da GUI
+        log_callback (function): Função para registrar logs na GUI
+    """
     log_callback(f"[Worker ONT-ETH] Inicializando worker global...")
     
     while True:
@@ -578,7 +771,7 @@ def process_ont_eth_worker(task_queue, main_window, log_callback):
                 # Lista para armazenar todos os dados coletados
                 all_eth_data = []
                 
-                # Loop sobre as portas Ethernet - CORREÇÃO AQUI
+                # Loop sobre as portas Ethernet
                 for eth_port in eth_ports:
                     log_callback(f"[Worker ONT-ETH] Coletando dados da porta Ethernet {eth_port} da ONT {ont_id}")
                     
@@ -652,79 +845,30 @@ def process_ont_eth_worker(task_queue, main_window, log_callback):
             # Se ocorrer um erro ao obter a tarefa, continue o loop
             log_callback(f"[Worker ONT-ETH] Erro ao obter tarefa da fila: {str(e)}")
             continue
-            
-def get_active_gpon_slots(shell):
-    """
-    Executa 'display board 0' para descobrir quais slots têm placas ativas
-    e retorna uma lista com suas informações (slot, nome da placa, nº de portas).
-    """
-    active_boards_info = []
-    try:
-        # Executa o comando para listar todas as placas no chassi 0.
-        # Adicionando o prompt esperado como argumento (geralmente "#")
-        board_output = send_command_with_pagination(shell, "display board 0", "#", timeout=30)
-        
-        # Regex para encontrar linhas que representam uma placa em estado normal/ativo.
-        pattern = re.compile(r'^\s*(\d+)\s+([A-Z0-9]+)\s+(Normal|Active_normal|Standby_normal)', re.IGNORECASE)
-        
-        for line in board_output.splitlines():
-            match = pattern.search(line.strip())
-            if match:
-                slot_id, board_name = int(match.group(1)), match.group(2).upper()
-                # Verifica se a placa encontrada está no nosso dicionário de placas conhecidas.
-                if board_name in BOARD_PORT_MAP:
-                    # Adiciona as informações da placa à lista de placas ativas.
-                    active_boards_info.append({
-                        "slot": slot_id, 
-                        "board_name": board_name, 
-                        "ports": BOARD_PORT_MAP[board_name] # Pega o nº de portas do dicionário.
-                    })
-        return active_boards_info
-    except Exception as e:
-        logging.error(f"Falha crítica ao obter informações das placas: {e}. Nenhum slot será processado.")
-        return [] # Retorna uma lista vazia em caso de erro.
-
-def collect_pon_state(shell, slot, port):
-    """(VERSÃO SIMPLIFICADA) Apenas executa o comando de estado e faz o parse da saída."""
-    fsp = f"0/{slot}/{port}"
-    log_prefix = f"[PON State {fsp}]"
-    
-    try:
-        # 1. Executa o comando, assumindo que já está no modo de interface
-        command = f"display port state {port}\n"
-        logging.info(f"{log_prefix} Executando comando: {command.strip()}")
-        shell.send(command)
-        time.sleep(1)
-
-        # 2. Lê a resposta completa, lidando com a paginação
-        response = ""
-        timeout = time.time() + 45
-        while time.time() < timeout:
-            if shell.recv_ready():
-                chunk = shell.recv(8192).decode('utf-8', errors='ignore')
-                response += chunk
-                if "---- More" in chunk:
-                    shell.send(" ")
-                    time.sleep(0.8)
-            
-            # Sai se o prompt da interface for encontrado e não houver mais dados
-            elif f"(config-if-gpon-0/{slot})" in response and not shell.recv_ready():
-                break
-            time.sleep(0.2)
-            
-        logging.info(f"{log_prefix} Resposta completa recebida ({len(response)} bytes)")
-
-        # 3. Faz o parsing da resposta
-        return parse_pon_port_state(response)
-        
-    except Exception as e:
-        logging.error(f"{log_prefix} Erro CRÍTICO durante coleta de estado: {e}", exc_info=True)
-        return None
 
 def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instance, log_callback, eth_task_queue):
     """
-    (VERSÃO FINAL E ROBUSTA) Worker que conecta, gerencia a navegação com verificação de prompt
-    e chama as funções de coleta de forma segura e na ordem correta.
+    Worker que processa uma porta PON específica.
+    
+    Esta função é executada em uma thread separada para cada porta PON e é responsável por:
+    1. Conectar à OLT
+    2. Navegar para os modos de configuração corretos
+    3. Coletar dados da porta PON e das ONTs conectadas
+    4. Processar os detalhes de cada ONT
+    5. Salvar todos os dados no banco de dados
+    
+    Args:
+        olt_ip (str): Endereço IP da OLT
+        username (str): Nome de usuário para conexão
+        password (str): Senha para conexão
+        slot (int): Número do slot da porta PON
+        port (int): Número da porta PON
+        gui_window_instance: Instância da janela principal da GUI
+        log_callback (function): Função para registrar logs na GUI
+        eth_task_queue (queue.Queue): Fila para adicionar tarefas de coleta Ethernet
+        
+    Returns:
+        int: Número de ONTs processadas com sucesso
     """
     client = None
     processed_count = 0
@@ -970,9 +1114,16 @@ def process_pon_worker(olt_ip, username, password, slot, port, gui_window_instan
             except:
                 pass
 
+# ==============================================================================
+# FUNÇÕES DE PARSING E SALVAMENTO DE DADOS
+# ==============================================================================
+
 def parse_ont_ethernet_stats(output, eth_port):
     """
     Parseia a saída do comando de estatísticas Ethernet da ONT.
+    
+    Esta função analisa a saída bruta do comando de estatísticas Ethernet
+    e extrai informações como frames RX/TX, bytes RX/TX, erros, etc.
     
     Args:
         output (str): Saída bruta do comando
@@ -1065,6 +1216,15 @@ def parse_ont_ethernet_stats(output, eth_port):
 def save_ont_ethernet_stats(eth_data_list, olt_ip, fsp, ont_id):
     """
     Salva as estatísticas Ethernet das ONTs no banco de dados.
+    
+    Esta função insere os dados de estatísticas Ethernet na tabela
+    'ont_eth_port_statistics' do banco de dados.
+    
+    Args:
+        eth_data_list (list): Lista de dicionários com dados de estatísticas
+        olt_ip (str): Endereço IP da OLT
+        fsp (str): Frame/Slot/Porta da ONT
+        ont_id (int): ID da ONT
     """
     try:
         conn = psycopg2.connect(**DB_CONFIG)
@@ -1076,20 +1236,14 @@ def save_ont_ethernet_stats(eth_data_list, olt_ip, fsp, ont_id):
         for eth_data in eth_data_list:
             # Inserir os dados no banco
             query = """
-                INSERT INTO ont_eth_port_statistics (
-                    olt_ip, olt_identifier, fsp, ont_id, eth_port_id, collection_time,
-                    rx_frames, tx_frames, rx_bytes, tx_bytes,
-                    rx_error_frames, tx_error_frames, tx_collision_frames,
-                    duration_seconds
-                ) VALUES (
-                    %s, %s, %s, %s, %s, NOW(),
-                    %s, %s, %s, %s,
-                    %s, %s, %s, %s
-                )
+                INSERT INTO ont_eth_port_statistics
+                (olt_identifier, fsp, ont_id, eth_port_id, rx_frames, tx_frames, 
+                 rx_bytes, tx_bytes, rx_error_frames, tx_error_frames, 
+                 tx_collision_frames, duration_seconds, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             """
             
             cursor.execute(query, (
-                olt_ip,
                 olt_identifier, fsp, ont_id, eth_data['eth_port_id'],
                 eth_data['rx_frames'], eth_data['tx_frames'],
                 eth_data['rx_bytes'], eth_data['tx_bytes'],
@@ -1100,6 +1254,13 @@ def save_ont_ethernet_stats(eth_data_list, olt_ip, fsp, ont_id):
         conn.commit()
         cursor.close()
         conn.close()
+        logging.info(f"Estatísticas Ethernet salvas para ONT {ont_id} na PON {fsp}")
+    except Exception as e:
+        logging.error(f"Erro ao salvar estatísticas Ethernet: {str(e)}")
+        if conn:
+            conn.rollback()
+            cursor.close()
+            conn.close()
         
         logging.info(f"Estatísticas Ethernet salvas com sucesso para ONT {ont_id} na PON {fsp}")
         return True
@@ -1433,217 +1594,459 @@ def run_resource_monitoring(olt_ip, username, password, gui_window_instance):
         if client: client.close()
         db_signals.update_status.emit(f"Execuções: {gui_window_instance.resource_execution_count} (Parado)", f"Última execução: {datetime.now().strftime('%H:%M:%S')}", "Monitoramento de Recursos parado")
 
-# Em olt/processing.py
+# ==============================================================================
+# FUNÇÕES DE PARSING E SALVAMENTO DE DADOS (CONTINUAÇÃO)
+# ==============================================================================
 
 def collect_pon_traffic(shell, slot, port):
-    """(VERSÃO SIMPLIFICADA) Apenas executa o comando de tráfego e faz o parse da saída."""
+    """
+    Coleta dados de tráfego de uma porta PON específica.
+    
+    Esta função executa o comando 'display port traffic' na OLT
+    e parseia a resposta para extrair informações de tráfego da porta.
+    
+    Args:
+        shell: Objeto de conexão SSH com a OLT
+        slot (int): Número do slot da porta
+        port (int): Número da porta PON
+        
+    Returns:
+        dict: Dados de tráfego da porta PON parseados ou None em caso de erro
+    """
     fsp = f"0/{slot}/{port}"
     log_prefix = f"[PON Traffic {fsp}]"
     
     try:
-        # 1. Executa o comando, assumindo que já está no modo de interface
-        command = f"display port traffic {port}\n"
-        logging.info(f"{log_prefix} Executando comando: {command.strip()}")
-        shell.send(command)
-        time.sleep(2) # Pausa para a resposta começar a chegar
-
-        # 2. Lê a resposta
-        response = ""
-        timeout = time.time() + 15
-        while time.time() < timeout:
-            if shell.recv_ready():
-                response += shell.recv(8192).decode('utf-8', errors='ignore')
-            elif f"(config-if-gpon-0/{slot})" in response:
-                break # Sai do loop se o prompt da interface aparecer no final
-            time.sleep(0.2)
+        # Verificar e garantir que estamos no modo de interface correto
+        logging.info(f"{log_prefix} Verificando modo de operação...")
         
-        logging.info(f"{log_prefix} Resposta recebida ({len(response)} bytes)")
-
-        # 3. Faz o parse da resposta (lógica de parsing movida para cá)
-        traffic_data = {}
-        for line in response.splitlines():
-            if ":" in line:
-                key, value = line.split(":", 1)
-                key = key.strip()
-                value = value.strip()
-                try:
-                    if "Up traffic (kbps)" in key:
-                        traffic_data['up_traffic_kbps'] = float(value)
-                    elif "Down traffic (kbps)" in key:
-                        traffic_data['down_traffic_kbps'] = float(value)
-                    elif "upstream broadcast" in key:
-                        traffic_data['upstream_broadcast_pps'] = int(value)
-                    elif "upstream multicast" in key:
-                        traffic_data['upstream_multicast_pps'] = int(value)
-                    elif "upstream unicast" in key:
-                        traffic_data['upstream_unicast_pps'] = int(value)
-                    elif "downstream broadcast" in key:
-                        traffic_data['downstream_broadcast_pps'] = int(value)
-                    elif "downstream multicast" in key:
-                        traffic_data['downstream_multicast_pps'] = int(value)
-                    elif "downstream unicast" in key:
-                        traffic_data['downstream_unicast_pps'] = int(value)
-                except (ValueError, IndexError):
-                    continue
-        
-        return traffic_data
-
-    except Exception as e:
-        logging.error(f"{log_prefix} Erro durante coleta de tráfego: {e}", exc_info=True)
-        return None
-        
-        # Verificar se coletou dados suficientes
-        if len(traffic_data) < 8:
-            logging.warning(f"{log_prefix} Dados incompletos coletados: {traffic_data}")
-        else:
-            logging.info(f"{log_prefix} Todos os dados de tráfego coletados com sucesso")
-        
-        # Sair do modo de configuração da interface
-        logging.info(f"{log_prefix} Saindo do modo de configuração da interface...")
-        shell.send("quit\n")
-        time.sleep(1)
-        
-        # Sair do modo de configuração global
-        logging.info(f"{log_prefix} Saindo do modo de configuração global...")
-        shell.send("quit\n")
-        time.sleep(1)
-        
-        return traffic_data
-    except Exception as e:
-        logging.error(f"{log_prefix} Erro durante coleta de tráfego: {e}", exc_info=True)
-        return None
-    
-def collect_uplink_ddm_data(olt_ip, username, password, uplink_configs):
-    """Coleta dados DDM das portas de uplink de uma OLT"""
-    client = None
-    ddm_data_list = []
-    
-    try:
-        client, shell = connect_to_olt(olt_ip, username, password)
-        if not client or not shell:
-            logging.error(f"[{olt_ip}] Falha ao conectar para coleta DDM.")
-            return []
-        
-        # Entrar no modo enable
-        shell.send("enable\n")
-        time.sleep(1)
-        
-        response = ""
-        while shell.recv_ready():
-            response += shell.recv(4096).decode('utf-8', errors='ignore')
-        
-        if "Password:" in response:
-            shell.send(f"{password}\n")
-            time.sleep(2)
-            while shell.recv_ready():
-                shell.recv(4096)
-        
-        # Entrar no modo config
-        shell.send("config\n")
-        time.sleep(1)
-        
-        response = ""
-        while shell.recv_ready():
-            response += shell.recv(4096).decode('utf-8', errors='ignore')
-        
-        if "(config)" not in response:
-            logging.error(f"[{olt_ip}] Não foi possível entrar no modo config para coleta DDM.")
-            return []
-        
-        # Para cada configuração de uplink
-        for config in uplink_configs:
-            placa = config['placa']
-            slot = config['slot']
-            port = config['port']
-            
-            try:
-                # Determinar o comando de interface baseado no tipo de placa
-                interface_cmd = None
-                expected_prompt = None
-                
-                if placa.startswith("H801") or placa.startswith("H802"):
-                    # Para placas H801 e H802, o formato é interface giu 0/slot
-                    interface_cmd = f"interface giu 0/{slot}"
-                    expected_prompt = f"(config-if-giu-0/{slot})"
-                elif placa.startswith("H901") or placa.startswith("H902"):
-                    # Para placas H901 e H902, o formato é interface xgigabitethernet 0/slot
-                    interface_cmd = f"interface xgigabitethernet 0/{slot}"
-                    expected_prompt = f"(config-if-xge-0/{slot})"
-                else:
-                    logging.warning(f"[{olt_ip}] Tipo de placa desconhecido: {placa}")
-                    continue
-                
-                logging.info(f"[{olt_ip}] Tentando comando de interface: {interface_cmd}")
-                
-                shell.send(f"{interface_cmd}\n")
-                time.sleep(1)
-                
-                response = ""
-                while shell.recv_ready():
-                    response += shell.recv(4096).decode('utf-8', errors='ignore')
-                
-                # Verificar se entrou no modo de interface
-                if expected_prompt in response:
-                    logging.info(f"[{olt_ip}] Entrou no modo de interface com sucesso: {interface_cmd}")
-                else:
-                    logging.error(f"[{olt_ip}] Não foi possível entrar no modo de interface para {placa} slot {slot}")
-                    logging.debug(f"[{olt_ip}] Resposta após tentar entrar no modo de interface:\n{response}")
-                    continue
-                
-                # Enviar o comando DDM - o número da porta é passado como parâmetro
-                ddm_cmd = f"display port ddm-info {port}"
-                logging.info(f"[{olt_ip}] Enviando comando DDM: {ddm_cmd}")
-                shell.send(f"{ddm_cmd}\n")
-                time.sleep(2)
-                
-                # Ler a resposta com tratamento de paginação
-                response = ""
-                timeout = time.time() + 15
-                while time.time() < timeout:
-                    if shell.recv_ready():
-                        chunk = shell.recv(4096).decode('utf-8', errors='ignore')
-                        response += chunk
-                        
-                        # Tratar paginação
-                        if "---- More" in chunk:
-                            shell.send(" ")
-                            time.sleep(0.5)
-                            continue
-                        
-                        # Verificar se o comando terminou
-                        if expected_prompt in response:
-                            break
-                    time.sleep(0.2)
-                
-                # Parsear a resposta
-                ddm_data = parse_uplink_ddm_response(response)
-                if ddm_data:
-                    ddm_data['placa'] = placa
-                    ddm_data['slot'] = slot
-                    ddm_data['port'] = port
-                    ddm_data_list.append(ddm_data)
-                    logging.info(f"[{olt_ip}] DDM coletado para {placa} slot {slot} port {port}")
-                else:
-                    logging.warning(f"[{olt_ip}] Falha ao parsear DDM para {placa} slot {slot} port {port}")
-                    logging.debug(f"[{olt_ip}] Resposta DDM bruta:\n{response}")
-                
-                # Sair do modo de interface
-                shell.send("quit\n")
-                time.sleep(0.5)
-                
-            except Exception as e:
-                logging.error(f"[{olt_ip}] Erro ao coletar DDM para {placa} slot {slot} port {port}: {e}")
-                continue
-        
-        # Sair do modo config
-        shell.send("quit\n")
+        # Enviar um enter para garantir que temos o prompt atual
+        shell.send("\n")
         time.sleep(0.5)
         
-        return ddm_data_list
+        # Ler o prompt atual
+        prompt_response = ""
+        while shell.recv_ready():
+            prompt_response += shell.recv(4096).decode('utf-8', errors='ignore')
+        
+        expected_prompt = f"(config-if-gpon-0/{slot})"
+        logging.debug(f"{log_prefix} Prompt atual: {prompt_response.strip()}")
+        logging.debug(f"{log_prefix} Prompt esperado: {expected_prompt}")
+        
+        # Se não estiver no modo correto, tentar entrar
+        if expected_prompt not in prompt_response:
+            logging.warning(f"{log_prefix} Não estamos no modo de interface correto. Tentando entrar...")
+            
+            # Sair de qualquer modo de configuração atual
+            shell.send("quit\n")
+            time.sleep(1)
+            
+            # Entrar no modo config
+            shell.send("config\n")
+            time.sleep(1)
+            
+            # Entrar no modo de interface GPON
+            shell.send(f"interface gpon 0/{slot}\n")
+            time.sleep(2)
+            
+            # Verificar novamente o prompt
+            shell.send("\n")
+            time.sleep(0.5)
+            
+            prompt_response = ""
+            while shell.recv_ready():
+                prompt_response += shell.recv(4096).decode('utf-8', errors='ignore')
+            
+            if expected_prompt not in prompt_response:
+                logging.error(f"{log_prefix} Falha ao entrar no modo de interface GPON. Prompt atual: {prompt_response.strip()}")
+                return None
+            else:
+                logging.info(f"{log_prefix} Entrou com sucesso no modo de interface GPON")
+        
+        # Executar o comando de tráfego
+        command = f"display port traffic {port}"
+        logging.info(f"{log_prefix} Executando comando: {command}")
+        
+        # Limpar o buffer antes de enviar o comando
+        while shell.recv_ready():
+            shell.recv(4096)
+        
+        # Enviar o comando
+        shell.send(command + "\n")
+        
+        # Esperar um pouco para o comando começar a executar
+        time.sleep(3)
+        
+        # Ler a resposta completa com tratamento de paginação
+        response = ""
+        timeout = time.time() + 60  # Timeout de 60 segundos
+        
+        while time.time() < timeout:
+            if shell.recv_ready():
+                chunk = shell.recv(8192).decode('utf-8', errors='ignore')
+                response += chunk
+                
+                # Verificar se há paginação
+                if "---- More" in chunk:
+                    logging.info(f"{log_prefix} Paginação detectada. Enviando espaço.")
+                    shell.send(" ")
+                    time.sleep(0.5)
+                    continue
+                
+                # Verificar se a resposta está completa
+                if expected_prompt in response:
+                    logging.info(f"{log_prefix} Prompt detectado. Resposta completa.")
+                    break
+            else:
+                time.sleep(0.2)
+        
+        logging.info(f"{log_prefix} Resposta recebida ({len(response)} bytes)")
+        
+        # Verificar se houve erro no comando
+        if "Unknown command" in response or "Error" in response:
+            logging.error(f"{log_prefix} Comando não reconhecido ou erro na execução.")
+            logging.error(f"{log_prefix} Resposta: {response[:500]}...")
+            return None
+        
+        # Parsear a resposta
+        traffic_data = {}
+        lines = response.splitlines()
+        for line in lines:
+            line = line.strip()
+            if "RX traffic" in line:
+                # Exemplo: RX traffic(kbps): 12345
+                match = re.search(r'RX traffic\(kbps\):\s*(\d+)', line)
+                if match:
+                    traffic_data['rx_traffic_kbps'] = int(match.group(1))
+            elif "TX traffic" in line:
+                # Exemplo: TX traffic(kbps): 54321
+                match = re.search(r'TX traffic\(kbps\):\s*(\d+)', line)
+                if match:
+                    traffic_data['tx_traffic_kbps'] = int(match.group(1))
+        
+        if traffic_data:
+            logging.info(f"{log_prefix} Parse bem-sucedido. RX: {traffic_data.get('rx_traffic_kbps', 'N/A')} kbps, TX: {traffic_data.get('tx_traffic_kbps', 'N/A')} kbps")
+            return traffic_data
+        else:
+            logging.warning(f"{log_prefix} Parse falhou. Nenhum dado de tráfego encontrado.")
+            return None
         
     except Exception as e:
-        logging.error(f"[{olt_ip}] Erro geral na coleta DDM: {e}")
-        return []
-    finally:
+        logging.error(f"{log_prefix} Erro durante coleta de tráfego da porta PON: {e}", exc_info=True)
+        return None
+
+def save_uplink_ddm_data(ddm_data_list, olt_ip):
+    """
+    Salva os dados DDM (Digital Diagnostics Monitoring) dos uplinks no banco de dados.
+    
+    Esta função insere os dados DDM na tabela 'uplink_ddm_data' do banco de dados.
+    
+    Args:
+        ddm_data_list (list): Lista de dicionários com dados DDM
+        olt_ip (str): Endereço IP da OLT
+    """
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        # Obter o identificador da OLT
+        olt_identifier = olt_ip.replace('.', '_')
+        
+        for ddm_data in ddm_data_list:
+            # Inserir os dados no banco
+            query = """
+                INSERT INTO uplink_ddm_data
+                (olt_identifier, uplink_name, temperature, voltage, 
+                 tx_bias_current, tx_power, rx_power, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+            """
+            
+            cursor.execute(query, (
+                olt_identifier, ddm_data['uplink_name'],
+                ddm_data.get('temperature', None),
+                ddm_data.get('voltage', None),
+                ddm_data.get('tx_bias_current', None),
+                ddm_data.get('tx_power', None),
+                ddm_data.get('rx_power', None)
+            ))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        logging.info(f"Dados DDM salvos para {len(ddm_data_list)} uplinks da OLT {olt_ip}")
+    except Exception as e:
+        logging.error(f"Erro ao salvar dados DDM: {str(e)}")
+        if conn:
+            conn.rollback()
+            cursor.close()
+            conn.close()
+
+def collect_uplink_ddm_data(shell, uplink_name):
+    """
+    Coleta dados DDM (Digital Diagnostics Monitoring) de um uplink específico.
+    
+    Esta função executa o comando 'display transceiver diagnose' na OLT
+    e parseia a resposta para extrair informações DDM do uplink.
+    
+    Args:
+        shell: Objeto de conexão SSH com a OLT
+        uplink_name (str): Nome do uplink (ex: "XGigabitEthernet0/0/1")
+        
+    Returns:
+        dict: Dados DDM do uplink parseados ou None em caso de erro
+    """
+    log_prefix = f"[DDM {uplink_name}]"
+    
+    try:
+        # Executar o comando de diagnóstico
+        command = f"display transceiver diagnose {uplink_name}"
+        logging.info(f"{log_prefix} Executando comando: {command}")
+        
+        # Usar a função com paginação
+        response = send_command_with_pagination(shell, command, "#", timeout=30)
+        
+        if not response:
+            logging.warning(f"{log_prefix} Resposta vazia recebida")
+            return None
+        
+        # Parsear a resposta
+        ddm_data = parse_uplink_ddm_response(response)
+        
+        if ddm_data:
+            ddm_data['uplink_name'] = uplink_name
+            logging.info(f"{log_prefix} Dados DDM coletados com sucesso")
+            return ddm_data
+        else:
+            logging.warning(f"{log_prefix} Falha ao parsear dados DDM")
+            return None
+        
+    except Exception as e:
+        logging.error(f"{log_prefix} Erro durante coleta de dados DDM: {e}", exc_info=True)
+        return None
+
+def collect_all_uplinks_ddm(shell, olt_ip, uplinks_config):
+    """
+    Coleta dados DDM de todos os uplinks configurados.
+    
+    Esta função itera sobre a lista de uplinks configurados, coleta os dados DDM
+    de cada um e salva no banco de dados.
+    
+    Args:
+        shell: Objeto de conexão SSH com a OLT
+        olt_ip (str): Endereço IP da OLT
+        uplinks_config (dict): Configuração dos uplinks
+        
+    Returns:
+        int: Número de uplinks processados com sucesso
+    """
+    processed_count = 0
+    log_prefix = f"[DDM {olt_ip}]"
+    
+    try:
+        logging.info(f"{log_prefix} Iniciando coleta DDM para {len(uplinks_config)} uplinks")
+        
+        # Lista para armazenar todos os dados DDM coletados
+        all_ddm_data = []
+        
+        # Iterar sobre cada uplink configurado
+        for uplink_name in uplinks_config.keys():
+            try:
+                # Coletar dados DDM do uplink
+                ddm_data = collect_uplink_ddm_data(shell, uplink_name)
+                
+                if ddm_data:
+                    all_ddm_data.append(ddm_data)
+                    processed_count += 1
+                    logging.info(f"{log_prefix} Dados DDM coletados para {uplink_name}")
+                else:
+                    logging.warning(f"{log_prefix} Falha ao coletar dados DDM para {uplink_name}")
+                
+                # Pequena pausa para não sobrecarregar a OLT
+                time.sleep(1)
+                
+            except Exception as e:
+                logging.error(f"{log_prefix} Erro ao processar uplink {uplink_name}: {str(e)}")
+                continue
+        
+        # Salvar todos os dados DDM no banco
+        if all_ddm_data:
+            save_uplink_ddm_data(all_ddm_data, olt_ip)
+            logging.info(f"{log_prefix} {len(all_ddm_data)} registros DDM salvos no banco")
+        
+        return processed_count
+        
+    except Exception as e:
+        logging.error(f"{log_prefix} Erro durante coleta DDM: {e}", exc_info=True)
+        return 0
+
+# ==============================================================================
+# FUNÇÃO PRINCIPAL DE PROCESSAMENTO
+# ==============================================================================
+
+def process_olt_data(olt_config, gui_window_instance, log_callback):
+    """
+    Função principal que orquestra a coleta de dados de uma OLT.
+    
+    Esta função é responsável por:
+    1. Conectar à OLT
+    2. Descobrir placas ativas
+    3. Processar cada porta PON em paralelo
+    4. Coletar dados DDM dos uplinks
+    5. Salvar todos os dados no banco de dados
+    
+    Args:
+        olt_config (dict): Configuração da OLT (IP, usuário, senha, etc.)
+        gui_window_instance: Instância da janela principal da GUI
+        log_callback (function): Função para registrar logs na GUI
+        
+    Returns:
+        dict: Estatísticas do processamento (número de ONTs processadas, etc.)
+    """
+    olt_ip = olt_config['ip']
+    username = olt_config['username']
+    password = olt_config['password']
+    uplinks_config = olt_config.get('uplinks', {})
+    
+    log_callback(f"[SYSTEM] Iniciando processamento da OLT {olt_ip}")
+    
+    # Estatísticas do processamento
+    stats = {
+        'total_onts': 0,
+        'online_onts': 0,
+        'processed_onts': 0,
+        'processed_pons': 0,
+        'processed_uplinks': 0
+    }
+    
+    client = None
+    try:
+        # Conectar à OLT
+        client, shell = connect_to_olt(olt_ip, username, password)
+        if not client or not shell:
+            log_callback(f"[SYSTEM] Falha ao conectar à OLT {olt_ip}")
+            return stats
+        
+        log_callback(f"[SYSTEM] Conectado à OLT {olt_ip}")
+        
+        # Descobrir placas ativas
+        log_callback(f"[SYSTEM] Descobrindo placas ativas na OLT {olt_ip}")
+        active_boards = get_active_gpon_slots(shell)
+        
+        if not active_boards:
+            log_callback(f"[SYSTEM] Nenhuma placa ativa encontrada na OLT {olt_ip}")
+            return stats
+        
+        log_callback(f"[SYSTEM] Encontradas {len(active_boards)} placas ativas na OLT {olt_ip}")
+        
+        # Criar fila para tarefas de coleta Ethernet
+        eth_task_queue = queue.Queue()
+        
+        # Iniciar worker global para coleta Ethernet
+        eth_worker = threading.Thread(
+            target=process_ont_eth_worker,
+            args=(eth_task_queue, gui_window_instance, log_callback),
+            daemon=True
+        )
+        eth_worker.start()
+        log_callback(f"[SYSTEM] Worker de coleta Ethernet iniciado")
+        
+        # Processar cada placa ativa
+        for board in active_boards:
+            slot = board['slot']
+            board_name = board['board_name']
+            num_ports = board['ports']
+            
+            log_callback(f"[SYSTEM] Processando placa {board_name} no slot {slot} com {num_ports} portas")
+            
+            # Lista para armazenar as threads de cada porta PON
+            pon_threads = []
+            
+            # Processar cada porta PON da placa
+            for port in range(1, num_ports + 1):
+                if not gui_window_instance.collection_running:
+                    log_callback(f"[SYSTEM] Coleta interrompida pela GUI")
+                    break
+                
+                # Criar thread para processar a porta PON
+                thread = threading.Thread(
+                    target=process_pon_worker,
+                    args=(olt_ip, username, password, slot, port, gui_window_instance, log_callback, eth_task_queue),
+                    daemon=True
+                )
+                thread.start()
+                pon_threads.append(thread)
+                
+                # Pequena pausa para não iniciar todas as threads ao mesmo tempo
+                time.sleep(0.5)
+            
+            # Aguardar todas as threads da placa terminarem
+            for thread in pon_threads:
+                thread.join()
+            
+            stats['processed_pons'] += num_ports
+        
+        # Enviar sinal de parada para o worker Ethernet
+        eth_task_queue.put(None)
+        eth_worker.join()
+        log_callback(f"[SYSTEM] Worker de coleta Ethernet finalizado")
+        
+        # Coletar dados DDM dos uplinks
+        if uplinks_config:
+            log_callback(f"[SYSTEM] Coletando dados DDM dos uplinks da OLT {olt_ip}")
+            stats['processed_uplinks'] = collect_all_uplinks_ddm(shell, olt_ip, uplinks_config)
+        
+        # Fechar a conexão
+        client.close()
+        log_callback(f"[SYSTEM] Processamento da OLT {olt_ip} concluído")
+        
+        return stats
+        
+    except Exception as e:
+        log_callback(f"[SYSTEM] Erro durante processamento da OLT {olt_ip}: {str(e)}")
+        logging.error(f"Erro durante processamento da OLT {olt_ip}: {str(e)}", exc_info=True)
         if client:
             client.close()
+        return stats
+
+# ==============================================================================
+# PONTO DE ENTRADA DO MÓDULO
+# ==============================================================================
+
+# Verifica se o script está sendo executado diretamente (e não importado como um módulo)
+if __name__ == '__main__':
+    # Exemplo de uso do módulo
+    import threading
+    
+    # Configuração de exemplo
+    olt_config = {
+        'ip': '192.168.1.1',
+        'username': 'admin',
+        'password': 'password',
+        'uplinks': {
+            'XGigabitEthernet0/0/1': {},
+            'XGigabitEthernet0/0/2': {}
+        }
+    }
+    
+    # Função de callback para logs
+    def log_callback(message):
+        print(f"[LOG] {message}")
+    
+    # Classe de exemplo para a janela principal
+    class MockMainWindow:
+        def __init__(self):
+            self.collection_running = True
+    
+    # Criar instância da janela principal
+    main_window = MockMainWindow()
+    
+    # Processar dados da OLT
+    stats = process_olt_data(olt_config, main_window, log_callback)
+    
+    # Exibir estatísticas
+    print("\nEstatísticas do processamento:")
+    print(f"Total de ONTs: {stats['total_onts']}")
+    print(f"ONTs online: {stats['online_onts']}")
+    print(f"ONTs processadas: {stats['processed_onts']}")
+    print(f"Portas PON processadas: {stats['processed_pons']}")
+    print(f"Uplinks processados: {stats['processed_uplinks']}")
